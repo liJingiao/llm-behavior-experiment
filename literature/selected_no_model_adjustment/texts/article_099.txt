@@ -1,0 +1,1126 @@
+                           Logical forms complement probability
+                in understanding language model (and human) performance
+
+                          Yixuan Wang                                            Freda Shi
+                       University of Chicago                              University of Waterloo
+                    yixuanwang@uchicago.edu                      Vector Institute, Canada CIFAR AI Chair
+                                                                            fhs@uwaterloo.ca
+
+
+
+                           Abstract                                                1.0
+                                                                                   0.8
+
+
+
+                                                                   soft accuracy
+         With the increasing interest in using large lan-
+                                                                                   0.6
+         guage models (LLMs) for planning in natu-                                                                 (a) Modalities
+         ral language, understanding their behaviors be-                           0.4                                 propositional
+         comes an important research question. This                                0.2
+                                                                                                                       must
+         work conducts a systematic investigation of                                                                   may
+                                                                                   0.0
+         LLMs’ ability to perform logical reasoning in                                   5   10   15       20            25            30
+         natural language. We introduce a controlled                               1.0
+         dataset of hypothetical and disjunctive syllo-                            0.8
+
+
+
+                                                                   soft accuracy
+         gisms in propositional and modal logic and use
+                                                                                   0.6
+         it as the testbed for understanding LLM per-                                                           (b) Argument Forms
+         formance. Our results lead to novel insights                              0.4                                disjunctive
+         in predicting LLM behaviors: in addition to                               0.2
+                                                                                                                      modus ponens
+         the probability of input (Gonen et al., 2023;                                                                modus tollens
+         McCoy et al., 2024), logical forms should be                              0.0
+                                                                                         5   10   15       20            25            30
+         considered as important factors. In addition,                             1.0
+         we show similarities and discrepancies between
+                                                                                   0.8
+         the logical reasoning performances of humans
+
+                                                                   soft accuracy
+         and LLMs by collecting and comparing behav-                               0.6
+         ioral data from both.                                                     0.4                               (c) Content
+                                                                                                                        meaningful
+    1    Introduction                                                              0.2
+                                                                                                                        nonsensical
+                                                                                   0.0
+                                                                                         5   10   15       20            25            30
+    Logical reasoning is a fundamental aspect of build-                                           perplexity
+    ing AI systems for reliable decision-making (Kautz
+                                                                   Figure 1: Illustration of the fact that perplexity does
+    et al., 1992, inter alia)—given a set of premises, an
+                                                                   not serve as a reliable indicator of logical reasoning
+    AI system should be able to deduce valid conclu-               performance; and therefore, neither does probability.
+    sions. With the advent of large language models                The distributions of the probabilities assigned to the
+    (LLMs; Touvron et al., 2023; Jiang et al., 2023;               ground-truth answer (i.e., soft accuracy; Y-axis) by
+    AI@Meta, 2024, inter alia), there has been a surge             Llama-3-70B are plotted against the perplexity of the
+    of interest in using these models to assist plan-              corresponding example question (X-axis) and grouped
+    ning and decision-making (Huang et al., 2022, in-              by (a) modality, (b) argument forms, and (c) logic inter-
+                                                                   pretation content. Each group consists of 20 randomly
+    ter alia); therefore, understanding the logical rea-
+                                                                   selected examples with other factors controlled.
+    soning capabilities becomes crucial in understand-
+    ing the reliability and potential of LLMs in plan-
+    ning. While recent work has shown that LLMs                    certain argument forms? Do more complex compo-
+    exhibit decent performance on logical reasoning                nents of logical forms, such as modalities, matter
+    problems (Liu et al., 2020; Ontanon et al., 2022;              for LLM performance?
+    Wan et al., 2024, inter alia), there is still a lack of           In this work, we investigate the logical reason-
+    fine-grained understanding of the logical forms—               ing capabilities of LLMs by assessing their per-
+    among many argument forms presented in natu-                   formance on different logical forms. We curate
+    ral language (Shieber, 1993), do LLMs perform                  a dataset of natural language statements and ques-
+    equally well, or do they exhibit preferences for               tions based on several logical forms in both proposi-
+                                                             16862
+Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pages 16862–16877
+                             July 27 - August 1, 2025 ©2025 Association for Computational Linguistics
+tional and modal logic, which is designed to mirror      Propositional and modal logic reasoning in lan-
+reasoning in daily communication. An example is          guage models. Recent work has explored training
+shown in §3.3. We then conduct a series of con-          and fine-tuning language models specifically for
+trolled experiments to analyze the performance of a      logical reasoning (Clark et al., 2021; Hahn et al.,
+set of LLMs on the dataset. Although our findings        2021; Tafjord et al., 2022). Our work differs in two
+generally align with those by Gonen et al. (2023)        key aspects: (1) we evaluate general-purpose lan-
+and McCoy et al. (2024), who suggest that LLMs           guage models through prompting, a cost-efficient
+excel on examples with high probability, our results     setup that has been widely adopted in recent years,
+indicate that logical form, including but not limited    and we focus on propositional and alethic modal
+to modalities and argument forms, is a crucial com-      logic rather than temporal (Hahn et al., 2021) or
+plementary factor in predicting the performance of       epistemic (Sileo and Lernould, 2023) logic; 1 (2)
+LLMs (Figure 1). Additionally, with meaningful           unlike studies comparing LLM and human per-
+real-world interpretations, we find that:                formance on categorical syllogisms (Eisape et al.,
+1. LLMs are still far from being perfect in atomic-      2024, inter alia),2 we focus on hypothetical and dis-
+   level propositional and modal logic reasoning.        junctive syllogisms with considerations of modal-
+2. LLMs prefer an affirmative answer under the           ity.
+   modality of possibility, whereas they prefer a        Human logic reasoning and reasoning bias.
+   negative answer under the modality of necessity.      Work on human reasoning capabilities has in-
+3. In line with the recent results on categorical syl-   formed studies of LLM logical reasoning: Eis-
+   logisms (Eisape et al., 2024), we verify on hy-       ape et al. (2024) compared LLM syllogistic rea-
+   pothetical and disjunctive syllogisms that LLMs       soning with human behavior results (Ragni et al.,
+   achieve better performance on certain logical         2019) under the framework of the Mental Mod-
+   forms that humans perform well. However,              els Theory (Johnson-Laird, 1983); Lampinen et al.
+   some logical forms receive favor from LLMs,           (2024) found similar content effects in human and
+   while the phenomena lack support from human           LLM reasoning, supporting the need to control for
+   intuition or human behavioral data.                   common-sense knowledge in benchmarks (§3.2);
+                                                         Belem et al. (2024) studied human and LLM per-
+This paper is structured as follows. After reviewing
+                                                         ception of uncertainty at a lexical level. Seals and
+related work (§2), we describe the dataset synthesis
+                                                         Shalin (2024) simulated the famous Wason selec-
+process (§3). We report the LLM reasoning results
+                                                         tion task (Wason, 1968) and covered content effects
+on our data (§4) and compare them with human
+                                                         over conditional syllogisms. Ozeki et al. (2024) in-
+performance (§5). We conclude by discussing the
+                                                         vestigated the human-like bias of LLM first-order
+implications of our results and the limitations(§6).
+                                                         logic reasoning introduced by content effects or
+2   Related Work                                         answer argument forms.
+                                                            Compared to them, we focus on the bias in-
+Logical reasoning benchmarks. Existing LLM               troduced by argument forms within the proposi-
+logical reasoning benchmarks (Liu et al., 2020; Han      tional and modal logic reasoning process. We also
+et al., 2024, inter alia) focus on complex, multi-       contribute new human behavioral data beyond the
+hop reasoning problems with manually annotated           LLM results.
+problems, making cross-problem comparisons chal-
+lenging. Recent work has introduced benchmarks           3    Dataset
+with synthesized natural-language questions us-
+ing predefined logical formulas and substitution         We curate a dataset of natural-language multi-
+rules (Saparov and He, 2022; Saparov et al., 2023;       choice questions to measure the logical inference
+Parmar et al., 2024; Wan et al., 2024, inter alia).      performance of LLMs. Starting from propositional
+Compared to them, our work uniquely incorporates         and modal logical forms as templates (§3.1), we as-
+modal logic, which has been largely unexplored in           1
+                                                              Technically, any logic that involves non-truth-functional
+existing benchmarks—while Holliday et al. (2024)         operators, including first-order logic, temporal logic, and epis-
+present a case study, our approach offers two key        temic logic, can be viewed as a modal logic; however, we
+advances: controlled knowledge bias in logic in-         adopt the most restrictive sense of modal logic (Ballarin, 2023)
+                                                         and use it interchangeably with alethic modal logic.
+terpretations (§3.3) and a more rigorous statistical        2
+                                                              We refer readers to Zong and Lin (2024) for a more com-
+evaluation framework (§4.1).                             prehensive review of categorical syllogisms.
+
+                                                    16863
+sign meanings (e.g., real-world interpretations) to                  φ and ψ are variables that represent logical formu-
+each variable and translate templates into natural-                  las. The logical or (∨) and logical and (∧) operators
+language Yes/No questions (§3.2). A subsidiary                       can be rewritten with logical not (¬) and logical
+visualization of the process is shown in Figure 2.                   implication (→), as follows:
+
+3.1 Background: Propositional and Modal                                              φ ∨ ψ ⇔ ¬φ → ψ,                           (2)
+    Logic                                                                            φ ∧ ψ ⇔ ¬ (φ → ¬ψ) .
+Propositional logic studies the relation between
+propositions. In this framework, each proposition                    Possibility operator 3 can also be derived from the
+is typically represented by a variable, and multi-                   necessity operator.
+ple propositions combine with logical connectives
+                                                                                           3φ ⇔ ¬2¬φ                           (3)
+(e.g., ∨ and →) to form compound propositions.
+   In propositional logic, a proposition can be eval-
+                                                                     Deduction and sequent. Given a formula set Γ as
+uated as either true or false; however, this system
+                                                                     premises, if a deduction to a conclusion φ exists
+can be overly simplistic when dealing with the com-
+                                                                     using axiom schemata and inference rules under the
+plexity of real-world events. Consider the state-
+                                                                     normal modal logic, we say the premises infer the
+ment Alice is not eating, while it is true in a world
+                                                                     conclusion, and the deduction can be represented
+where Alice is not eating, it may become false in
+                                                                     as a logic sequent Γ ⊢ φ. If a formula set Γ do not
+a hypothetical possible world where Alice is in-
+                                                                     infer the conclusion, we denote it as Γ ⊬ φ and call
+deed eating. This idea, known as possible world
+                                                                     it a non-entailment.
+semantics (Kripke, 1959), provides a framework
+for more nuanced statements about event possibili-                   3.2    Translating Logic to Natural Language
+ties, such as Alice may be eating and Alice must be
+                                                                     An interpretation maps propositional variables to
+eating. The former statement can be understood as
+                                                                     concrete meanings. For example, under the inter-
+there exists a possible world where Alice is eating,
+                                                                     pretation that p is “Jane is eating apples” and q is
+and the latter can be understood as in all possi-
+                                                                     “John is eating oranges”, the logical formula p ∨ q
+ble worlds, Alice is eating.3 Normal modal logic
+                                                                     becomes “Jane is eating apples or John is eating
+(Kripke, 1963) formalizes this idea and extends
+                                                                     oranges.”
+propositional logic to reason about event necessity
+                                                                        Choices of interpretation, i.e., the concrete con-
+and possibility. In the Backus–Naur form, a normal
+                                                                     tent of the sentence, should not affect the un-
+modal logic system L can be written as
+                                                                     derlying logical reasoning process. However, in
+          L : φ := p | ¬φ | 2φ | 3φ |                                natural-language utterances, reasoning can be in-
+                                                                     fluenced by various confounding factors. Knowl-
+                       φ ∨ φ | φ ∧ φ | φ → φ,                (1)     edge bias is a common pitfall. For example,
+                                                                     given the logical form {2p → 2¬q, 2p} ⊢ 2¬q,
+where p is a propositional variable that serves as
+                                                                     regardless of p’s interpretation, if we interpret
+an atom in L, ¬ is the negation operator, 2 is the
+                                                                     ¬q := “Cats are not animals” then the conclusion
+necessity operator (must), 3 is the possibility oper-
+                                                                     will be “It is certain that cats are not animals.”
+ator (may), ∨ is logical disjunction (or), ∧ is logical
+                                                                     But common-sense knowledge suggests that “it is
+conjunction (and), and → is the logical implica-
+                                                                     certain that cats are animals” (2q), which logi-
+tion operator (if...then). φ denotes the syntactic
+                                                                     cally contradicts the existing premise set.4 Such
+category of a formula in L. The right-hand side of
+                                                                     bias will complicate logical reasoning (Lampinen
+Eq. (1) describes all possible logical formulas un-
+                                                                     et al., 2024) and should be avoided in data curation.
+der the system L: for example, if φ ∈ L, the rules
+                                                                     Besides, each variable should have independent
+imply that ¬φ ∈ L, 2φ ∈ L, and so on. Following
+                                                                     interpretation, as detailed in Appendix B.1.
+the convention in logic, the operator precedence is
+                                                                        After being assigned interpretations, each logi-
+{¬, 2, 3} ≻ {∨, ∧} ≻ {→}.
+                                                                     cal form is further articulated as a yes-no question
+   Indeed, the operators (¬, 2, →) forms a func-
+                                                                     on whether the conclusion can be inferred from the
+tional complete set of operators under L. Suppose
+                                                                        4
+                                                                          This confounding factor affects the examples in Table
+   3
+     The possible world semantics, therefore, connects the no-       9 of Han et al. (2024). See Bertolazzi et al. (2024) for a
+tion of necessity and possibility to the universal and existential   detailed discussion on the impact of knowledge bias in natural
+quantification (∀, ∃) under first-order logic.                       language reasoning.
+
+                                                                16864
+                                         It is true that φ or it is true that ψ.
+              {φ ∨ ψ, ¬φ} ⊢ ψ            It isn’t true that φ.
+                                         Is it true that ψ?
+                                                                            Consider the following statements:
+  Logic               Form                         Template                 It is true that Jane is watching a show or . . .
+                                                                               it is true that John is reading a book.
+                                                                            It isn’t true that Jane is watching a show.
+                                                                            Question: Based on these statements, can we infer . . .
+Content           Word Pairs                    Interpretation                 that John is reading a book?
+                                                                            Answer:
+                (Jane, watch, show)      φ = Jane is watching a show
+                 (John, read, book)      ψ = John is reading a book
+
+
+Figure 2: The data synthesis pipeline: for each variable in logic forms (§3.1), we assign meanings to them to obtain
+the natural language question-answering pairs (§3.2).
+
+
+premises. To mitigate the ambiguity in natural lan-                With the same interpretation, →L ’s translation of
+guage, we design heuristic rules to translate logic                the first statement is If Jane isn’t watching a show,
+forms into less ambiguous English, which are de-                   then John is reading a book.
+tailed in Appendix B.1. For the exact wordings we                     According to the commutativity of disjunction
+used, see Table A1 in Appendices. If a valid deduc-                operator, we group ∨L and ∨R together as disjunc-
+tion exists (⊢) for the logical form, the ground truth             tive syllogism, alongside two hypothetical syllo-
+answer is Yes, otherwise No. The answer is solely                  gism groups, modus ponens (→L ) and modus tol-
+determined by the logical form and is independent                  lens (→R ). All the logical forms shown above are
+of the interpretation.                                             valid sequents with ground-truth answer Yes. To
+                                                                   balance the dataset, we introduce some logic fal-
+3.3 Involved Logical Forms                                         lacies that generate questions with ground-truth
+Translated logical forms can have varying degrees                  label No. By flipping the second premises and the
+of naturalness. For example, the necessitation rule                conclusions, we obtain the following fallacies:
+{φ} ⊢ 2φ, which translates to “φ is true; therefore,
+it is certain that φ is true,” appears to be unnatural                                   {φ ∨ ψ, ψ} ⊬ ¬φ,                      (∨L⊬ )
+due to redundancy. 5 Based on the relationship                                        {¬φ → ψ, ψ} ⊬ ¬φ,                      (→L⊬ )
+between ∨ and → in Eq. (2), we use hypothetical                                          {φ ∨ ψ, φ} ⊬ ¬ψ,                     (∨R
+                                                                                                                                ⊬)
+and disjunctive syllogisms with four basic variants:                                                                         (→R
+                                                                                      {¬φ → ψ, φ} ⊬ ¬ψ,                        ⊬)
+         {φ ∨ ψ, ¬φ} ⊢ ψ,                               (∨L )      where ∨L⊬ and ∨R ⊬ are grouped as affirming the dis-
+       {¬φ → ψ, ¬φ} ⊢ ψ,           (→L ; modus ponens)             junction, →L⊬ and →R   ⊬ corresponds to affirming
+         {φ ∨ ψ, ¬ψ} ⊢ φ,                              (∨R )       the consequent and denying the antecedent, respec-
+                                                                   tively. In our dataset, we require the formulas φ
+       {¬φ → ψ, ¬ψ} ⊢ φ.           (→R ; modus tollens)
+                                                                   and ψ to the form of Mp and Mq, where p and q
+Despite the semantic similarity, these logical                     are propositional variables, each assigned with an
+forms translate to different natural-language ques-                interpretation. Both variables are constrained under
+tions. For example, taking the interpretations                     the same modality M, which can be necessity (2),
+of φ := Jane is watching a show and ψ :=                           possibility (3) or no modality (∅). Pairing with
+John is reading a book, ∨L translates to                           four rules and theorem–fallacy variations, we have
+                                                                   a total of 3 × 4 × 2 = 24 forms.
+ Consider the following statements:
+ Jane is watching a show or John is reading a                      3.4      Involved Logic Interpretations
+ book.                                                             For logic interpretations, we generate a set of verb
+ Jane isn’t watching a show.                                       phrases by prompting the CodeLlama 2 model
+ Question: Based on these statements, can we                       (Rozière et al., 2024), and select 204 of them manu-
+ infer that John is reading a book?                                ally. and combine them with top-200 popular baby
+   5
+                                                                   names in the US into subject-verb-object pairs,6
+     Nevertheless, we report the experiment results on neces-
+                                                                       6
+sitation rule in Appendix C.1.                                             https://www.ssa.gov/oact/babynames/names.zip
+
+                                                            16865
+such as (Ray, make, a pizza). We randomly gener-                  4.2 Results: Performance w.r.t. Logical Forms
+ate 1000 interpretations with two pairs each. The                 We evaluate the aforementioned models with the
+same set of interpretations is applied to variables               probability-based protocol (Table 1). Generally,
+p, q in each logic sequent’s natural langauge tem-                models that rank higher in the leaderboard also
+plate. In total, there are 24 × 1000 = 24000 ques-                achieve higher soft accuracy on our dataset. The
+tion, with samples shown in Table A1.                             break-down accuracies on modalities and argument
+                                                                  forms reveal that:
+4       Experiment
+                                                                  1. (Modality) All models consistently perform bet-
+4.1 Metrics and Investigated Models                                  ter on the possibility (3) than necessity (2) or
+Hu and Levy (2023) have suggested that the stan-                     plain propositional logic.
+dard approach of greedily decoding yes-no strings                 2. (Argument Forms) The pattern is more diverse,
+(Dentella et al., 2023) may underestimate the com-                   yet most of the models struggle the most on
+petence of a language model; therefore, we adopt a                   modus tollens (→R ⊢ ) within logic sequents (i.e.,
+probability-based metric to evaluate the model per-                  questions with ground-truth answers Yes), and
+formance. In our evaluation protocol, the predicted                  affirming the consequent (→L⊬ ) within fallacies.
+likelihood of the tokens Yes and No, conditioned on                  This result resonates with Wason (1968), who
+the prompt s—denoted as p(Yes | s) and p(No | s),                    concludes that modus tollens is a particularly
+respectively—serve as the soft labels for yes-no an-                 hard reasoning pattern for human participants
+swers. The soft accuracy p̂ on the single example                    with card selection tasks.
+with ground-truth answer y ∈ {Yes, No} is defined
+as the relative probability of y:                                 4.2.1    Analysis on Logic Sequents
+                                                                  To systematically analyze the effect on model per-
+     p(No | s)1[y = No] + p(Yes | s)1[y = Yes]                    formance of each factor of interest, as well as cross-
+p̂ =                                           ,
+               p(No | s) + p(Yes | s)                             validating the observations above, we fit a linear
+                                                                  mixed-effects model (Raudenbush, 2002) to the
+where 1[·] is the indicator function that returns 1
+                                                                  soft accuracy data on valid logic sequents (i.e. with
+if the condition is true and 0 otherwise. This rel-
+                                                                  ground truth of Yes) across different LLMs and
+ative probability can also be viewed as the confi-
+                                                                  logical forms,
+dence score of the model on the ground-truth an-
+swer. The soft accuracy Acc soft of a model on
+                                                                     Acc soft ∼ Modality + ArgForm + Perplexity
+the entire dataset D is defined as the average soft
+accuracy over all examples,                                                   + (1 + Perplexity | LLM),                      (4)
+
+                                      |D|                         with the linear fixed effects of (i.) modality, (ii.)
+                                1 X                               argument form, and (iii.) input perplexity. Indi-
+                    Acc soft =      p̂i .
+                               |D|                                vidual probability, coupled with a constant term, is
+                                     i=1
+                                                                  modeled as a random effect to account for potential
+We use a zero-shot setting to investigate the gen-
+                                                                  model-specific biases. Here, Perplexity denotes the
+ eral performance of the models’ logical inference
+                                                                  perplexity of the input text (x1 x2 . . . xN ), which
+ capabilities—while adding detailed instructions or
+                                                                  is defined as the exponential of the token-wise av-
+ few-shot demonstrations may increase the absolute
+                                                                  erage negative log-likelihood of the text given a
+ performance, they are at the cost of introducing
+                                                                  specific language model:
+ possibly undesired confounding factors or behav-
+ iors, such as simply copy-pasting the answers in                                         N
+                                                                                                            !
+ the examples.                                                                          1 X
+                                                                     Perplexity = exp −     log p(xi | x<i )
+    We evaluate on the following models with open-                                      N
+                                                                                                    i=1
+ sourced weights: mistral-7b-v0.2 and -8x7b (Jiang
+ et al., 2023, 2024); llama-2-7b, -13b and -70b (Tou-             The mixed-effects model yields a marginal R2 of
+vron et al., 2023); 3.1 version of llama-3-8b and                 0.342 and a conditional R2 of 0.543, suggesting
+-70b (AI@Meta, 2024); yi-34b (01.AI, 2024); phi-2                 tional probabilities of specified answers given a prompt, which
+ and phi-3-mini (Microsoft, 2023, 2024).7                         are not supported by most commercial models; however, we
+                                                                  report the greedy-decoding accuracy of these models on a
+    7
+        Our evaluation protocol technically requires the condi-   sample subset for reference.
+
+                                                             16866
+                       Overall       Leaderboard                  Modality                             Argument Form
+ Model                 (Rank)            (Rank)            ∅         2        3        ∨L,R
+                                                                                        ⊢      →L
+                                                                                                ⊢       →R
+                                                                                                         ⊢      ∨L,R
+                                                                                                                 ⊬       →L
+                                                                                                                          ⊬       →R
+                                                                                                                                   ⊬
+
+ mistral-7b         0.645     (4)    0.145         (7)    0.464    0.496     0.974     0.877   0.663    0.280   0.434   0.653     0.939
+ mistral-8x7b       0.724     (1)    0.193         (5)    0.698    0.601     0.874     0.963   0.873    0.023   0.757   0.648     0.813
+ llama-2-7b         0.335     (10)   0.094         (10)   0.262    0.207     0.538     0.444   0.147    0.315   0.208   0.451     0.468
+ llama-2-13b        0.513     (9)    0.110         (9)    0.488    0.362     0.688     0.418   0.581    0.393   0.631   0.436     0.591
+ llama-2-70b        0.611     (5)    0.127         (8)    0.616    0.471     0.746     0.446   0.845    0.518   0.775   0.389     0.694
+ llama-3-8b         0.565     (6)    0.239         (3)    0.598    0.460     0.639     0.526   0.470    0.332   0.664   0.625     0.716
+ llama-3-70b        0.714     (2)    0.362         (1)    0.745    0.554     0.843     0.606   0.773    0.515   0.882   0.661     0.788
+ yi-34b             0.518     (8)    0.226         (4)    0.457    0.413     0.683     0.346   0.498    0.205   0.685   0.638     0.737
+ phi-2              0.532     (7)    0.155         (6)    0.469    0.456     0.673     0.670   0.757    0.522   0.365   0.402     0.510
+ phi-3-mini         0.690     (3)    0.272         (2)    0.657    0.536     0.877     0.839   0.974    0.475   0.664   0.462     0.604
+ OpenAI-o1          0.926     N/A    N/A           N/A    1.000    0.773     1.000     0.895   1.000    0.775   0.919   1.000     1.000
+ Gemini-1.5-Pro     0.859     N/A    N/A           N/A    0.831    0.748     0.997     1.000   1.000    0.919   0.661   0.991     0.638
+ human              0.595     N/A    N/A           N/A    0.589    0.566     0.640     0.691   0.901    0.628   0.594   0.225     0.411
+
+
+Table 1: Overall and break-down accuracies of different models, as well as their HuggingFace OpenLLM Leader-
+board performance and relative ranking (Fourrier et al., 2024). Each argument form category denotes the union
+of the fine-grained categories specified in the superscripts and subscripts—for example, ∨L,R
+                                                                                            ⊢   denotes the entire
+disjunctive syllogism group. Boldfaced values indicate the row-wise maximum for each factor. Note that due to
+technical limitations of commercial LLMs, results from OpenAI-o1 (OpenAI, 2024) and Gemini-1.5-pro (Team
+et al., 2024) are greedy-decoding based evaluation on 2,000 random samples that serve as references, and are
+therefore not directly comparable to other probability-based evaluations. Human results are detailed in §5.
+
+
+                                                                                     Hypothesis                         p-value
+                                       0.55
+    propositional                                                                    propositional < may                < 0.001
+                             0.27                                                    must < propositional               < 0.001
+            must                                                                     must < may                         < 0.001
+                                            0.61                                     disjunctive < modus ponens         < 0.001
+            may                                                                      modus tollens < modus ponens       < 0.001
+                                                                                     modus tollens < disjunctive        < 0.001
+                0.00        0.25     0.50          0.75    1.00
+                                                                         Table 2: Hypothesis testing results on the effect of
+                                       0.54                              logical form factors on soft accuracy (Figure 3).
+      disjunctive
+                                         0.59
+  modus ponens                                                           which suggests the necessity of the complemen-
+   modus tollens
+                              0.31                                       tary factors below in predicting LLM performance.
+                                                                            For different modalities and argument forms, we
+                0.00        0.25     0.50          0.75    1.00          estimate their marginal means on soft accuracy
+                                                                         (Figure 3) and perform pairwise hypothesis testing
+Figure 3: Estimated marginal means of logical form                       on the estimated coefficients (Table 2). The results
+factors in the mixed-effects model of Eq. (4), along with
+                                                                         generally align with the general observations on
+their 95% confidence intervals.
+                                                                         the full dataset. The only exception is that modus
+                                                                         ponens (→L ), instead of disjunctive syllogisms (∨),
+a reasonable predictive power. The likelihood ra-                        appears to be the easiest argument form (i.e., the
+tio test on the full regression model vs. the null                       one with the highest soft accuracy) among all.
+regression model without each of the fixed effects                         Random effects. We analyze the per-LLM ran-
+yields a significant result (p < 0.001), suggesting                        dom effects on the soft accuracy (Figure 4). All
+the importance of all these factors in determining                         the model-specific mixed effects of perplexity are
+the model performance.                                                     negative, suggesting the negative correlation be-
+Fixed effects. In line with Gonen et al. (2023) and                        tween perplexity and soft accuracy is consistent
+McCoy et al. (2024), we find a negative correlation                        across models (Figure 4a). While the intercept
+between perplexity and soft accuracy (p < 0.001);                          random effects are not perfectly aligned with the
+however, the correlation is weak (ρ = −0.09),                              model performance—since the perplexity random
+                                                                   16867
+                      (a) Perplexity                   (b) Intercept
+   mistral-7b                                9                       (4)                   4.2.3      The Affirmation Bias over Modalities
+                                                                           (1)
+ mistral-8x7b                                8                                             One key argument of Dentella et al. (2023) is that
+   llama-2-7b                                7 (10)                                        large language models exhibit a bias towards affirm-
+  llama-2-13b                                6         (9)                                 ing the claim, i.e., answering Yes more frequently
+  llama-2-70b                                5           (5)                               than No. We investigate this phenomenon by fitting
+   llama-3-8b                                4               (6)                           a mixed-effects model
+  llama-3-70b                                3                        (2)
+                                                                                                  P (Yes | s)
+       yi-34b                                2 (8)                                                                   ∼ Modality + ArgForm
+                                                                                            P (Yes | s) + P (No | s)
+        phi-2                                1                              (7)
+                                                                                            + Perplexity + (1 + Perplexity | LLM),      (5)
+   phi-3-mini                                0                                    (3)
+                0.0         0.1        0.2       0.2           0.0               0.2       which has the same structure as Eq. (4), except the
+                                                                                           dependent variable being the relative probability of
+Figure 4: Illustration of per-model random effects on
+                                                                                           answering Yes conditioned on input text s.
+soft accuracy in the mixed-effects model of Eq. (4) with
+99.9% confidence intervals. (a) Mixed effects (i.e., the                                      We present the estimated marginal means of
+sum of fixed and random effects) of perplexity. (b)                                        the factors in the mixed-effects model (Figure 6).
+Intercept random effects (i.e., constant term per model                                    While our results confirm the affirmation bias on
+on soft accuracy), with the model performance rank                                         propositional logic, such bias is slightly less pro-
+(Table 1) annotated in parentheses.                                                        nounced on the possibility modality (3, around
+                                                                                           0.03), and the models even show a bias towards
+effects may introduce confounding factors—higher-                                          rejecting claims under the necessity modality (2).
+ranked models generally tend to have higher in-
+tercept random effects (Figure 4b), which cross-                                           5        Human Experiments
+validates the general performance ranking.                                                 LLMs are trained on text produced by humans and
+                                                                                           are able to generate plausible text; therefore, there
+4.2.2 Extended Analysis on the Negative                                                    have been interests in using LLMs as human mod-
+      Perplexity–Performance Correlation                                                   els (Eisape et al., 2024; Misra and Kim, 2024, inter
+                                                                                           alia). Following this line of work, we conduct a
+We further investigate the negative correlation be-                                        human behavioral experiment to ground the LLM
+tween perplexity and model performance through                                             reasoning behavior, as advocated in Ivanova (2025).
+a controlled experiment: we create a mirror dataset                                        Using samples from our primary dataset, we col-
+of the same size, keeping all the logical formulas                                         lected 710 responses from adults fluent in English
+while interpreting them with nonsensical words.                                            through Prolific.8 More experiment details can be
+For example, the formula 3(φ ∨ ψ) may be in-                                               found in Appendix A.2.
+terpreted as it’s possible that Neva is balaring a                                            The average human accuracy on each group is
+montery or Lucille is sweeling prandates, where                                            shown in the last row of Table 1.9 Aligned with our
+the underlined words and phrases are nonsensical.                                          LLM results (§4), on modalities, the overall human
+Intuitively, the perplexity of the problems in this                                        results also show an accuracy order of (3 ≻ ∅ ≻
+mirror dataset should be much higher than that of                                          2), and on argument forms, modus ponens (→L )
+the primary dataset problems (§3) under any rea-                                           is the most accurately answered pattern.
+sonably trained language model.                                                               To further investigate the interactions of logic
+   We analyze the correlation between perplexity                                           factors, we fit a generalized linear mixed-effects
+and model performance (Figure 5). As desired,                                              model (Bates et al., 2015) to verify the effect of
+the perplexity of problems with nonsensical words                                          modality and argument forms on human logic rea-
+are indeed much higher than that of the primary                                            soning accuracy (Eq. (6) and Figure 7).
+dataset (≈ 30 vs. ≈ 10). The significant portion
+                                                                                                    logit(Acc) ∼ Modality + ArgForm + Rt
+of horizontal and inclined lines in the figures again
+suggests that perplexity is not a reliable predictor                                                          + (1 + Rt | ParticipantID),            (6)
+of model performance. Meanwhile, the overall                                                    8
+                                                                                                https://prolific.com
+parallelism of the lines echos our results that logical                                         9
+                                                                                                Human responses are binary classes, so correct and incor-
+forms are important factors for such prediction.                                           rect responses are coded as 1 and 0, respectively.
+
+                                                                                        16868
+                              mistral-7b                     mistral-8x7b                      llama-2-7b                      llama-2-13b                        llama-2-70b
+                1.0                                                                                                                                                                                words
+                                                                                                                                                                                                       meaningful
+                0.8                                                                                                                                                                                    nonsensical
+                0.6
+                0.4
+                0.2
+                0.0
+
+soft accuracy
+                              llama-3-8b                     llama-3-70b                         yi-34b                           phi-2                           phi-3-mini
+                1.0
+                0.8
+                0.6
+                0.4
+                0.2
+                0.0
+                        10     20      30   40          10    20          30     40   10        20        30     40       10    20         30    40          10    20       30       40
+                                                                                           mean perplexity
+
+
+Figure 5: Correlation between mean perplexity and mean confidence score on each logic sequent. Each point
+represents an average over a group of 1000 prompts that share the same underlying logic sequent. Two connected
+dots share the same logic formula.
+
+                                                                   0.58                                                                                                                  0.83
+                propositional                                                                                          propositional
+                                                 0.25                                                                                                                              0.76
+                             must                                                                                              must
+                                                                0.54                                                                                                                     0.82
+                             may                                                                                                may
+                                    0.00         0.25        0.50              0.75   1.00                                                0.00        0.25        0.50            0.75            1.00
+Figure 6: Estimated marginal means of the factors in
+the mixed-effects model of Eq. (5) with 95% confidence                                                                                                                            0.73
+intervals. Higher coefficients indicate a higher tendency                                                                disjunctive
+to affirm the claim.                                                                                                                                                                            0.94
+                                                                                                                      modus ponens
+                                                                                                                                                                           0.65
+where Acc is the binary accuracy of human re-                                                                         modus tollens
+sponses, and Rt is the response time. The gen-
+eralized mixed-effects model yields a marginal R2                                                                                         0.00        0.25        0.50            0.75            1.00
+of 0.121 yet a 0.419 conditional R2 , indicating a di-
+verse response pattern across participants. The like-                                                          Figure 7: Estimated marginal means of logical form
+lihood ratio test on the full model against the null                                                           factors in the generalized mixed-effects model of Eq. (6),
+                                                                                                               along with their 95% confidence intervals.
+model shows that only the effect of argument form
+is significant (χ2 (2) = 25.6, p < 0.001). How-
+                                                                                                               role in determining the performance of LLMs. In
+ever, in accordance with the overall performance,
+                                                                                                               addition, we compare the behaviors of LLMs and
+we find modus ponens (→L ) has a significantly
+                                                                                                               humans using the same data through human behav-
+higher effect than the other two valid argument
+                                                                                                               ioral experiments. We discuss the implications of
+forms. This confirms that logical forms can also
+                                                                                                               our results as follows.
+have a significant impact on human reasoning ac-
+curacy, which is consistent with the LLM results,                                                              Probability in language models. Probability and
+although the effect sizes are not the same.                                                                    perplexity are often used as intrinsic evaluation
+                                                                                                               metrics for language models. While Gonen et al.
+6                     Conclusion and Discussion                                                                (2023) and McCoy et al. (2024) show that probabil-
+                                                                                                               ity and perplexity correlate well with LLM perfor-
+We present an analysis of hypothetical and disjunc-                                                            mance, literature in program synthesis with LLMs
+tive syllogisms on propositional and modal logic                                                               shows little correlation between probability and
+and systematically analyze the LLM performance                                                                 execution-based evaluation results (Li et al., 2022;
+on the dataset. Our analysis provides novel insights                                                           Shi et al., 2022). This work does not necessarily
+on explaining and predicting LLM performance: in                                                               contradict either line but rather provides comple-
+addition to the perplexity or probability of the input                                                         mentary factors for analyzing LLM performance.
+text, the underlying logic forms play an important                                                                We argue that probability may have become an
+                                                                                                     16869
+overloaded term in analyzing LLMs. Low proba-            principle, encodes mental states and beliefs. The
+bility may be due to one or more of the following        reasoning of beliefs also resonates with the the-
+non-exhaustive reasons: (1) out-of-context content,      ory of mind (Premack and Woodruff, 1978; Baron-
+(2) ungrammatical language, or (3) grammatical           Cohen et al., 1985, inter alia) and machine the-
+but semantically awkward content (cf. the mirror         ory of mind (Rabinowitz et al., 2018; Ma et al.,
+dataset in §4.2.2), (4) reasonable but rare content.     2023, inter alia). Following the effort by Sileo and
+We hypothesize that the probability of language          Lernould (2023) that uses epistemic modal logic
+models may not be essentially able to capture all        to model the machine theory of mind, our work
+these nuanced differences, and call for encoding         assesses the behaviors of LLMs on alethic modal
+and decoding algorithms—such as Meister et al.           logic, distantly revealing the future potential of
+(2023)—that can better decompose the probability         LLMs in achieving the theory of mind.
+into finer-grained and explainable components.
+Comparing humans and LLMs. What is our goal              Limitations
+for building LLMs? To achieve better performance
+                                                         This work comes with two major limitations:
+on practical tasks or to build a more human-like
+                                                         1. While we have verified that our data has a low
+model? Our results, together with Eisape et al.
+                                                            perplexity (9.82 ± 2.47 under mistral-7b; much
+(2024), suggest that these two goals may not be per-
+                                                            lower than that of the data by Wan et al. (2024),
+fectly aligned by revealing a mixture of similarity
+                                                            25.44), and, therefore, are similar enough to nat-
+and discrepancy between LLMs and humans—for
+                                                            ural language utterances, the synthetic language
+example, while LLMs exhibit higher benchmark
+                                                            cannot fully substitute natural language in daily
+performance than humans on our dataset and show
+                                                            life. Our dataset and analysis are not comprehen-
+the same argument form preferences with humans
+                                                            sive enough to cover many nuanced examples
+(Figures 3 and 7), they also show systematic biases
+                                                            that may appear in real communication, espe-
+that we do not find significant in human reasoning
+                                                            cially when context-dependent understanding is
+(e.g., disfavoring the necessity modality, §4.2.3).
+                                                            crucial to conveying communication goals.
+While there has been positive evidence of using
+LLMs as human models in psycholinguistic stud-           2. Despite more than 7,000 languages worldwide,
+ies (Misra and Kim, 2024, inter alia), our results           as a first step, our material only covers English.
+suggest executing such approaches cautiously.                This narrow focus is due to the languages the
+On the relation between modality and perfor-                 authors are proficient in and the coverage of the
+mance. Our results show that there is a significant          language models. We acknowledge the impor-
+difference in performance between necessity and              tance of extending the scope of this work to a
+possibility modalities, with the former much lower           more comprehensive set of languages and leave
+than the latter (Table 1). Part of the reason for this       the extension as an immediate follow-up step.
+is that LLMs have a significant tendency to say             In addition, the sample size of human experi-
+“No” to the necessity modality (Figure 6).               ments is somewhat limited. We leave more com-
+                                                         prehensive human behavioral data collection and
+   On the one hand, our results extend the conclu-
+                                                         analysis to future work.
+sion of Dentella et al. (2023) that LLMs generally
+respond positively—LLM behaviors may be signif-
+icantly affected by finer-grained factors, including
+                                                         Ethics Statement
+but not necessarily limited to the modality involved     While this work involves human logical reasoning
+in the input. On the other hand, while LLMs sys-         experiments, we have ensured that (1) the data are
+tematically tend to answer “No” to questions in          generated procedurally following templates listed
+necessity modality, we do not find related evidence      in the paper and (2) there is no harmful content
+in human experiments, which leads us to hypothe-         in the atomic logical interpretations, reviewed by
+size that such rejection bias comes from either the      all the authors. In addition, we have ensured that
+model architecture or the training strategies, such      all participants are paid a fair wage through the
+as the reinforcement learning with human feedback        Prolific platform. Instructions and consent forms
+(RLHF; Ouyang et al., 2022) protocol. We leave           delivered to the participants can be found in the Ap-
+this as an open question for future research.            pendix A.2. The institutional ethics review board
+Modal logic and theory of mind. Modality, in             has approved the data collection process.
+                                                    16870
+   This work contributes to the understanding of          Tiwalayo Eisape, Michael Tessler, Ishita Dasgupta, Fei
+LLMs. We do not foresee risk beyond the minimal             Sha, Sjoerd Steenkiste, and Tal Linzen. 2024. A
+                                                            systematic comparison of syllogistic reasoning in
+risk posed by LLM evaluation work. We acknowl-
+                                                            humans and language models. In NAACL.
+edge that using LLMs in real-world scenarios could
+significantly impact human behaviors, raising the         Clémentine Fourrier, Nathan Habib, Alina Lozovskaya,
+need for model transparency, safety, security, and          Konrad Szafer, and Thomas Wolf. 2024. Open
+                                                            llm leaderboard v2.        https://huggingface.
+interpretability. We will open-source the synthetic         co/spaces/open-llm-leaderboard/open_llm_
+logical reasoning dataset upon publication.                 leaderboard.
+                                                          Hila Gonen, Srini Iyer, Terra Blevins, Noah Smith, and
+7   Acknowledgements                                        Luke Zettlemoyer. 2023. Demystifying prompts in
+                                                            language models via perplexity estimation. In Find-
+We thank Yudong Li for his help in setting up the           ings of ACL: EMNLP.
+Gemini and OpenAI API for the experiments. This
+work was supported in part by a Google PhD Fel-           Christopher Hahn, Frederik Schmitt, Jens U Kreber,
+                                                            Markus Norman Rabe, and Bernd Finkbeiner. 2021.
+lowship and a Canada CIFAR AI Chair award to
+                                                            Teaching temporal logics to neural networks. In
+FS, as well as NSERC RGPIN-2024-04395.                      ICLR.
+                                                          Simeng Han, Hailey Schoelkopf, Yilun Zhao, Zhent-
+                                                            ing Qi, Martin Riddell, Wenfei Zhou, James Coady,
+References                                                  David Peng, Yujie Qiao, Luke Benson, Lucy Sun,
+01.AI. 2024. Yi: Open Foundation Models by 01.AI.           Alexander Wardle-Solano, Hannah Szabó, Ekate-
+                                                            rina Zubova, Matthew Burtell, Jonathan Fan, Yixin
+AI@Meta. 2024. The Llama 3 Herd of Models.                  Liu, Brian Wong, Malcolm Sailor, Ansong Ni, Liny-
+                                                            ong Nan, Jungo Kasai, Tao Yu, Rui Zhang, Alexan-
+Roberta Ballarin. 2023. Modern origins of modal logic.      der Fabbri, Wojciech Maciej Kryscinski, Semih
+  In Edward N. Zalta and Uri Nodelman, editors, The         Yavuz, Ye Liu, Xi Victoria Lin, Shafiq Joty, Yingbo
+  Stanford Encyclopedia of Philosophy, Fall 2023 edi-       Zhou, Caiming Xiong, Rex Ying, Arman Cohan, and
+  tion. Metaphysics Research Lab, Stanford University.      Dragomir Radev. 2024. FOLIO: Natural Language
+                                                            Reasoning with First-Order Logic. In Proceedings
+                                                            of the 2024 Conference on Empirical Methods in
+Simon Baron-Cohen, Alan M. Leslie, and Uta Frith.
+                                                            Natural Language Processing, pages 22017–22031,
+  1985. Does the autistic child have a “theory of mind”
+                                                            Miami, Florida, USA. Association for Computational
+  ? Cognition, 21(1):37–46.
+                                                            Linguistics.
+Douglas Bates, Martin Mächler, Ben Bolker, and Steve      Wesley H. Holliday, Matthew Mandelkern, and Cede-
+  Walker. 2015. Fitting Linear Mixed-Effects Models        gao E. Zhang. 2024. Conditional and Modal Rea-
+  Using lme4. Journal of Statistical Software, 67(1).      soning in Large Language Models. In Proceedings
+                                                           of the 2024 Conference on Empirical Methods in
+Catarina G. Belem, Markelle Kelly, Mark Steyvers,          Natural Language Processing, pages 3800–3821, Mi-
+  Sameer Singh, and Padhraic Smyth. 2024. Percep-          ami, Florida, USA. Association for Computational
+  tions of Linguistic Uncertainty by Language Models       Linguistics.
+  and Humans.
+                                                          Jennifer Hu and Roger Levy. 2023. Prompting is not
+Leonardo Bertolazzi, Albert Gatt, and Raffaella             a substitute for probability measurements in large
+  Bernardi. 2024. A Systematic Analysis of Large            language models. In Proceedings of the 2023 Con-
+  Language Models as Soft Reasoners: The Case of            ference on Empirical Methods in Natural Language
+  Syllogistic Inferences. In Proceedings of the 2024        Processing, pages 5040–5060, Singapore. Associa-
+  Conference on Empirical Methods in Natural Lan-           tion for Computational Linguistics.
+  guage Processing, pages 13882–13905. Association
+  for Computational Linguistics.                          Wenlong Huang, Pieter Abbeel, Deepak Pathak, and
+                                                           Igor Mordatch. 2022. Language models as zero-shot
+                                                           planners: Extracting actionable knowledge for em-
+Peter Clark, Oyvind Tafjord, and Kyle Richardson. 2021.
+                                                           bodied agents. In ICML, pages 9118–9147. PMLR.
+  Transformers as soft reasoners over language. In
+  IJCAI.                                                  Anna A. Ivanova. 2025. How to evaluate the cognitive
+                                                            abilities of LLMs. 9(2):230–233.
+Vittoria Dentella, Fritz Günther, and Evelina Leivada.
+  2023. Systematic testing of three language mod-         Albert Q. Jiang, Alexandre Sablayrolles, Arthur Men-
+  els reveals low language accuracy, absence of re-         sch, Chris Bamford, Devendra Singh Chaplot, Diego
+  sponse stability, and a yes-response bias. Pro-           de las Casas, Florian Bressand, Gianna Lengyel, Guil-
+  ceedings of the National Academy of Sciences,             laume Lample, Lucile Saulnier, Lélio Renard Lavaud,
+  120(51):e2309583120.                                      Marie-Anne Lachaux, Pierre Stock, Teven Le Scao,
+                                                     16871
+  Thibaut Lavril, Thomas Wang, Timothée Lacroix,          Clara Meister, Tiago Pimentel, Gian Wiher, and Ryan
+  and William El Sayed. 2023. Mistral 7B.                   Cotterell. 2023. Locally typical sampling. Transac-
+                                                            tions of the Association for Computational Linguis-
+Albert Q. Jiang, Alexandre Sablayrolles, Antoine            tics, 11:102–121.
+  Roux, Arthur Mensch, Blanche Savary, Chris
+  Bamford, Devendra Singh Chaplot, Diego de las           Microsoft. 2023. Phi-2: The surprising power of small
+  Casas, Emma Bou Hanna, Florian Bressand, Gi-              language models. Microsoft Research Blog.
+  anna Lengyel, Guillaume Bour, Guillaume Lam-
+  ple, Lélio Renard Lavaud, Lucile Saulnier, Marie-       Microsoft. 2024. Phi-3 Technical Report: A Highly
+  Anne Lachaux, Pierre Stock, Sandeep Subramanian,          Capable Language Model Locally on Your Phone.
+  Sophia Yang, Szymon Antoniak, Teven Le Scao,
+                                                          Kanishka Misra and Najoung Kim. 2024. Generat-
+  Théophile Gervet, Thibaut Lavril, Thomas Wang,
+                                                            ing novel experimental hypotheses from language
+  Timothée Lacroix, and William El Sayed. 2024. Mix-
+                                                            models: A case study on cross-dative generalization.
+  tral of Experts.
+                                                            arXiv preprint arXiv:2408.05086.
+Philip Nicholas Johnson-Laird. 1983. Mental models:       Santiago Ontanon, Joshua Ainslie, Vaclav Cvicek, and
+  Towards a cognitive science of language, inference,       Zachary Fisher. 2022. LogicInference: A new
+  and consciousness. 6. Harvard University Press.           Datasaet for Teaching Logical Inference to seq2seq
+                                                            Models. In ICLR2022 Workshop on the Elements of
+Henry A Kautz, Bart Selman, et al. 1992. Planning as        Reasoning: Objects, Structure and Causality.
+  satisfiability. In ECAI, volume 92, pages 359–363.
+  Citeseer.                                               OpenAI. 2024.       Learning to reason with
+                                                            llms.            https://openai.com/index/
+Saul A. Kripke. 1959. A Completeness Theorem                learning-to-reason-with-llms/.
+  in Modal Logic. The Journal of Symbolic Logic,
+  24(1):1–14.                                             Long Ouyang, Jeffrey Wu, Xu Jiang, Diogo Almeida,
+                                                            Carroll Wainwright, Pamela Mishkin, Chong Zhang,
+Saul A. Kripke. 1963. Semantical Analysis of Modal          Sandhini Agarwal, Katarina Slama, Alex Ray, et al.
+  Logic I Normal Modal Propositional Calculi. Mathe-        2022. Training language models to follow instruc-
+  matical Logic Quarterly, 9(5-6):67–96.                    tions with human feedback. Advances in neural in-
+                                                            formation processing systems, 35:27730–27744.
+Andrew K Lampinen, Ishita Dasgupta, Stephanie C Y
+  Chan, Hannah R Sheahan, Antonia Creswell, Dhar-         Kentaro Ozeki, Risako Ando, Takanobu Morishita, Hi-
+  shan Kumaran, James L McClelland, and Felix               rohiko Abe, Koji Mineshima, and Mitsuhiro Okada.
+  Hill. 2024. Language models, like humans, show            2024. Exploring Reasoning Biases in Large Lan-
+  content effects on reasoning tasks. PNAS Nexus,           guage Models Through Syllogism: Insights from the
+  3(7):pgae233.                                             NeuBAROCO Dataset. In Findings of the Associa-
+                                                            tion for Computational Linguistics ACL 2024, pages
+Yujia Li, David Choi, Junyoung Chung, Nate Kushman,         16063–16077. Association for Computational Lin-
+  Julian Schrittwieser, Rémi Leblond, Tom Eccles,           guistics.
+  James Keeling, Felix Gimeno, Agustin Dal Lago,
+  et al. 2022. Competition-level code generation with     Mihir Parmar, Nisarg Patel, Neeraj Varshney, Mutsumi
+  alphacode. Science, 378(6624):1092–1097.                  Nakamura, Man Luo, Santosh Mashetty, Arindam
+                                                            Mitra, and Chitta Baral. 2024. LogicBench: Towards
+                                                            systematic evaluation of logical reasoning ability of
+Jian Liu, Leyang Cui, Hanmeng Liu, Dandan Huang,
+                                                            large language models. In Proceedings of the 62nd
+   Yile Wang, and Yue Zhang. 2020. LogiQA: A Chal-
+                                                            Annual Meeting of the Association for Computational
+   lenge Dataset for Machine Reading Comprehension
+                                                            Linguistics (Volume 1: Long Papers).
+   with Logical Reasoning. In Proceedings of the
+   Twenty-Ninth International Joint Conference on Ar-     David Premack and Guy Woodruff. 1978. Does the
+   tificial Intelligence, pages 3622–3628, Yokohama,        chimpanzee have a theory of mind? Behavioral and
+   Japan. International Joint Conferences on Artificial     Brain Sciences, 1(4):515–526.
+   Intelligence Organization.
+                                                          Neil Rabinowitz, Frank Perbet, Francis Song, Chiyuan
+Ziqiao Ma, Jacob Sansom, Run Peng, and Joyce Chai.          Zhang, S. M. Ali Eslami, and Matthew Botvinick.
+  2023. Towards A Holistic Landscape of Situated The-       2018. Machine Theory of Mind. In Proceedings
+  ory of Mind in Large Language Models. Findings of         of the 35th International Conference on Machine
+  Empirical Methods in Natural Language Processing.         Learning, pages 4218–4227. PMLR.
+
+R. Thomas McCoy, Shunyu Yao, Dan Friedman,                Marco Ragni, Hannah Dames, Daniel Brand, and Nico-
+  Mathew D. Hardy, and Thomas L. Griffiths. 2024.          las Riesterer. 2019. When Does a Reasoner Respond:
+  Embers of autoregression show how large language         Nothing Follows?: 41st Annual Meeting of the Cog-
+  models are shaped by the problem they are trained        nitive Science Society. Proceedings of the 41st An-
+  to solve. Proceedings of the National Academy of         nual Conference of the Cognitive Science Society,
+  Sciences, 121(41):e2322420121.                           pages 2640–2645.
+                                                     16872
+Stephen W Raudenbush. 2002. Hierarchical linear mod-       Yuxuan Wan, Wenxuan Wang, Yiliu Yang, Youliang
+   els: Applications and data analysis methods. Ad-          Yuan, Jen-tse Huang, Pinjia He, Wenxiang Jiao, and
+   vanced Quantitative Techniques in the Social Sci-         Michael Lyu. 2024. LogicAsker: Evaluating and
+   ences Series/SAGE.                                        Improving the Logical Reasoning Ability of Large
+                                                             Language Models. In Proceedings of the 2024 Con-
+Baptiste Rozière, Jonas Gehring, Fabian Gloeckle, Sten       ference on Empirical Methods in Natural Language
+  Sootla, Itai Gat, Xiaoqing Ellen Tan, Yossi Adi,           Processing, pages 2124–2155, Miami, Florida, USA.
+  Jingyu Liu, Romain Sauvestre, Tal Remez, Jérémy            Association for Computational Linguistics.
+  Rapin, Artyom Kozhevnikov, Ivan Evtimov, Joanna
+  Bitton, Manish Bhatt, Cristian Canton Ferrer, Aaron      Peter C Wason. 1968. Reasoning about a rule. Quar-
+  Grattafiori, Wenhan Xiong, Alexandre Défossez,             terly journal of experimental psychology, 20(3):273–
+  Jade Copet, Faisal Azhar, Hugo Touvron, Louis Mar-         281.
+  tin, Nicolas Usunier, Thomas Scialom, and Gabriel
+  Synnaeve. 2024. Code Llama: Open Foundation              Yimei Xiang. 2019. Two types of higher-order readings
+  Models for Code.                                           of wh-questions. Proceedings of the 22nd Amsterdam
+Abulhair Saparov and He He. 2022. Language Mod-              Colloquium.
+  els Are Greedy Reasoners: A Systematic Formal
+  Analysis of Chain-of-Thought. In The Eleventh Inter-     Shi Zong and Jimmy Lin. 2024. Categorical syllogisms
+  national Conference on Learning Representations.           revisited: A review of the logical reasoning abilities
+                                                             of llms for analyzing categorical syllogism. arXiv
+Abulhair Saparov, Richard Yuanzhe Pang, Vishakh Pad-         preprint arXiv:2406.18762.
+  makumar, Nitish Joshi, Mehran Kazemi, Najoung
+  Kim, and He He. 2023. Testing the General Deduc-         A     Additional Experiment Details
+  tive Reasoning Capacity of Large Language Models
+  Using OOD Examples. Advances in Neural Informa-
+  tion Processing Systems, 36:3083–3105.
+                                                           A.1    LLM Experiment Details
+                                                           All LLMs used are obtained from Hugging Face
+S Seals and Valerie Shalin. 2024. Evaluating the De-
+  ductive Competence of Large Language Models. In          checkpoints, exact repository and commits are
+  Proceedings of the 2024 Conference of the North          shown in Table 3. Specifically, we use the
+  American Chapter of the Association for Computa-         instruction-tuned versions of the models due to
+  tional Linguistics: Human Language Technologies          the zero-shot nature of our experiments.
+  (Volume 1: Long Papers), pages 8614–8630. Associ-
+  ation for Computational Linguistics.                        Time and compute power requirements vary, the
+                                                           largest llama-3-70b model takes around 2 hours on
+Freda Shi, Daniel Fried, Marjan Ghazvininejad, Luke        NVIDIA A6000 GPU to obtain all results in §4.
+  Zettlemoyer, and Sida I Wang. 2022. Natural lan-
+  guage to code translation with execution. In Proceed-       All models besides phi-2 and phi-3-mini is
+  ings of the 2022 Conference on Empirical Methods         quantized to the bfloat16 floating-point format
+  in Natural Language Processing.                          (bf16), while the Phi family is using the original
+Stuart M. Shieber. 1993. The problem of logical form       32-bit format (f32). We found that phi-2’s perfor-
+  equivalence. Computational Linguistics, 19(1):179–       mance degraded too much when quantized in an
+  190.                                                     earlier experiment, so we resort to f32 on small
+                                                           models from the Phi family. Due to compute re-
+Damien Sileo and Antoine Lernould. 2023.
+  MindGames: Targeting theory of mind in large lan-        source limits, models of size 70B have to be quan-
+  guage models with dynamic epistemic modal logic.         tized, so we choose to align all the larger models
+  In Findings of the Association for Computational         to bf16.
+  Linguistics: EMNLP 2023, pages 4570–4577.
+Oyvind Tafjord, Bhavana Dalvi, and Peter Clark. 2022.      A.2    Human Experiment Details
+  Entailer: Answering questions with faithful and truth-   Participant instructions. We use keys F and J,
+  ful chains of reasoning. In EMNLP.
+                                                           which are roughly symmetric on a standard English
+Gemini Team, Petko Georgiev, Ving Ian Lei, Ryan            keyboard, to collect participant responses. Half of
+  Burnell, Libin Bai, Anmol Gulati, Garrett Tanzer,        the participants see the following instruction:
+  Damien Vincent, Zhufeng Pan, Shibo Wang, et al.
+  2024. Gemini 1.5: Unlocking multimodal under-               In this study, you will be presented with two
+  standing across millions of tokens of context. arXiv     statements followed by a question. Your task is to
+  preprint arXiv:2403.05530.                               answer either Yes or No to the question, based on
+Hugo Touvron, Louis Martin, and Kevin Stone. 2023.
+                                                           the information provided in the statements. Please
+  Llama 2: Open Foundation and Fine-Tuned Chat             respond quickly and accurately by pressing "F" for
+  Models.                                                  Yes, and "J" for No.
+                                                      16873
+           Model          Repository                                   Commit
+           mistral-7b     mistralai/Mistral-7B-Instruct-v0.2           250544c9a802b0396550d0fd24bc80ff98bb1f5f
+           mistral-8x7b   mistralai/Mixtral-8x7B-Instruct-v0.1         1e637f2d7cb0a9d6fb1922f305cb784995190a83
+           llama-2-7b     meta-llama/Llama-2-7b-chat-hf                f5db02db724555f92da89c216ac04704f23d4590
+           llama-2-13b    meta-llama/Llama-2-13b-chat-hf               c2f3ec81aac798ae26dcc57799a994dfbf521496
+           llama-2-70b    meta-llama/Llama-2-70b-chat-hf               8b17e6f4e86be78cf54afd49ddb517d4e274c13f
+           llama-3-8b     meta-llama/Meta-Llama-3.1-8B-Instruct        5206a32e0bd3067aef1ce90f5528ade7d866253f
+           llama-3-70b    meta-llama/Meta-Llama-3.1-70B-Instruct       33101ce6ccc08fa6249c10a543ebfcac65173393
+           yi-34b         01-ai/Yi-34B-Chat                            75fa0ab8d2a50841f433f373433c170b571638ba
+           phi-2          microsoft/phi-2                              ef382358ec9e382308935a992d908de099b64c23
+           phi-3-mini     microsoft/Phi-3-mini-4k-instruct             5a516f86087853f9d560c95eb9209c1d4ed9ff69
+
+                               Table 3: Hugging Face checkpoints used in the experiments.
+
+
+   To mitigate the possible bias introduced by the                 are less likely to induce LLM’s or human’s individ-
+dominant hand, we have the other half of the par-                  ual bias, as they are unrelated to factual knowledge
+ticipants see instruction with reversed keys:                      or moral judgements. Also, we always use two
+   In this study, you will be presented with two                   full verb phrases, ruling out sentences like “Jane
+statements followed by a question. Your task is to                 is eating apples or oranges,” so the two events are
+answer either Yes or No to the question, based on                  less likely to be mutually exclusive. In this way, we
+the information provided in the statements. Please                 can reduce the ambiguity of the questions in our
+respond quickly and accurately by pressing "F" for                 dataset.
+No, and "J" for Yes.
+                                                                   B.2     Data Samples
+Participant wage. We offer participants an                         All logic forms and corresponding natural language
+hourly wage of 1.5 times Prolific’s minimum wage.                  sentences can be found in Table A1.
+The duration is determined by the median comple-                     The exact prompt format is as follows:
+tion time among all participants.
+                                                                    Consider the following statements:\n
+                                                                    Jane is watching a show or John is reading a book.\n
+ B        Extra Details of the Dataset                              Jane isn’t watching a show.\n
+                                                                    Question: Based on these statements, can we infer that
+ B.1       Considerations in Translating Logical                    John is reading a book?\n
+           Form to Natural Language                                 Answer:<eof>
+
+ During the interpretation process, another key point
+                                                                   C      Additional Experiments
+ is to assign independent interpretations to vari-
+ ables. Deciding the dependency also involves com-                 C.1     Extra Experiment: Introduction Rule of
+ mon sense knowledge. For example, consider the                            Modality
+ premises ¬p → q and q. If we interpret p :=                    We report the results on the necessitation rule and
+“Jane is inside the house” and q := “Jane is out”               its variants here, as these rules are obscure and
+ to proposition variables p and q, the two variables            verbose to be articulated in natural language:
+ are possibly not independent. According to com-
+ mon sense, “Jane is not inside the house” (¬p)                                 {φ} ⊢ 2φ,                (necessitation rule)
+ correlates with or is even equivalent to “Jane is out”                         {φ} ⊢ 3φ,
+ (q). Logically, {¬p → q, q} ⊬ ¬p; however, with
+                                                                                {φ} ⊢ φ.
+ the extra premise ¬p ↔ q given by common sense,
+ people may conclude that ¬p.10                                    Its natural language form is as follows:
+    Besides, natural language is ambiguous—one
+                                                                           Jane is watching a show.
+ sentence in natural language can come from mul-                    (2)    Can we infer that it’s certain that Jane is watching
+ tiple logical forms under the same interpretation.                        a show?
+ We use present tense and progressive aspect to en-                 (3)    Can we infer that it’s possible that Jane is watch-
+                                                                           ing a show?
+ courage a reading of imaginary ongoing events,                     (∅)    Can we infer that Jane is watching a show?
+ corresponding to the alethic modality. Such events
+     10
+     This confounding factor affects the examples in Appendix         All three variants are paired with 1000 logic in-
+ C.1.12 of Holliday et al. (2024).                                 terpretations. As they are all rules of inference,
+                                                           16874
+Modality   Argument Form   Logical Form           Natural Language
+   ∅            ∨L         {p ∨ q, ¬p} ⊢ q        Jane is watching a show or John is reading a book.
+                                                  Jane isn’t watching a show.
+                                                  Can we infer that John is reading a book?
+   ∅            ∨R         {p ∨ q, ¬q} ⊢ p        Jane is watching a show or John is reading a book.
+                                                  John isn’t reading a book.
+                                                  Can we infer that Jane is watching a show?
+   ∅           →L          {¬p → q, ¬p} ⊢ q       If Jane isn’t watching a show, then John is reading a book.
+                                                  Jane isn’t watching a show.
+                                                  Can we infer that John is reading a book?
+   ∅           →R          {¬p → q, ¬q} ⊢ p       If Jane isn’t watching a show, then John is reading a book.
+                                                  John isn’t reading a book.
+                                                  Can we infer that Jane is watching a show?
+   2            ∨L         {2p ∨ 2q, ¬2p} ⊢ 2q    It’s certain that Jane is watching a show or it’s certain that John is reading a book.
+                                                  It’s uncertain whether Jane is watching a show.
+                                                  Can we infer that it’s certain that John is reading a book?
+   2            ∨R         {2p ∨ 2q, ¬2q} ⊢ 2p    It’s certain that Jane is watching a show or it’s certain that John is reading a book.
+                                                  It’s uncertain whether John is reading a book.
+                                                  Can we infer that it’s certain that Jane is watching a show?
+   2           →L          {¬2p → 2q, ¬2p} ⊢ 2q   If it’s uncertain whether Jane is watching a show, then it’s certain that John is reading
+                                                  a book.
+                                                  It’s uncertain whether Jane is watching a show.
+                                                  Can we infer that it’s certain that John is reading a book?
+   2           →R          {¬2p → 2q, ¬2q} ⊢ 2p   If it’s uncertain whether Jane is watching a show, then it’s certain that John is reading
+                                                  a book.
+                                                  It’s uncertain whether John is reading a book.
+                                                  Can we infer that it’s certain that Jane is watching a show?
+   3            ∨L         {3p ∨ 3q, ¬3p} ⊢ 3q    It’s possible that Jane is watching a show or it’s possible that John is reading a book.
+                                                  It’s impossible that Jane is watching a show.
+                                                  Can we infer that it’s possible that John is reading a book?
+   3            ∨R         {3p ∨ 3q, ¬3q} ⊢ 3p    It’s possible that Jane is watching a show or it’s possible that John is reading a book.
+                                                  It’s impossible that John is reading a book.
+                                                  Can we infer that it’s possible that Jane is watching a show?
+   3           →L          {¬3p → 3q, ¬3p} ⊢ 3q   If it’s impossible that Jane is watching a show, then it’s possible that John is reading
+                                                  a book.
+                                                  It’s impossible that Jane is watching a show.
+                                                  Can we infer that it’s possible that John is reading a book?
+   3           →R          {¬3p → 3q, ¬3q} ⊢ 3p   If it’s impossible that Jane is watching a show, then it’s possible that John is reading
+                                                  a book.
+                                                  It’s impossible that John is reading a book.
+                                                  Can we infer that it’s possible that Jane is watching a show?
+   ∅            ∨L         {p ∨ q, q} ⊬ ¬p        Jane is watching a show or John is reading a book.
+                                                  John is reading a book.
+                                                  Can we infer that Jane isn’t watching a show?
+   ∅            ∨R         {p ∨ q, p} ⊬ ¬q        Jane is watching a show or John is reading a book.
+                                                  Jane is watching a show.
+                                                  Can we infer that John isn’t reading a book?
+   ∅           →L          {¬p → q, q} ⊬ ¬p       If Jane isn’t watching a show, then John is reading a book.
+                                                  John is reading a book.
+                                                  Can we infer that Jane isn’t watching a show?
+   ∅           →R          {¬p → q, p} ⊬ ¬q       If Jane isn’t watching a show, then John is reading a book.
+                                                  Jane is watching a show.
+                                                  Can we infer that John isn’t reading a book?
+   2            ∨L         {2p ∨ 2q, 2q} ⊬ ¬2p    It’s certain that Jane is watching a show or it’s certain that John is reading a book.
+                                                  It’s certain that John is reading a book.
+                                                  Can we infer that it’s uncertain whether Jane is watching a show?
+   2            ∨R         {2p ∨ 2q, 2p} ⊬ ¬2q    It’s certain that Jane is watching a show or it’s certain that John is reading a book.
+                                                  It’s certain that Jane is watching a show.
+                                                  Can we infer that it’s uncertain whether John is reading a book?
+   2           →L          {¬2p → 2q, 2q} ⊬ ¬2p   If it’s uncertain whether Jane is watching a show, then it’s certain that John is reading
+                                                  a book.
+                                                  It’s certain that John is reading a book.
+                                                  Can we infer that it’s uncertain whether Jane is watching a show?
+   2           →R          {¬2p → 2q, 2p} ⊬ ¬2q   If it’s uncertain whether Jane is watching a show, then it’s certain that John is reading
+                                                  a book.
+                                                  It’s certain that Jane is watching a show.
+                                                  Can we infer that it’s uncertain whether John is reading a book?
+   3            ∨L         {3p ∨ 3q, 3q} ⊬ ¬3p    It’s possible that Jane is watching a show or it’s possible that John is reading a book.
+                                                  It’s possible that John is reading a book.
+                                                  Can we infer that it’s impossible that Jane is watching a show?
+   3            ∨R         {3p ∨ 3q, 3p} ⊬ ¬3q    It’s possible that Jane is watching a show or it’s possible that John is reading a book.
+                                                  It’s possible that Jane is watching a show.
+                                                  Can we infer that it’s impossible that John is reading a book?
+   3           →L          {¬3p → 3q, 3q} ⊬ ¬3p   If it’s impossible that Jane is watching a show, then it’s possible that John is reading
+                                                  a book.
+                                                  It’s possible that John is reading a book.
+                                                  Can we infer that it’s impossible that Jane is watching a show?
+   3           →R          {¬3p → 3q, 3p} ⊬ ¬3q   If it’s impossible that Jane is watching a show, then it’s possible that John is reading
+                                                  a book.
+                                                  It’s possible that Jane is watching a show.
+                                                  Can we infer that it’s impossible that John is reading a book?
+
+
+               Table A1: Samples of all logical forms and corresponding natural language sentences.
+
+                                                         16875
+                      ∅           2          3              Modality     Argument Form       Logical Form
+    mistral-7b       0.998      0.885      0.999               ∅              base           φ ∨ ψ, ¬φ ⊢ ψ
+    mistral-8x7b     0.957      0.540      0.987               2              base           2φ ∨ 2ψ, ¬2φ ⊢ 2ψ
+    llama-2-7b       0.768      0.013      0.920               2            theorem          2(φ ∨ ψ), 2¬φ ⊢ 2ψ
+    llama-2-13b      0.368      0.004      0.829               2            spurious         2(φ ∨ ψ), ¬2φ ⊬ 2ψ
+    llama-2-70b      0.511      0.051      0.834               3              base           3φ ∨ 3ψ, ¬3φ ⊢ 3ψ
+    llama-3-8b       0.398      0.225      0.783               3            theorem          3(φ ∨ ψ), 3¬φ ⊢ 3ψ
+    llama-3-70b      0.674      0.384      0.794               3            spurious         3(φ ∨ ψ), ¬3φ ⊢ 3ψ
+    yi-34b           0.960      0.382      0.999
+    phi-2            0.814      0.226      0.892
+    phi-3-mini       0.992      0.925      0.994        Table A3: Logical forms and their ground truth to study
+                                                        the distribution of modalities. Only the spurious form
+                                                        of the necessity modality (marked by underline) has a
+Table A2: Overall accuracy of the necessitation rule
+                                                        ground truth of false.
+and its modality variants on each model.
+
+                                                        truth we used to study the distribution of modali-
+the ground truth answer is always Yes. Overall
+                                                        ties. The natural language form is as follows:
+accuracy is shown in Table A2, where across all
+LLMs, the necessitation rule has the lowest accu-                         It’s certain that if Freddy is not going
+racy. This echoes the necessity modality’s tendency                       shopping, then Coy is making dinner.
+to be rejected discussed in §4.2.3.                         (theorem)     It’s certain that Freddy is not going shop-
+                                                                          ping.
+   We further fit a linear mixed-effects model simi-     (spurious)       It’s uncertain whether Freddy is going
+lar to Eq. (4), except that the argument form effect                      shopping.
+                                                                          Can we infer that it’s certain that Coy is
+is now constant across all data points. The mixed-                        making dinner?
+effects model yields a marginal R2 of 0.391 and
+a conditional R2 of 0.745. Estimated marginal
+                                                           This group of rules and fallacies comes from
+means shows that the accuracy on ∅ is 0.171 less
+                                                        the fact that the necessity modality 2 is not dis-
+than 3, but 0.371 higher than 2, with both dif-
+                                                        tributive to disjunction, i.e. 2(φ ∨ ψ) ⊬ 2φ ∨ 2ψ
+ferences significant at p < 0.0001. This further
+                                                        (Xiang, 2019, Ex. 5). In contrast, the possibility
+suggests that modality serves as an important fac-
+                                                        modality 3 is distributive to disjunction. This par-
+tor on logic reasoning performance.
+                                                        ticular case could have served as a material to test
+C.2 Extra Experiment: Distribution of                   the LLM’s knowledge of the asymmetry between
+    Modalities                                          the two modalities, yet in §4.2.3 we showed that
+                                                        there is a bias towards rejection on the necessity
+Besides the necessitation rule, distribution axiom
+                                                        modality. As the false case of the disjunction is
+is the other fundamental axiom in normal modal
+                                                        on the necessity modality, this bias confounds the
+logic. It can be transformed into the rule shown
+                                                        experiment.
+in Eq. (A1), and plugging in the definition of ∨ in
+                                                           We fit a linear mixed-effects model similar to
+Eq. (2) gives the rule shown in Eq. (A2). Notice
+                                                        Eq. (4) to the data,
+that Eq. (A2) closely resembles rule ∨L ’s variant
+with necessity, as shown in Eq. (A3), except the dif-       Acc soft ∼ Modality × ArgForm + Perplexity
+ferent scope of the necessity operator and the posi-
+                                                                       + (1 + Perplexity | LLM),
+tion of the negation operator. Moving the negation
+operator out of the necessity operator will result in
+                                                        with an interaction term between the modality and
+a fallacy (Eq. A4).
+                                                        argument form. On the theorem form compared
+                                                        to the base form, the necessity modality 2 has a
+              {2(φ → ψ), 2φ} ⊢ 2ψ,               (A1)
+                                                        0.173 higher estimated marginal means with p <
+             {2(φ ∨ ψ), 2¬φ} ⊢ 2ψ,               (A2)   0.0001 significance, yet the possibility modality 3
+             {2φ ∨ 2ψ, ¬2φ} ⊢ 2ψ,                (A3)   has a 0.071 lower estimated marginal means. On
+             {2(φ ∨ ψ), ¬2φ} ⊬ 2ψ.               (A4)   the spurious form compared to the base form,
+                                                        the 2 has a 0.312 higher means, and the 3 has no
+We say (A2) to (A4) are of argument form                significant difference. On both forms, 3 ≻ 2 in
+theorem, base and spurious, respectively. See           terms of accuracy still holds at a slight margin of
+Table A3 for the logical forms and their ground         0.110 and 0.047 respectively.
+                                                    16876
+                                    Soft                          a binary metric, we threshold the soft accuracy at
+                       Soft                       Hard
+                                (Thresholded)                     0.5 (I[Acc soft ⩾ 0.5]) for a fair comparison. The
+          mistral-7b   0.644        0.648         0.648           results of accuracies averaged over all argument
+       mistral-8x7b    0.725        0.731         0.730           forms and modalities on all models are shown in
+         llama-2-7b    0.335        0.273         0.259
+       llama-2-13b     0.513        0.553         0.511           Table A4. We observe that the thresholded soft ac-
+       llama-2-70b     0.611        0.719         0.696           curacy is no less than the hard accuracy on models.
+         llama-3-8b    0.566        0.684         0.665
+       llama-3-70b     0.714        0.850         0.836
+                                                                  Besides accuracy, we also observe that although
+             yi-34b    0.517        0.544         0.528           nearly all models always predict an answer token
+               phi-2   0.532        0.544         0.544           (either Yes or No) as the first output token, this is
+         phi-3-mini    0.690        0.712         0.712
+                                                                  not the case for phi-3-mini. It on average greedily
+                                                                  decodes an answer token at around the 4th output
+Table A4: Comparison between greedy decoding-based                token, and only on 76.3% of the cases it decodes
+hard accuracy and probability-based soft accuracy.                an answer token within the first 10 output tokens.
+                                                                  The evidence above supports the argument from
+   To verify whether on 2 the performance increase                Hu and Levy (2023) that decoding-based methods
+on spurious form is due to the rejection bias, we                 may underestimate the language model’s true per-
+fit a linear mixed-effects model with the relative                formance, and justifies our choice of using the soft
+probability of answering Yes as dependent variable.               accuracy in §4.
+Results show that on spurious form compared to
+the base form, the effect of 2’s tendency to answer
+Yes is only 0.060 lower, indicating the rejection
+bias of the base form is still present. Therefore,
+we hypothesize that the LLM’s performance on
+recognizing the fallacy of necessity distribution
+over disjunction is hindered by the rejection bias
+on the necessity modality.
+
+C.3 Extra Experiment: Greedy Decoding
+We provide additional results based on greedy de-
+coding methods. The hard accuracy, a metric com-
+plementing the soft accuracy we mentioned in §4.1,
+is obtained by the following procedure:
+1. Prefill the input.
+2. Predict the next token with the model, and greed-
+   ily select the token t with the highest probability.
+3. If the t token is Yes or No, take the token as
+   model’s answer and terminate.
+4. Append the t token to the input. Return to step 2
+   to generate autoregressively, until an answer is
+   determined or the maximum number of output
+   tokens N is reached.
+5. The hard accuracy is 1 iff the answer is correct.
+   If the answer is incorrect or the maximum num-
+   ber of output tokens N is reached without an
+   answer, the hard accuracy is 0.
+  We report the hard accuracy with maximum to-
+ken number of N = 10. 11 As hard accuracy is
+  11
+     Notice that due to the non-deterministic nature of GPU
+parallelism, the soft accuracy results reported in this section
+differ from the one in §4. We verify that on all models, the
+mean squared error between the soft accuracy results reported     here and the ones in §4 is less than 0.01.
+
+                                                             16877
+

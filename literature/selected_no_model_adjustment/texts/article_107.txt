@@ -1,0 +1,1370 @@
+             Measuring Social Biases in Masked Language Models by Proxy of
+                                   Prediction Quality
+
+                            Rahul Zalkikar∗                                 Kanchan Chandra
+                         Independent Researcher                             New York University
+                          rayzck9@gmail.com                                   kc76@nyu.edu
+
+
+
+                             Abstract                                Masked language models (MLM(s); Brown
+                                                                  et al., 2020; Devlin et al., 2019; Liu et al., 2019a;
+        Innovative transformer-based language mod-                Radford et al., 2019) such as transformers BERT
+        els produce contextually-aware token embed-
+                                                                  and RoBERTa incorporate bidirectionality and self-
+        dings and have achieved state-of-the-art perfor-
+        mance for a variety of natural language tasks,
+                                                                  attention, producing contextually-aware embed-
+        but have been shown to encode unwanted bi-                dings. Unlike BERTunc , RoBERTa was pretrained
+        ases for downstream applications. In this pa-             solely on the masked language modeling objective
+        per, we evaluate the social biases encoded by             (MLMO) on a larger corpus of text. RoBERTa uses
+        transformers trained with the masked language             a dynamic masking strategy for a diverse set of rep-
+        modeling objective using proposed proxy func-             resentations during training and has achieved state-
+        tions within an iterative masking experiment              of-the-art results on GLUE, RACE, and SQuAD
+        to measure the quality of transformer models’
+                                                                  (Liu et al., 2019b; Rajpurkar et al., 2016; Lai et al.,
+        predictions and assess the preference of MLMs
+        towards disadvantaged and advantaged groups.              2017; Wang et al., 2018). Distilled model vari-
+        We find that all models encode concerning so-             ants have been shown to train significantly faster
+        cial biases. We compare bias estimations with             for minor decreases in performance (Sanh et al.,
+        those produced by other evaluation methods us-            2019). MLMs have produced state-of-the-art re-
+        ing benchmark datasets and assess their align-            sults for masked language modeling, named entity
+        ment with human annotated biases. We extend               recognition, and intent or topic classification, but
+        previous work by evaluating social biases in-
+                                                                  also encode concerning social biases against disad-
+        troduced after retraining an MLM under the
+        masked language modeling objective and find
+                                                                  vantaged groups that are undesirable in production
+        proposed measures produce more accurate and               settings. As MLMs become increasingly preva-
+        sensitive estimations of biases based on rela-            lent, researchers have been working on methods to
+        tive preference for biased sentences between              measure biases embedded in these models (Nangia
+        models, while other methods tend to underesti-            et al., 2020; Kaneko and Bollegala, 2022; Salutari
+        mate biases after retraining on sentences biased          et al., 2023).
+        towards disadvantaged groups.
+        Warning: This paper contains explicit statements of
+                                                                     To address the issue of social biases in MLMs
+        biased stereotypes and may be upsetting.                  at its source, we measure biases of MLMs while
+                                                                  focusing on an MLM’s key pretraining objective:
+   1    Introduction                                              masked language modeling. In this work, we focus
+                                                                  on proposing and assessing bias evaluation mea-
+   Word embeddings have proven useful in a variety
+                                                                  sures for MLMs and not proposing methods for
+   of Natural Language Processing (NLP) tasks due
+                                                                  debiasing MLMs. However, when assessing eval-
+   to their ability to efficiently model complex seman-
+                                                                  uation measures, we consider prior research that
+   tic and syntactic word relationships. Token-level
+                                                                  involves retraining or fine-tuning under the MLMO
+   embeddings, such as those produced by Word2Vec
+                                                                  with debiased or counterfactual data to reduce bi-
+   (Mikolov et al., 2013) and GloVe (Pennington et al.,
+                                                                  ases in MLMs, such as Zhao et al., 2018 and Zhao
+   2014) algorithms, learn a non-contextualized text
+                                                                  et al., 2019 which use data augmentation to swap
+   representation and produce static word embeddings
+                                                                  gendered words with their opposites prior to re-
+   that can uncover linear semantic or syntactic rela-
+                                                                  training. Motivated by this, we assess whether pro-
+   tionships between tokens.
+                                                                  posed measures satisfy an important criterion for
+        ∗
+            Corresponding author.                                 improvement over previously proposed ones: align-
+                                                              1337
+Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pages 1337–1361
+                            July 27 - August 1, 2025 ©2025 Association for Computational Linguistics
+ment with biases introduced by MLM retraining                    function BSRT to estimate social biases against
+under the MLMO (Section 4.5.1).                                  disadvantaged groups for a retrained MLM
+   We represent MLM bias through a model’s rela-                 relative to its pretrained base, and assess bias
+tive preference for ground truth tokens between two              evaluation measures for alignment with bi-
+paired sentences along a social bias axis. In each               ases introduced by MLM retraining under the
+sentence pair, one contains bias against disadvan-               MLMO.
+taged groups (stereotypical) and the other contains
+bias against advantaged groups (anti-stereotypical).        • We evaluate social biases for four transformer
+We assess the relative preferences of MLMs to-                models available through the Transformers
+wards sentences biased against disadvantaged and              library (Wolf et al., 2020). We use proxy
+advantaged groups using proxy measures for pre-               measures for MLM prediction quality with
+diction quality. In particular, we quantify MLM               model-comparative function BSRT to estimate
+preference by proxy of masked token prediction                social biases introduced by retraining MLMs
+quality given unmasked token context between                  under the MLMO. We find that proposed mea-
+encoded sentences within pairs.                               sures ∆PA and CRRA, along with modified
+   To measure the preference of an MLM using the              ∆P and CRR, produce more accurate estima-
+(attention-weighted) quality of its predictions under         tions of biases introduced by MLM retraining
+the MLMO, we propose and validate proxy func-                 than previously proposed ones, which can pro-
+tions ∆PA (Equation 7; Probability Difference with            duce concerning underestimations of biases
+Attention) and CRRA (Equation 6; Complementary                after retraining MLMs on sentences biased
+Reciprocal Rank with Attention) and introduce a               against disadvantaged groups. We observe
+modified ∆P (Equation 3) to measure the likeli-               that proposed measures ∆PA and CRRA, along
+hood an MLM will select a ground truth token                  with modified ∆P, show greater sensitivity
+to replace a masked one, and extend these defi-               than CRR, CSPS, AUL, and AULA to relative
+nitions for a sentence. We apply per-model indi-              changes in MLM bias due to retraining, indi-
+cator function BSPT (Equation 9) to estimate the              cated by larger and smaller bias scores and
+encoded social biases in pretrained MLMs. Our                 more frequently significant relative difference
+approach differs from prior research in measuring             in proportions of bias between pre- and re-
+biases in MLMs by using attention-weights under               trained transformers.
+an Iterative Masking Experiment (IME; Section 4)
+                                                           Our methodology could help others evaluate so-
+to probe MLM preferences.
+                                                        cial biases encoded in an MLM after it is retrained
+   We compare pre- and retrained MLMs within the
+                                                        on the MLMO, such as for any downstream fill-
+same model class to recover the nature of biases in-
+                                                        mask task, or after it is fine-tuned for other ob-
+troduced by retraining. In particular, we define and
+                                                        jectives that alter weights and change MLMO per-
+apply a proxy for the relative preference between
+                                                        formance. We release a package for measuring
+two MLMs with model-comparative indicator
+                                                        biases in MLMs to enable bias score computation
+function BSRT (Bias Score for MLM Re-training;
+                                                        on user-supplied or benchmark datasets and easy
+Equation 10) to estimate social biases introduced
+                                                        integration into existing evaluation pipelines.
+by retraining MLMs under the MLMO. These
+"introduced" biases must be represented by the rel-     2       Related Work
+ative change in biases after retraining an MLM
+under the MLMO.                                         2.1       Biases in Static Word Embeddings
+   In summary, the primary contributions of this        Static word embeddings (Pennington et al., 2014;
+work are as follows:                                    Mikolov et al., 2013) can be shifted in a direction
+   • We explore MLM bias through a model’s rel-         to decompose bias embedded in learned text data
+     ative preference for ground truth tokens be-       representations. These could be analogies or biases
+     tween two minimally distant sentences with         along an axis, such as gender1 (Bolukbasi et al.,
+     contrasting social bias under the IME. We mea-     2016) or race (Manzini et al., 2019). The Word Em-
+     sure this using the attention-weighted quality     bedding Association Test (WEAT; Caliskan et al.,
+     of predictions.                                    2017) measures association between targets and
+   • We propose the model-comparative indicator             1
+                                                                For example, doctor - man + woman = nurse.
+
+                                                    1338
+attributes using cosine similarity between static         token of highest probability P (tp |c) and, as such,
+word embeddings, but has been shown to overes-            first rank ρ(tp |c) = 1 in the set of model token
+timate biases by Ethayarajh et al., 2019, which           predictions (which is limited by the MLM’s embed-
+proposed the robust relational inner product asso-        ding space).
+ciation (RIPA) method, derived from the subspace
+projection method to debias vectors in Bolukbasi               ∆P(t|s\tm ; θ) = P (tp |s\tm ; θ) − P (tm |s\tm ; θ)
+et al., 2016.                                                                                                             (1)
+                                                                              = ∆P(w; θ)
+   While WEAT has shown that token-level em-
+beddings produced by GloVe and Word2Vec en-                  ∆P(t|s\tm ; θ) (Equation 1) represents the differ-
+code biases based on gender and race (Caliskan            ence between the probability of a predicted token
+et al., 2017), the Sentence Encoder Association           tp and a masked token tm in a sentence s. It serves
+Test (SEAT; May et al., 2019) extends on WEAT             as a proxy of the MLM’s prediction quality for a
+to measure social biases in sentence-level encoders       token given its context within the IME, or all tokens
+such as ELMo and BERT using template sentences            in s besides tm (Salutari et al., 2023).
+with masked target tokens2 , averaging token em-
+                                                                                                                          
+beddings to form sentence-level embeddings on                CRR (t|s\tm ; θ) =   ρ(tp |s\tm ; θ)−1 − ρ(tm |s\tm ; θ)−1
+which cosine similarity is applied as a proxy for                            = 1 − ρ(tm |s\tm ; θ)−1
+semantic association. As an alternative evaluation                           = CRR(w; θ)
+method under a different objective, Liang et al.,                                                                         (2)
+2020 assessed differences in log-likelihood be-
+tween gender pronouns in a template sentence3                Salutari et al., 2023 proposes the Complemen-
+where occupations can uncover the directionality          tary Reciprocal Rank (CRR(t|s\tm ; θ); Equation
+of the bias encoded by an MLM.                            2) for a masked token given its context, where
+                                                          ρ(tp |s\tm )−1 is the reciprocal rank of the predicted
+2.2 Evaluating Biases in MLMs                             token (and always equal to 1) and ρ(tm |s\tm )−1
+                                                          is the reciprocal rank of the masked token. Thus,
+When considering a sentence s containing tokens
+                                                          ρ(tm |s\tm )−1 provides a likelihood measure for
+{t1 , t2 , ..., tls }, where ls is the number of tokens
+                                                          tm being chosen by the model as a candidate token
+in s, (modified) token(s) of s can characterize its
+                                                          to replace the ground truth (masked) one.
+bias towards either disadvantaged or advantaged
+                                                             Salutari et al., 2023 defines ∆P(s) (Appendix D)
+groups. For a given sentence s with tokens t ∈
+                                                          as the probability difference for a sentence s and
+s we denote all tokens besides tx as s\tx (where
+                                                          CRR (s) (Appendix E; average of all single masked
+1 ≤ x ≤ ls ), and we denote modified tokens as
+                                                          token CRRs with token ordering preserved) as the
+M and unmodified tokens as U (s = U ∪ M ).
+                                                          complementary reciprocal rank for a sentence s,
+For a given MLM with parameters θ, we denote a
+                                                          and uses them as proxies for an MLM’s prediction
+masked token as tm and a predicted token as tp .
+                                                          quality or preference, claiming metrics based on
+    Salazar et al., 2020 uses pseudo-log-likelihood
+                                                          CRR for a sentence s are necessary to fully capture
+scoring to approximate P (U |M, θ), or the probabil-
+                                                          the biases embedded in MLMs.
+ity of unmodified tokens conditioned on modified
+                                                             Kaneko and Bollegala, 2022 propose evaluation
+ones. Similarly, Nangia et al., 2020 reports CrowS-
+                                                          metrics All Unmasked Likelihood (AUL; Appendix
+Pairs Scores (CSPS; Appendix B), a pseudo-log-
+                                                          F) and AUL with Attention weights (AULA; Ap-
+likelihood score for an MLM selecting unmodified
+                                                          pendix G), where both are generated by requiring
+tokens given modified ones. Nadeem et al., 2021
+                                                          the MLM to predict all tokens (unmasked input).
+reports a StereoSet Score (SSS; Appendix C), a
+                                                          By requiring the MLM to simultaneously predict all
+pseudo-log-likelihood score for an MLM selecting
+                                                          of the tokens in a given unmasked input sentence
+modified tokens given unmodified ones.
+                                                          s, Kaneko and Bollegala, 2022 aim to eliminate
+    Salutari et al., 2023 tests MLMs in an iterative
+                                                          biases associated with masked tokens under pre-
+fill mask setting where the model outputs a set of
+                                                          viously proposed pseudo-likelihood-based scoring
+tokens (or the (log)softmax of model logits mapped
+                                                          methods (Nadeem et al., 2021, Nangia et al., 2020),
+to tokens) to fill the masked one, starting with the
+                                                          which assumed that masked tokens are statistically
+   2
+       For example, "This is <mask>".                     independent, and selectional biases from masking
+   3
+       For example, "<mask> is a/an [occupation]".        a subset of input tokens, such as high frequency
+                                                      1339
+words (which are masked more often during train-               goes unrecognized during evaluation using previ-
+ing).                                                          ously proposed measures. CRR could perform bet-
+   Kaneko and Bollegala, 2022 reference the use                ter than pseudo-(log)likelihood-based measures for
+of sentence-level embeddings produced by MLMs                  this sensitivity that yields larger relative differences
+for downstream tasks such as sentiment classifica-             in ∆P(t|c) as opposed to CRR(t|c)6 , and is deemed
+tion to argue that biases associated with masked               critical for evaluation by Salutari et al., 2023 due to
+tokens should not influence the intrinsic bias evalu-          the possible uniformity of probabilities generated
+ation of an MLM, as opposed to the evaluation of               by a particular MLM w.r.t. others.
+biases introduced after an MLM is fine-tuned. In
+contrast, we focus on an MLM’s key pretraining                 3     Methodology
+objective, masked language modeling, to measure                3.1    Biases in Pretrained MLMs
+social biases of the MLM.4 In addition, we mea-
+                                                               We probe for MLM preferences using the IME,
+sure relative changes in biases w.r.t. the intrinsic
+                                                               which masks one token at a time until all tokens
+biases of the same base MLM after retraining under
+                                                               have been masked, or until we have n logits or pre-
+the MLMO (as opposed to fine-tuning). Thus, we
+                                                               dictions for a sentence with n tokens. Appendix I
+argue that biases associated with masked tokens
+                                                               shows an IME example for one model and text.
+are not undesirable in our case.
+                                                                  Table 1 shows masked token predictions (those
+   AUL and AULA were found to be sensitive to con-
+                                                               with first rank and highest probability) produced
+textually meaningful inputs by randomly shuffling              by MLMs for example input contexts. The ground
+tokens in input sentences and comparing accuracies             truth masked token rank, or ρ(tm |c), represents
+with and without shuffle. CRR is also conditional              the quality of the models’ predictions relative to a
+to the unmasked token context by definition. We                sentence biased against an advantaged or disadvan-
+argue measure sensitivity to unmasked token con-               taged group. Special start and end character tokens
+texts is desirable when evaluating a given MLM’s               for MLMs are not included in the span of tokens
+preference under a fill-mask task, or when estimat-            considered in our experiments to eliminate noise.7
+ing biases using contextualized token-level embed-
+dings produced by an MLM.                                                                                                     
+                                                               ∆P(t|s\tm ; θ) = log P (tp |s\tm ; θ) − log P (tm |s\tm ; θ)
+   In contrast with previous methods such as SSS                               = ∆P(w; θ)
+and CSPS, we refrain from using strictly modified or                                                                      (3)
+unmodified subsets of input tokens as context and
+                                                                  Motivated by the typically long-tail distribution
+instead provide all tokens but the ground truth one
+                                                               of probabilities output by MLMs, we redefine Equa-
+as context for MLM prediction under each iteration
+                                                               tion 1 and propose a modified version ∆P(w) as
+of our masking experiment. In this sense, CRR and
+                                                               shown in Equation 3. The log transformation re-
+∆P consider all tokens equally, and like AUL, they
+                                                               duces sensitivity to differences when probabilities
+might also benefit from considering the weight of
+                                                               are high but enhances relative differences when
+MLM attention as a proxy for token importance
+                                                               probabilities are low, improving sensitivity to sub-
+when probing for MLM preferences for ground
+                                                               tle but potentially meaningful variations in low-
+truth tokens between two paired sentences along a
+                                                               probability token choices.
+social bias axis.5
+   Existing benchmark datasets such as CPS are                     CRRA (t|s\tm ; θ) = am 1 − log ρ(tm |s\tm ; θ)
+                                                                                                                   −1 
+
+limited to one ground truth per masked token, so                                                                          (4)
+                                                                                    = CRRA(w; θ)
+an important consideration is an MLM’s ability
+to predict multiple plausible tokens for a context                   ∆PA(t|s\tm ; θ) = am log P (tp |s\tm ; θ)
+                                                                                                                     
+that could qualify for concerning social bias but                                              − log P (tm |s\tm ; θ)     (5)
+                                                                                      = ∆PA(w; θ)
+   4
+      Masked language modeling was a pretraining objective
+                                                                   6
+for all transformers considered in this work. Next sentence          The lowest rank of any possible ground truth token within
+prediction was not used for RoBERTa and variants due to        a model’s vocabulary is equal to the size of the vocabulary
+relatively lower performance with its inclusion (Liu et al.,   (1 ≤ ρ(tm |c) ≤ V and 0 ≤ CRR(s) ≤ 1 − (V )−1 for an
+2019b).                                                        MLM with embedding vocabulary of size V ).
+    5                                                              7
+      By incorporating attention weights, ∆PA and CRRA con-          Special start and end character tokens for MLMs are not
+sider token-level contributions to MLM predictions, leverag-   considered by measures using attention weights and probabili-
+ing the attention mechanism’s role in weighting contextually   ties computed from the (log)softmax of model logits for the
+important tokens.                                              masked token index.
+
+                                                           1340
+       Model                  IME Input with masked token w11 = money                                        w11 Rank
+       distilRoBERTaP         The poor are really ignorant about how to handle the problems they do have     5
+       distilRoBERTaR         The poor are really ignorant about how to handle the money they do have        1
+       distilRoBERTaP         The rich are really ignorant about how to handle the wealth they do have       4
+       distilRoBERTaR         The rich are really ignorant about how to handle the problems they do have     2
+
+Table 1: MLM predictions and ground truth masked token ranks for input sentences under the IME. The processed
+input sentences are "The [poor, rich] are really ignorant about how to handle the money they do have", and are
+contained in Sdis or Sadv from CPS with characteristic words poor and rich respectively. Masked tokens are in bold.
+
+
+   For a given MLM with parameters θ, we pro-                      ∀f ∈ {CRR, CRRA, ∆P, ∆PA, CSPS, SSS, AUL,
+pose attention-weighted measures CRRA(w) and                       AULA }. We define a bias score for a pretrained
+∆PA(w) defined in Equations 4 and 5 respectively,                  MLM as BSPT (Equation 9).
+where aw is the average of all multi-head atten-                                                  N
+                                                                                             100 X                
+tions associated with the ground truth token w8 ,                             BSPT(f ) :=           1 ∆fT (i) > 0         (9)
+                                                                                              N i=1
+and P (tm |s\tm ) and ρ(tm |s\tm ) are the probabil-
+ity score and rank of the masked token respectively.                  1 is a per-model indicator function which returns
+We extend these definitions for a sentence s as                    1 if transformer T has a larger preference for Sdis
+shown in Equations 6 and 7.                                        relative to Sadv and 0 otherwise, as estimated for
+                                                                   a measure f by Equation 8. BSPT represents the
+                              1 X
+              CRRA (s) :=            CRRA (w; θ)             (6)   proportion of sentences with higher relative bias
+                              ls w∈s
+                                                                   against disadvantaged groups for a given measure,
+                              1 X                                  where values above 50 indicate greater relative bias
+               ∆PA(s) :=             ∆PA(w; θ)               (7)
+                              ls w∈s                               against disadvantaged groups for an MLM.
+  We compute measure f , ∀f ∈ {CRRT (s),                           3.2    Biases Introduced by MLM Retraining
+∆PT (s), CRRAT (s), ∆PAT (s)}, where T is an
+                                                                   We define a bias score for a retrained MLM (rela-
+MLM transformer and s is a sentence, ∀s ∈ Sdis
+                                                                   tive to its pretrained base) as BSRT (Equation 10).
+and ∀s ∈ Sadv .9 Table 13 in the Appendix shows
+these measures (likelihood scores) for an example                                           N
+sentence s in SS and CPS.10 We define sets of mea-                                      100 X                        
+                                                                         BSRT (f ) :=          1 ∆fT1 (i) > ∆fT2 (i)     (10)
+                                                                                         N i=1
+sures M1 and M2 (M1 ∩ M2 = ∅), where M1 =
+{CRR, CRRA, ∆PA, ∆P} and M2 = {AUL, AULA,                             We define a proxy for the relative preference
+CSPS, SSS }.                                                       between two MLMs with the model-comparative
+                                                                   indicator function 1, which returns 1 if transformer
+              (
+                  fT (Sadv (i)) − fT (Sdis (i)), if f ∈ M1         T1 has a larger preference for Sdis relative to Sadv
+  ∆fT (i) =                                                  (8)
+                  fT (Sdis (i)) − fT (Sadv (i)), if f ∈ M2         than transformer T2 and 0 otherwise, as estimated
+                                                                   for a measure f by Equation 8. BSRT can be applied
+   We apply Equation 8 to estimate the preference                  to compare pre- and retrained MLMs within the
+of a transformer T for s ∈ Sdis relative to s ∈ Sadv               same model class and recover biases introduced by
+for paired sentence s with index i and measure f ,                 MLM retraining. Values above 50 indicate greater
+    8
+      Averaging the multi-head attentions associated with a
+                                                                   bias against disadvantaged groups for transformer
+ground truth token provides a potentially balanced representa-     T1 relative to T2 , or a retrained transformer relative
+tion of token-level contributions by capturing diverse contex-     to its pretrained base.
+tual relationships encoded by individual heads while reducing
+noise from any single head.
+    9
+      We apply the Shapiro-Wilk test (Shapiro and Wilk, 1965)
+                                                                   4     Experiments and Findings
+for normality to each measure and did not find evidence that
+the measures were not drawn from a normal distribution. The
+                                                                   4.1    Benchmark Datasets for Social Bias
+same was found for the difference of each of these measures        The Crowdsourced Stereotype Pairs Benchmark
+between sentence sets relative to the same transformer T .
+   10
+      Greater MLM preference based on prediction quality is        (CPS; Nangia et al., 2020) contains biased sen-
+reflected by CRR, CRRA, ∆P and ∆PA values closer to 0 (if a        tences towards historically advantaged and disad-
+sentence with bias against advantaged groups has a greater         vantaged groups along nine forms of social biases.
+value relative to its paired counterpart, the MLM is deemed
+to prefer bias against disadvantaged groups). The opposite is      StereoSet (SS; Nadeem et al., 2021) contains in-
+true for measures CSPS, SSS, AUL and AULA.                         trasentence and intersentence (with context) pairs
+                                                               1341
+for four forms of social biases, using the likeli-               where s is a sentence in CPS biased towards either
+hood of modified tokens given unmodified token                   advantaged (Sadv ) or disadvantaged groups (Sdis ).
+contexts as proxy for MLM preference. Similarly,
+CPS contains characteristic words that distinguish               4.3    Transformer-based Language Models
+sentences within pairs and define the nature of a                We denote pre- and retrained transformers as
+particular bias towards either advantaged or dis-                TP and TR respectively. The subscript unc de-
+advantaged groups, but instead uses the relative                 notes an uncased model. We report results from
+likelihood of unmodified tokens being chosen by                  the following transformer-based language models
+the MLM given a modified context (characteristic                 available through the HuggingFace library (Wolf
+word) across a sentence pair.                                    et al., 2020): bert-base-uncased (BERTunc ; Devlin
+   CPS and SS contain biased sentences towards                   et al., 2019), roberta-base (RoBERTa; Liu et al.,
+advantaged and disadvantaged groups, where CPS                   2019b), distilbert-base-uncased (distilBERTunc ;
+sentence pairs are categorized by bias types: race,              Sanh et al., 2019), and distilroberta-base (distil-
+age, socioeconomic, disability, religion, physical               RoBERTa; Liu et al., 2019a).
+appearance, gender, sexual orientation, and nation-
+ality, and SS sentence pairs by: race, religion, gen-            4.4    Pretrained MLM Bias Scores
+der, and profession (see Appendix A.1 for details                We use BSPT to compare MLM preferences, report
+on sentence counts for bias categories).                         overall bias scores in Table 2, and provide detailed
+   To probe for biases of interest that are encoded              results for all measures and MLMs in Appendix K.
+in MLMs, the scope of our experiments include
+all bias categories and sentences pairs in CPS and                  f     RoBERTaP BERTP,unc D-RoBERTaP D-BERTP,unc
+                                                                    CPS Dataset
+intrasentence pairs in SS, since intersentence pairs                CSPS     59.35   60.48      59.35      56.83
+are not masked for bias evaluation (Kaneko and                      AUL      58.75   48.34      53.32      51.59
+                                                                    AULA     58.09   48.21      51.86      52.65
+Bollegala, 2022).11 We estimate MLM preference                      CRR      58.89   61.07      57.76      56.23
+towards a stereotypical sentence over a less stereo-                CRRA     60.68   58.89      61.94      60.08
+                                                                    ∆P       59.88   60.08      59.75      57.49
+typical one for each bias category in CPS and SS.                   ∆PA      60.15   60.81      59.81      58.02
+                                                                    SS Dataset
+4.2 Retraining Dataset                                              SSS      61.06   59.16       61.4      60.59
+                                                                    AUL      59.45   48.91      60.21      51.71
+                                                                    AULA     58.83   50.28      59.59      51.66
+CPS provides a more diverse alternative to biases                   CRR      57.83   53.85      54.37      53.42
+expressed by sentence pairs in SS. Biases widely                    CRRA     62.06   58.59      60.54      61.11
+                                                                    ∆P         62.2  58.64       61.4      59.31
+acknowledged in the United States are well rep-                     ∆PA      62.35   58.21      61.35      59.31
+resented in CPS12 compared to SS, and there is
+greater diversity of sentence structures in CPS                  Table 2: Overall bias scores for pretrained MLMs us-
+(Nangia et al., 2020). CPS has been found to be a                ing BSPT(f ) with measures ∀f ∈ {CRR, CRRA, ∆P,
+more reliable benchmark for pretrained MLM bias                  ∆PA, CSPS, SSS, AUL, AULA} on CPS and SS, where
+measurement than SS, and the validation rate of                  D- denotes distilled. Color-coded from lightest to dark-
+                                                                 est, with lower values represented by lighter shades and
+CPS is 18% higher than SS. (Nangia et al., 2020).
+                                                                 higher values by darker shades. Bold values indicate the
+Based on these findings, paired with (1) the com-                highest bias score for an MLM across all measures.
+putational expense and time-consumption involved
+with retraining MLMs under the MLMO and (2)
+                                                                    Overall, all evaluation methods show concern-
+concerns regarding standard masked language mod-
+                                                                 ing social biases against disadvantaged groups em-
+eling metric viability on SS, we proceed to use sen-
+                                                                 bedded in MLMs as observed in prior research
+tence sets in CPS to re-train MLMs and validate
+                                                                 (Kaneko and Bollegala, 2022, Nangia et al., 2020).
+methods for estimating the biases that are intro-
+                                                                 Interestingly, BERTunc has the lowest overall SSS,
+duced (Nangia et al., 2020) (see Appendix A.2 for
+                                                                 AUL , AULA , CRRA , ∆ P , and ∆ PA (second lowest
+details). We re-train MLMs ∀s ∈ Sdis or ∀s ∈ Sadv ,
+                                                                 CRR ) on SS, but conflicting results on CPS, where
+   11
+      Our experiments on the SS dataset include only intrasen-   it has the highest CSPS, CRR, ∆P, and ∆PA but the
+tence pairs as in experiment code used by Kaneko and Bolle-      lowest AUL, AULA, and CRRA. RoBERTa and dis-
+gala, 2022.                                                      tilRoBERTa have higher overall bias than BERTunc
+   12
+      CPS categories are a "narrowed" version of the US Equal
+Employment Opportunities Commission’s list of protected          and distilBERTunc according to (1) all but one mea-
+categories (Nangia et al., 2020).                                sure on SS and (2) AUL and CRRA on CPS.
+                                                             1342
+   Kaneko and Bollegala, 2022 observe a higher                    vantaged groups (ROC curves in Appendix L).
+bias score for religion in CPS across CSPS, AUL,
+and AULA with the roberta-large MLM. Nangia                       4.5     Retrained MLM Bias Scores
+et al., 2020 also observe that roberta-large has                  We re-train each transformer under consideration
+relatively higher bias scores for the religion cate-              using the PyTorch Python library with P100 and T4
+gory in CPS, and relatively lower bias scores for                 GPUs on cased (RoBERTa and distilRoBERTa) and
+the gender and race categories compared to SS.13                  uncased (BERTunc and distilBERTunc ) versions of
+Similarly, we observe that gender has relatively                  CPS sentences (see Appendix M.1 for more de-
+lower scores in CPS compared to SS across MLMs,                   tails).
+but that race bias remains low across all MLMs,
+measures, and datasets. We observe a relatively
+high religious bias across all MLMs in CPS, but
+find AUL and AULA tend to underestimate religious
+bias on SS and overestimate it on CPS compared
+to proposed measures for BERTunc . We find that
+other measures underestimate disability bias for
+BERTunc and distilBERTunc on CPS, but give simi-
+lar estimates for RoBERTa and distilRoBERTa. We
+find that only AUL and AULA estimate overall bias
+scores below 50, where the corresponding MLM is
+BERTunc in each case.
+                                                                  Figure 1: Difference between ECDFs for CRR distribu-
+4.4.1 Human Annotated Bias Alignment                              tion for sentences in Sdis and Sadv for pre- and retrained
+                                                                  RoBERTa and the race bias category in CPS. The line
+We compare the alignment (agreement) between
+                                                                  at y = 0 separates what is biased against disadvantaged
+measures and bias ratings in CPS. Sentence pairs in               groups on the positive y-axis from what is biased against
+CPS received five annotations in addition to the im-              advantaged groups on the negative y-axis.
+plicit annotation from the writer. We map sentences
+to a binary classification task, where a sentence is                 Figure 1 shows the difference in ECDFs for
+considered biased if it satisfies criteria from Nangia            the CRRm (s) measure on the race bias category
+et al., 2020, where (1) at least three out of six an-             in CPS, where m is retrained MLM RoBERTaR .
+notators (including the implicit annotation) agree a              It illustrates how the difference in ECDF distribu-
+given pair is socially biased and (2) the majority of             tions for an MLM can visually represent a con-
+annotators who agree a given pair is socially biased              textual shift in relative bias. When compared
+agree on the type of social bias being expressed.14               with pretrained RoBERTa (RoBERTa-P), we ob-
+   We compute evaluation measures derived from                    serve an upwards shift in the difference of ECDFs
+MLMs to predict whether a pair is biased or un-                   for the CRR difference between sentence sets af-
+biased at varying thresholds. All measures are                    ter retraining RoBERTa on Sdis (RoBERTa-R-DIS),
+computed for each sentence in a pair. Thresholds                  and a downwards shift after retraining on Sadv
+for bias scores computed on sentences with bias                   (RoBERTa-R-ADV). This is expected since retraining
+against advantaged and disadvantaged groups re-                   on Sdis or Sadv should shift the MLM preference
+spectively maximize area under the ROC Curve                      towards the corresponding bias type.
+for that measure. We find that one or more of pro-                   We compute BSRT for retrained MLMs and all
+posed measures ∆PA and CRRA, along with mod-                      measures and bias categories on CPS and report de-
+ified ∆P and CRR, outperform AUL and AULA in                      tailed results in Appendix M.2.15 In general, each
+their agreement with human annotators on CPS for                  measure produces a bias score in accordance with
+RoBERTaP and BERTP,unc based on higher AU-                        the particular retraining dataset used for almost
+ROC values if MLMs exhibit bias towards disad-                       15
+                                                                       We assess whether the relative differences in proportions
+  13
+      BERTunc and RoBERTa in this paper are transformers          of bias between pre- and retrained transformers are statis-
+roberta-base and bert-base-uncased as referenced in Section       tically significant according to McNemar’s test (McNemar,
+4.3, whereas Kaneko and Bollegala, 2022 use roberta-large         1947) (p-value < 0.05), using binarized outcomes for bias as
+and bert-base-cased in their experiments.                         given by fR (Sadv ) > fR (Sdis ) and fP (Sadv ) > fP (Sdis ) to
+   14
+      This experiment setting gives 58 unbiased pairs and 1,450   create contingency tables of outcome pairings between pre-
+biased pairs for binary classification.                           and retrained transformers to test for marginal homogeneity.
+
+                                                              1343
+       Model              Retrain dataset    f : min / max BSRT ∃c ∈ C              f : p < a ∀c ∈ C
+       RoBERTaR           ∀s ∈ Sdis          max BSRT : {∆P, ∆PA}                   CRR , CRRA , ∆ P , ∆ PA
+                          ∀s ∈ Sadv          min BSRT : {CRRA, ∆P}                  CSPS, CRR , CRRA , ∆ P , ∆ PA
+       distilRoBERTaR     ∀s ∈ Sdis          max BSRT : {CRR, ∆P, ∆PA}              ∆P, ∆PA
+                          ∀s ∈ Sadv          min BSRT : {CRRA, ∆P, ∆PA}             CRR , CRRA , ∆ P , ∆ PA
+       BERTR              ∀s ∈ Sdis          max BSRT : {∆P, ∆PA}                   CRR , CRRA , ∆ P , ∆ PA
+                          ∀s ∈ Sadv          min BSRT : {CRRA, ∆P, ∆PA}             CSPS, CRR , CRRA , ∆ P , ∆ PA
+       distilBERTR        ∀s ∈ Sdis          max BSRT : {AUL, CRR, ∆P, ∆PA}         AUL , AULA , ∆ P , ∆ PA
+                          ∀s ∈ Sadv          min BSRT : {CRRA, ∆P, ∆PA}             CSPS, CRRA , ∆ P , ∆ PA
+
+
+Table 3: Measures ∀f ∈ {CRR, CRRA, ∆P, ∆PA, CSPS, AUL, AULA} with at least one min BSRT or max BSRT across
+bias categories in CPS for MLMs retrained on Sadv or Sdis respectively (BSRT; Equation 10). f : p < a ∀c ∈ C
+indicates that, for a measure f and every bias category in CPS, the relative difference in proportions of bias between
+pre- and retrained transformers is statistically significant according to McNemar’s test (p-value < 0.05).
+
+
+all significant results across MLMs, demonstrating           MLMs retrained on Sadv .
+that proposed function BSRT can be applied to es-               We find that ∆PA, ∆P, and CRRA show greater
+timate the bias against disadvantaged groups for             sensitivity than CRR, CSPS, AUL, and AULA for
+transformer T1 relative to its pretrained base T2 .          relative changes in MLM bias due to retraining,
+   In Table 3, we report (1) measures with at least          indicated by larger and smaller scores and more
+one min BSRT or max BSRT across bias categories              frequently significant relative difference in propor-
+in CPS for MLMs retrained on Sadv or Sdis respec-            tions of bias between pre- and retrained transform-
+tively, and (2) measures for which the relative dif-         ers. We find that CSPS, AUL, and AULA produce
+ference in proportions of bias between pre- and              concerning underestimations of biases introduced
+retrained transformers is statistically significant ac-      by retraining MLMs only on sentences with bi-
+cording to McNemar’s test (p-value < 0.05) for               ases against disadvantaged groups from CPS, and
+every bias category in CPS.                                  overestimations from retraining on sentences with
+   For all MLMs retrained on Sdis , CRR, ∆P, and             biases against advantaged groups (see Appendix
+∆PA give results above 50 for each bias category as          M.2 for more details).
+expected, with higher scores than other measures in          4.5.1    Retraining Bias Alignment
+almost every case. CRRA also gives results above
+50 for each bias category except for disability bias           Retrain dataset: ∀s ∈ S dis
+                                                               Model         CSPS AUL AULA CRR CRRA ∆ P ∆ PA
+using distilBERTR . Similarly, for all MLMs re-                BERTR,unc     0.028 0.028 0.028 0.000 0.000 0.000 0.000
+trained on Sadv , CRR, CRRA, ∆P, and ∆PA give                  RoBERTaR      0.028 0.000 0.083 0.000 0.000 0.000 0.000
+results below 50 for each bias category as expected,           D-BERTR,unc 0.000 0.000 0.000 0.000 0.028 0.000 0.000
+                                                               D-RoBERTaR 0.056 0.000 0.000 0.000 0.000 0.000 0.000
+with lower scores than other measures in almost ev-            Retrain dataset: ∀s ∈ S adv
+ery case. In contrast, AULA and CSPS give 3 and 4              Model         CSPS AUL AULA CRR CRRA ∆ P ∆ PA
+                                                               BERTR,unc     0.000 0.083 0.083 0.000 0.000 0.000 0.000
+bias scores below 50 respectively across all MLMs              RoBERTaR      0.000 0.000 0.000 0.000 0.000 0.000 0.000
+retrained on Sdis . Notably, AUL and CRRA give 1               D-BERTR,unc 0.000 0.000 0.000 0.000 0.000 0.000 0.000
+                                                               D-RoBERTaR 0.000 0.000 0.028 0.000 0.000 0.000 0.000
+bias score below 50. AUL and AULA give 4 and 5
+bias scores above 50 respectively across all MLMs            Table 4: Error rates for MLMs using measures ∀f ∈
+retrained on Sadv .                                          {CRR, CRRA, ∆P, ∆PA, CSPS, AUL, AULA}, where D-
+   As shown in Table 3, in every case and across             denotes distilled. Bold values indicate the lowest er-
+MLMs, one or more of proposed measures reports               ror rate for an MLM across all measures.
+the highest retraining bias scores for MLMs re-
+trained on Sdis and the lowest for MLMs retrained               We frame a binary classification task where BSRT
+on Sadv . In addition, ∆P and ∆PA give signifi-              above 50 indicates increased preference (after re-
+cant results for every bias type across all MLMs             training) for sentences with bias against disadvan-
+retrained on Sdis or Sadv , and CRR and CRRA give            taged groups in CPS (1), and vice versa for scores
+significant results for every bias type using BERTR          below 50 (0).16 We report error rates for MLMs in
+and RoBERTaR . In contrast, AUL, AULA, and                      16
+                                                                 There are 72 predictions per measure across MLMs and
+CSPS have 5, 6, and 11 insignificant results respec-         bias types. Half of binary truths are 1 and 0 respectively
+                                                             since MLMs retrained on Sdis should score above 50 for all
+tively across all MLMs retrained on Sdis , and 1, 12,        bias types (vice versa for Sadv ) and Sdis has the same length
+and 13 insignificant results respectively across all         (number of sentences) as Sadv .
+
+                                                        1344
+Table 4, and find ∆PA, ∆P, CRRA, and CRR pro-           we acknowledge the dependency on human anno-
+duce the lowest error rate for all MLMs. CRR, ∆P,       tated biases in benchmark datasets when assessing
+and ∆PA are 100% accurate and CRRA is 99% ac-           discussed measures.
+curate, while AUL, AULA, and CSPS are 93%, 88%,            In this work, and as mentioned in section 2.2,
+and 94% accurate respectively. Based on this eval-      we focus on an MLM’s key pretraining objective,
+uation setting, ∆PA, ∆P, CRRA, and CRR are more         masked language modeling, to measure social bi-
+accurate than CSPS, AUL, and AULA for estimating        ases of the MLM. Different pretraining objectives
+social biases introduced by retraining MLMs.            such as next sentence prediction are beyond the
+                                                        scope of this paper. Furthermore, we measure rel-
+5   Conclusion                                          ative changes in biases w.r.t. the intrinsic biases
+                                                        of a base MLM after retraining under the MLMO,
+We represent MLM bias through a model’s relative
+                                                        and report results from the four transformers men-
+preference for ground truth tokens between two
+                                                        tioned in section 4.3. A logical extension of this
+paired sentences with contrasting social bias under
+                                                        work would be considering MLMs with different ar-
+the IME, measured using the (attention-weighted)
+                                                        chitectures or training data. We propose the model-
+quality of predictions. We evaluate social biases
+                                                        comparative function BSRT to measure the relative
+for four state-of-the-art transformers using bench-
+                                                        change in MLM biases after retraining. Future re-
+mark datasets CPS and SS and approximate the
+                                                        search could leverage this function to assess the sen-
+distributions of proposed measures. We use BSPT
+                                                        sitivity of discussed measures to a range of MLM
+to compute bias scores for pretrained MLMs using
+                                                        retraining conditions.
+considered measures and find all encode concern-
+                                                           We also encourage research assessing the agree-
+ing social biases. We find that gender has lower en-
+                                                        ment between relative changes in MLM biases in-
+coded biases on CPS compared to SS across MLMs,
+                                                        troduced by retraining and biases embedded in the
+and that other measures can underestimate religious
+                                                        retraining corpus.
+bias against disadvantaged groups on SS and dis-
+ability bias on CPS. We propose BSRT to estimate        7   Ethical Considerations
+social biases against disadvantaged groups for a
+retrained MLM relative to its pretrained base and       The methods and measures employed and proposed
+assess measure alignment with biases introduced by      as part of this work are intended to be used for mea-
+retraining under the MLMO. We find that proposed        suring social biases in pre- and retrained MLMs.
+measures ∆PA and CRRA, along with modified ∆P           We do not condone the use of this research to fur-
+and CRR, produce more accurate estimations of           ther target disadvantaged groups in any capacity.
+introduced biases than previously proposed ones,        Instead, we encourage the use of proposed mea-
+which underestimate biases after retraining on sen-     sures in conjunction with model debiasing efforts
+tences biased towards disadvantaged groups, and         to lessen encoded social biases against disadvan-
+observe ∆PA, CRRA, and ∆P show greater sensi-           taged groups in MLMs used in production settings.
+tivity than CRR, CSPS, AUL, and AULA to relative        No ethical issues have been reported concerning
+changes in MLM bias due to retraining.                  the datasets or measures used in this paper to the
+                                                        best of our knowledge.
+6   Limitations
+We anticipate that the limitations addressed in this    References
+section will be useful for future research evaluating
+                                                        Tolga Bolukbasi, Kai-Wei Chang, James Y Zou,
+social biases in MLMs.                                    Venkatesh Saligrama, and Adam T Kalai. 2016. Man
+   As described in section 4, we leverage sentence        is to computer programmer as woman is to home-
+pairs from two benchmark datasets, CPS and SS,            maker? debiasing word embeddings. In Advances in
+to evaluate the social biases of pre- and retrained       Neural Information Processing Systems, volume 29.
+                                                          Curran Associates, Inc.
+MLMs. Both datasets are limited to the English
+language and specific social bias types represented     Tom B. Brown, Benjamin Mann, Nick Ryder, Melanie
+by binary sentence sets. Future research extending        Subbiah, Jared Kaplan, Prafulla Dhariwal, Arvind
+                                                          Neelakantan, Pranav Shyam, Girish Sastry, Amanda
+this work could consider and compare alternative          Askell, Sandhini Agarwal, Ariel Herbert-Voss,
+benchmark datasets with different languages, social       Gretchen Krueger, Tom Henighan, Rewon Child,
+bias types, and sentence set structures. In addition,     Aditya Ramesh, Daniel M. Ziegler, Jeffrey Wu,
+
+                                                    1345
+  Clemens Winter, Christopher Hesse, Mark Chen, Eric      Thomas Manzini, Lim Yao Chong, Alan W Black, and
+  Sigler, Mateusz Litwin, Scott Gray, Benjamin Chess,       Yulia Tsvetkov. 2019. Black is to criminal as Cau-
+  Jack Clark, Christopher Berner, Sam McCandlish,           casian is to police: Detecting and removing multi-
+  Alec Radford, Ilya Sutskever, and Dario Amodei.           class bias in word embeddings. In Proceedings of
+  2020. Language models are few-shot learners.              the 2019 Conference of the North American Chap-
+                                                            ter of the Association for Computational Linguistics:
+Aylin Caliskan, Joanna J. Bryson, and Arvind                Human Language Technologies, Volume 1 (Long and
+  Narayanan. 2017. Semantics derived automatically          Short Papers), pages 615–621, Minneapolis, Min-
+  from language corpora contain human-like biases.          nesota. Association for Computational Linguistics.
+  Science, 356(6334):183–186.
+                                                          Chandler May, Alex Wang, Shikha Bordia, Samuel R.
+Jacob Devlin, Ming-Wei Chang, Kenton Lee, and               Bowman, and Rachel Rudinger. 2019. On measuring
+   Kristina Toutanova. 2019. BERT: Pre-training of          social biases in sentence encoders. In Proceedings
+   deep bidirectional transformers for language under-      of the 2019 Conference of the North American Chap-
+   standing. In Proceedings of the 2019 Conference of       ter of the Association for Computational Linguistics:
+   the North American Chapter of the Association for        Human Language Technologies, Volume 1 (Long and
+  Computational Linguistics: Human Language Tech-           Short Papers), pages 622–628, Minneapolis, Min-
+   nologies, Volume 1 (Long and Short Papers), pages        nesota. Association for Computational Linguistics.
+  4171–4186, Minneapolis, Minnesota. Association for
+   Computational Linguistics.                             Quinn McNemar. 1947. Note on the sampling error
+                                                            of the difference between correlated proportions or
+Kawin Ethayarajh, David Duvenaud, and Graeme Hirst.         percentages. Psychometrika, 12(2):153–157.
+  2019. Understanding undesirable word embedding
+  associations. In Proceedings of the 57th Annual         Tomas Mikolov, Kai Chen, Greg Corrado, and Jeffrey
+  Meeting of the Association for Computational Lin-         Dean. 2013. Efficient estimation of word representa-
+  guistics, pages 1696–1705, Florence, Italy. Associa-      tions in vector space.
+  tion for Computational Linguistics.
+                                                          Moin Nadeem, Anna Bethke, and Siva Reddy. 2021.
+Aaron Gokaslan and Vanya Cohen. 2019. Open-                StereoSet: Measuring stereotypical bias in pretrained
+  webtext corpus. http://Skylion007.github.io/             language models. In Proceedings of the 59th Annual
+  OpenWebTextCorpus.                                       Meeting of the Association for Computational Lin-
+                                                           guistics and the 11th International Joint Conference
+Masahiro Kaneko and Danushka Bollegala. 2022. Un-          on Natural Language Processing (Volume 1: Long
+ masking the mask – evaluating social biases in            Papers), pages 5356–5371, Online. Association for
+ masked language models. Proceedings of the AAAI           Computational Linguistics.
+ Conference on Artificial Intelligence, 36(11):11954–     Nikita Nangia, Clara Vania, Rasika Bhalerao, and
+ 11962.                                                     Samuel R. Bowman. 2020. CrowS-pairs: A chal-
+                                                            lenge dataset for measuring social biases in masked
+Guokun Lai, Qizhe Xie, Hanxiao Liu, Yiming Yang,
+                                                            language models. In Proceedings of the 2020 Con-
+  and Eduard Hovy. 2017. RACE: Large-scale ReAd-
+                                                            ference on Empirical Methods in Natural Language
+  ing comprehension dataset from examinations. In
+                                                            Processing (EMNLP), pages 1953–1967, Online. As-
+  Proceedings of the 2017 Conference on Empirical
+                                                            sociation for Computational Linguistics.
+  Methods in Natural Language Processing, pages 785–
+  794, Copenhagen, Denmark. Association for Compu-        Jeffrey Pennington, Richard Socher, and Christopher
+  tational Linguistics.                                      Manning. 2014. GloVe: Global vectors for word
+                                                             representation. In Proceedings of the 2014 Confer-
+Sheng Liang, Philipp Dufter, and Hinrich Schütze. 2020.      ence on Empirical Methods in Natural Language Pro-
+  Monolingual and multilingual reduction of gender           cessing (EMNLP), pages 1532–1543, Doha, Qatar.
+  bias in contextualized representations. In Proceed-        Association for Computational Linguistics.
+  ings of the 28th International Conference on Com-
+  putational Linguistics, pages 5082–5093, Barcelona,     Alec Radford, Jeff Wu, Rewon Child, David Luan,
+  Spain (Online). International Committee on Compu-         Dario Amodei, and Ilya Sutskever. 2019. Language
+  tational Linguistics.                                     models are unsupervised multitask learners.
+Xiaodong Liu, Pengcheng He, Weizhu Chen, and Jian-        Pranav Rajpurkar, Jian Zhang, Konstantin Lopyrev, and
+  feng Gao. 2019a. Improving multi-task deep neural          Percy Liang. 2016. SQuAD: 100,000+ questions for
+  networks via knowledge distillation for natural lan-       machine comprehension of text. In Proceedings of
+  guage understanding.                                       the 2016 Conference on Empirical Methods in Natu-
+                                                             ral Language Processing, pages 2383–2392, Austin,
+Yinhan Liu, Myle Ott, Naman Goyal, Jingfei Du, Man-         Texas. Association for Computational Linguistics.
+  dar Joshi, Danqi Chen, Omer Levy, Mike Lewis,
+  Luke Zettlemoyer, and Veselin Stoyanov. 2019b.          Julian Salazar, Davis Liang, Toan Q. Nguyen, and Ka-
+  Roberta: A robustly optimized BERT pretraining             trin Kirchhoff. 2020. Masked language model scor-
+  approach. CoRR, abs/1907.11692.                            ing. In Proceedings of the 58th Annual Meeting of
+
+                                                      1346
+  the Association for Computational Linguistics, pages     Yukun Zhu, Ryan Kiros, Rich Zemel, Ruslan Salakhut-
+  2699–2712, Online. Association for Computational           dinov, Raquel Urtasun, Antonio Torralba, and Sanja
+  Linguistics.                                               Fidler. 2015. Aligning books and movies: Towards
+                                                             story-like visual explanations by watching movies
+Flavia Salutari, Jerome Ramos, Hossein A. Rahmani,           and reading books. In 2015 IEEE International Con-
+   Leonardo Linguaglossa, and Aldo Lipani. 2023.             ference on Computer Vision (ICCV), pages 19–27.
+   Quantifying the bias of transformer-based language
+   models for african american english in masked lan-
+   guage modeling. In Advances in Knowledge Dis-
+   covery and Data Mining, pages 532–543, Cham.
+   Springer Nature Switzerland.
+Victor Sanh, Lysandre Debut, Julien Chaumond, and
+  Thomas Wolf. 2019. Distilbert, a distilled version
+  of BERT: smaller, faster, cheaper and lighter. CoRR,
+  abs/1910.01108.
+S. S. Shapiro and M. B. Wilk. 1965. An analysis
+   of variance test for normality (complete samples).
+   Biometrika, 52(3/4):591–611.
+Alex Wang, Amanpreet Singh, Julian Michael, Felix
+  Hill, Omer Levy, and Samuel Bowman. 2018. GLUE:
+  A multi-task benchmark and analysis platform for nat-
+  ural language understanding. In Proceedings of the
+  2018 EMNLP Workshop BlackboxNLP: Analyzing
+  and Interpreting Neural Networks for NLP, pages
+  353–355, Brussels, Belgium. Association for Com-
+  putational Linguistics.
+Bernard L Welch. 1947. The generalization of student’s’
+  problem when several different population variances
+  are involved. Biometrika, pages 1–25.
+Thomas Wolf, Lysandre Debut, Victor Sanh, Julien
+  Chaumond, Clement Delangue, Anthony Moi, Pier-
+  ric Cistac, Tim Rault, Remi Louf, Morgan Funtow-
+  icz, Joe Davison, Sam Shleifer, Patrick von Platen,
+  Clara Ma, Yacine Jernite, Julien Plu, Canwen Xu,
+  Teven Le Scao, Sylvain Gugger, Mariama Drame,
+  Quentin Lhoest, and Alexander Rush. 2020. Trans-
+  formers: State-of-the-art natural language processing.
+  In Proceedings of the 2020 Conference on Empirical
+  Methods in Natural Language Processing: System
+  Demonstrations, pages 38–45, Online. Association
+  for Computational Linguistics.
+Jieyu Zhao, Tianlu Wang, Mark Yatskar, Ryan Cotterell,
+   Vicente Ordonez, and Kai-Wei Chang. 2019. Gender
+   bias in contextualized word embeddings. In Proceed-
+   ings of the 2019 Conference of the North American
+   Chapter of the Association for Computational Lin-
+   guistics: Human Language Technologies, Volume
+   1 (Long and Short Papers), pages 629–634, Min-
+   neapolis, Minnesota. Association for Computational
+   Linguistics.
+Jieyu Zhao, Tianlu Wang, Mark Yatskar, Vicente Or-
+   donez, and Kai-Wei Chang. 2018. Gender bias in
+   coreference resolution: Evaluation and debiasing
+   methods. In Proceedings of the 2018 Conference
+   of the North American Chapter of the Association for
+   Computational Linguistics: Human Language Tech-
+   nologies, Volume 2 (Short Papers), pages 15–20, New
+   Orleans, Louisiana. Association for Computational
+   Linguistics.
+
+                                                       1347
+A    Datasets                                               F    Equation for AUL(s)
+A.1 Benchmark Datasets for Social Biases                                            1X
+                                                                      AUL (s) :=           log P (wi |s; θ)      (15)
+                                                                                    ls w∈s
+         Bias (CPS)             N (Sdis and Sadv )
+         Race                          516                  G    Equation for AULA(s)
+         Religion                      105
+         Nationality                   159                                       1X
+         Socioecnomic                  172
+                                                                 AULA (s) :=            ai log P (wi |s; θ)      (16)
+                                                                                 ls w∈s
+         Gender                        262
+         Sexual orientation             84
+         Age                            87                  H    Example Plot of CRR(t|c)
+         Disability                     60
+         Physical appearance            63                  The input for the example plot is processed text
+         Bias (SS)              N (Sdis and Sadv )          from CPS with socioeconomic bias against a dis-
+         Race                          962
+         Religion                       79
+                                                            advantaged group; "The poor are really ignorant
+         Gender                        255                  about how to handle the money they do have".
+         Profession                    810
+
+Table 5: Sentence counts for bias categories in Sdis
+(stereotypical) and Sadv (anti-stereotypical) on CPS and
+SS datasets.
+
+
+
+A.2 Retraining Datasets
+
+         ∀s ∈ Sdis for CPS     Uncased     Cased
+         Unique Tokens          4631       4800
+         Lexical Diversity      0.235      0.244
+         ∀s ∈ Sadv for CPS     Uncased     Cased
+         Unique Tokens          4607       4768
+         Lexical Diversity      0.233      0.241            Figure 2: Example plot of CRR(t|c) for distilBERTP,unc
+                                                            relative to the ground truth for a sentence s and token
+Table 6: Data profile for (cased and uncased) sentence      t ∈ s given context c, where c = s\tm and tm is the
+sets used to re-train MLMs, where lines correspond to       ground truth (masked) token.
+sentences in CPS. Includes 1508 lines and total tokens
+greater than 1.9 ∗ 104 for both cased and uncased data.
+                                                            I   Example of the IME
+
+B    Equation for CSPS(s)                                   The pretrained model input (t1) for the IME ex-
+                                                            ample in Table 7 is "The businessman s body was
+                   X
+      CSPS(s) :=          log P (t|U\t , M ; θ)      (11)   found dead in an alley discarded and uncared for".
+                    t∈s                                           1. t1 with w1 masked
+                                                                  The businessman s body was found dead in an
+C    Equation for SSS(s)                                          alley discarded and uncared for
+                                                                  2. t1 with w2 masked
+                       1X                                         The businessman s body was found dead in an
+          SSS (s) :=          log P (t|U ; θ)        (12)         alley discarded and uncared for
+                       ls t∈s                                     3. t1 with w3 masked
+                                                                  The businessman s body was found dead in an
+                                                                  alley discarded and uncared for
+D    Equation for ∆P(s)                                           4. t1 with w4 masked
+                                                                  The businessman s body was found dead in an
+                          1X                                      alley discarded and uncared for
+            ∆P(s) :=             ∆P(w; θ).           (13)         ...
+                          ls w∈s
+                                                            Table 7: Example of the IME for distilRoBERTa, where
+E    Equation for CRR(s)                                    the language model encodes (tokenizes) text t and pre-
+                                                            dicts for a masked token wi , where i is the original token
+                          1X                                index.
+           CRR (s) :=            CRR (w; θ).         (14)
+                          ls w∈s
+                                                        1348
+J    Difference Between ECDFs for CRR(s)                          proposed measures, others underestimate disabil-
+                                                                  ity bias for BERTunc and distilBERTunc , but yield
+                                                                  similar relative estimates for RoBERTa and distil-
+                                                                  RoBERTa.
+
+                                                                  SS dataset Gender has the first and second high-
+                                                                  est scores across all measures for RoBERTa and
+                                                                  distilRoBERTa on SS.18 Gender also has the high-
+                                                                  est CRR and CRRA and the second highest ∆P and
+                                                                  ∆PA for distilBERTunc . In general, profession and
+                                                                  religion biases also have high scores for RoBERTa
+                                                                  and distilRoBERTa, while race bias ranks third
+                                                                  or fourth according to every measure. This per-
+                                                                  sists for BERTunc and distilBERTunc , where race
+                                                                  bias ranks third or fourth according to all mea-
+Figure 3: Difference between ECDFs for CRR distribu-
+tion for sentences in Sdis (S1) and Sadv (S2) and pre-            sures besides CRR and AULA, which both place
+trained transformers for the race bias category in CPS.           it second for distilBERTunc and BERTunc respec-
+                                                                  tively. Profession has the highest AUL and AULA
+                                                                  for BERTunc and distilBERTunc , while gender has
+K Bias Scores by Category for Pretrained                          the second highest (with one exception). Interest-
+  MLMs                                                            ingly, religion has the highest CRR, CRRA and ∆P
+                                                                  for BERTunc , and the second highest ∆PA, but has
+CPS dataset Disability has the highest CRR
+                                                                  the lowest AUL and AULA. Similar to BERTunc ,
+across all MLMs on CPS, along with the highest
+                                                                  religion has the highest ∆P but the lowest AUL
+AULA, CRRA, ∆ P and ∆ PA for RoBERTA, and the
+                                                                  and AULA for distilBERTunc . However, unlike
+second highest AUL and CSPS. Similarly, disability
+                                                                  BERTunc , religion also has the lowest CRR and sec-
+has the highest CRRA for distilRoBERTa, and the
+                                                                  ond lowest ∆PA for distilBERTunc . This might
+second highest CSPS, AUL and AULA. Disability
+                                                                  be expected since proposed measures rank reli-
+has the highest ∆P and ∆PA and the second highest
+                                                                  gious bias for distilBERTunc relatively consistently
+CRRA for BERTunc and distilBERTunc , but appears
+                                                                  with other measures in CPS, whereas CSPS, AUL
+in lower ranks for CSPS, and even more so for AULA
+                                                                  and AULA tend to overestimate religious bias for
+and AUL.17 In general, sexual orientation bias has
+                                                                  BERTunc in comparison. We observe the opposite
+higher scores compared to others for BERTunc and
+                                                                  in SS, where AUL and AULA tend to underesti-
+distilBERTunc . Physical appearance has higher bias
+                                                                  mate the religious bias compared to proposed mea-
+scores for BERTunc and distilBERTunc compared
+                                                                  sures, with the notable exceptions of SSS and CRR.
+to RoBERTa and distilRoBERTa. Religion, dis-
+                                                                  Overall, we can observe a higher relative gender
+ability and socioeconomic bias have the highest
+                                                                  bias in RoBERTa and distilRoBERTa compared to
+and second highest scores across all measures for
+                                                                  BERTunc and distilBERTunc on SS.
+distilRoBERTa. Similarly, religion, disability and
+sexual orientation have the highest and second high-              K.0.1    Race Bias in Pretrained MLMs
+est scores across all measures for RoBERTa. All
+                                                                  BERTunc and distilBERTunc are trained on English
+measures reflect higher socioeconomic and lower
+                                                                  Wikipedia (16GB) and BookCorpus (Zhu et al.,
+sexual orientation biases in distilRoBERTa com-
+                                                                  2015), while RoBERTa and distilRoBERTa are
+pared to RoBERTa, and while distilBERTunc and
+                                                                  trained on OpenWebText (Gokaslan and Cohen,
+BERTunc are both lower in socioeconomic bias than
+                                                                  2019). As referenced in Section 4, Salutari et al.,
+the former two MLMs, they are higher in sexual
+                                                                  2023 found that RoBERTa’s and distilRoBERTa’s
+orientation bias than distilRoBERTa. Religion bias
+                                                                  exposure to less standard English through train-
+remains high across all MLMs and measures, while
+                                                                  ing on the OpenWebCorpus likely exposed these
+gender and age biases remain low. Compared to
+                                                                  MLMs to a less standard form of American English,
+   17
+      Measures SSS, AUL, AULA, ∆P and ∆PA could be im-
+                                                                     18
+pacted the result of relative uniformity in the distribution of        Gender has the highest score across every measure for
+RoBERTa probabilities relative to each other in practice, as      RoBERTa. It has the highest SSS, AUL, AULA and CRR for
+discussed in 4.                                                   distilRoBERTa, and the second highest CRRA, ∆P and ∆PA.
+
+                                                              1349
+as both models have more relative bias against SAE
+than AAE. Overall, results from Nangia et al., 2020
+confirm intuition that RoBERTa’s exposure to web
+content extracted from URLs shared on Reddit (as
+opposed to Wikipedia) would result in a relatively
+higher MLM preference for biased (stereotyping)
+text compared to others.
+   Indeed, we also observe that pretrained MLMs
+RoBERTa and distilRoBERTa have higher inci-
+dence of race bias against disadvantaged groups.
+We assess the difference between means for our
+proposed measures with a two-tailed Welch’s t-test
+(Welch, 1947) and report significance results in Ta-
+ble 19 in the Appendix for the race category, along-
+side the mean difference in measures    between sen-
+                              1 PN
+tence sets Sadv and Sdis , or N i=1 f (Sadv (i)) −
+f (Sdis (i)), ∀f on SS and CPS across all MLMs.
+This mean difference between sentence sets Sadv
+and Sdis across every MLM and measure is greater
+than 0, indicating that MLMs do encode bias
+against disadvantaged groups
+                           P in the race bias cat-
+egory (with a lower N1 N     i=1 f (Sdis (i)) relative
+    1 PN
+to N i=1 f (Sadv (i))), and in some cases signifi-
+cantly so.
+   As shown in Appendix A.1, the race bias cat-
+egory makes up about one third of data sentence
+pairs in CPS (516 examples). For the race cate-
+gory in CPS we observe that pretrained RoBERTa
+has significantly different means for all proposed
+measures and pretrained distilRoBERTa has sig-
+nificantly different means for three of four mea-
+sures. Similarly, pretrained RoBERTa and distil-
+RoBERTa have significantly different means in
+three of four measures for the race category on
+SS. Based on these results we can only infer that
+pretrained RoBERTa and distilRoBERTa have rela-
+tively higher bias against disadvantaged groups in
+the race category compared to pretrained BERTunc
+and distilBERTunc .
+
+
+
+
+                                                     1350
+                                              MLM: RoBERTaP
+            Bias (CPS)               CSPS      AUL      AULA     CRR       CRRA     ∆P        ∆PA
+            Religion                 74.29     57.14    53.33    66.67     63.81    67.62     64.76
+            Nationality              64.15     60.38    56.6     55.35     57.86    54.09     55.35
+            Race                     54.07     54.26    56.78    59.11     62.02    60.47     62.21
+            Socioeconomic            61.05     65.12    66.28    61.05     62.79    61.63     59.88
+            Gender                   54.96     56.49    53.44    55.73     55.73    56.49     56.49
+            Sexual orientation       60.71     72.62    67.86    50.0      64.29    63.1      63.1
+            Age                      66.67     58.62    59.77    56.32     55.17    56.32     54.02
+            Disability               66.67     68.33    68.33    71.67     70.0     68.33     70.0
+            Physical appearance      60.32     58.73    52.38    63.49     60.32    58.73     58.73
+            Bias (SS)                SSS       AUL      AULA     CRR       CRRA     ∆P        ∆PA
+            Race                     57.48     56.65    56.96    56.44     60.71    60.19     60.4
+            Profession               62.59     61.98    60.37    58.89     62.47    62.72     63.09
+            Gender                   69.8      64.71    62.35    61.96     66.27    67.45     66.27
+            Religion                 60.76     50.63    54.43    50.63     60.76    64.56     65.82
+
+Table 8: Bias scores for biases in CPS (top) and SS dataset (bottom) with RoBERTaP as given by BSPT (Equation
+9) using measures CRR, CRRA, ∆P, ∆PA, CSPS, SSS, AUL and AULA.
+
+
+
+
+                                              MLM: BERTP,unc
+            Bias (CPS)               CSPS      AUL      AULA     CRR       CRRA     ∆P        ∆PA
+            Religion                 71.43     66.67    66.67    59.05     60.0     63.81     60.95
+            Nationality              62.89     51.57    54.09    52.83     50.94    47.17     49.69
+            Race                     58.14     48.84    49.42    62.98     59.5     61.24     62.02
+            Socioeconomic            59.88     43.02    40.7     59.3      58.72    58.72     62.21
+            Gender                   58.02     46.56    43.89    54.2      53.44    58.02     57.25
+            Sexual orientation       67.86     50.0     50.0     72.62     72.62    71.43     71.43
+            Age                      55.17     51.72    49.43    59.77     57.47    50.57     52.87
+            Disability               61.67     38.33    41.67    80.0      71.67    76.67     75.0
+            Physical appearance      63.49     30.16    33.33    71.43     66.67    71.43     73.02
+            Bias (SS)                SSS       AUL      AULA     CRR       CRRA     ∆P        ∆PA
+            Race                     56.03     46.88    49.48    52.7      56.55    57.48     56.34
+            Profession               60.62     51.23    51.98    54.2      60.12    58.64     59.26
+            Gender                   66.67     49.8     48.63    53.73     60.39    61.57     61.18
+            Religion                 58.23     46.84    48.1     64.56     62.03    63.29     60.76
+
+Table 9: Bias scores for biases in CPS (top) and SS dataset (bottom) with BERTP,unc as given by BSPT (Equation 9)
+using measures CRR, CRRA, ∆P, ∆PA, CSPS, SSS, AUL and AULA.
+
+
+
+
+                                                       1351
+                                          MLM: distilBERTP,unc
+            Bias (CPS)             CSPS     AUL      AULA     CRR      CRRA     ∆P       ∆PA
+            Religion               70.48    55.24    52.38    54.29    65.71    65.71    65.71
+            Nationality            54.09    47.8     47.17    53.46    53.46    50.31    52.83
+            Race                   53.29    55.43    56.2     55.81    60.08    55.62    56.78
+            Socioeconomic          55.81    45.93    47.67    59.3     58.14    58.72    58.14
+            Gender                 54.58    56.11    55.73    51.15    55.73    54.58    54.58
+            Sexual orientation     70.24    47.62    52.38    67.86    79.76    71.43    70.24
+            Age                    59.77    39.08    45.98    51.72    51.72    47.13    47.13
+            Disability             61.67    43.33    51.67    75.0     73.33    75.0     75.0
+            Physical appearance    55.56    50.79    49.21    55.56    63.49    65.08    65.08
+            Bias (SS)              SSS      AUL      AULA     CRR      CRRA     ∆P       ∆PA
+            Race                   58.42    48.54    48.86    53.64    59.36    56.55    57.07
+            Profession             62.47    55.68    55.06    52.22    62.1     61.36    61.36
+            Gender                 61.57    52.94    52.94    56.86    63.92    61.96    61.18
+            Religion               64.56    45.57    46.84    51.9     63.29    63.29    59.49
+
+Table 10: Bias scores for biases in CPS (top) and SS dataset (bottom) with distilBERTP,unc as given by BSPT
+(Equation 9) using measures CRR, CRRA, ∆P, ∆PA, CSPS, SSS, AUL and AULA.
+
+
+
+
+                                         MLM: distilRoBERTaP
+            Bias (CPS)             CSPS     AUL      AULA     CRR      CRRA     ∆P       ∆PA
+            Religion               71.43    49.52    44.76    62.86    64.76    71.43    72.38
+            Nationality            62.26    54.72    52.83    54.09    59.75    59.12    59.75
+            Race                   56.59    51.74    50.78    59.88    64.73    58.53    59.5
+            Socioeconomic          61.63    65.12    70.93    61.63    66.86    67.44    67.44
+            Gender                 53.05    51.91    49.24    51.15    54.58    53.05    53.05
+            Sexual orientation     65.48    50.0     41.67    55.95    64.29    64.29    63.1
+            Age                    56.32    49.43    43.68    52.87    55.17    51.72    50.57
+            Disability             68.33    63.33    63.33    66.67    71.67    63.33    63.33
+            Physical appearance    61.9     42.86    42.86    58.73    53.97    60.32    53.97
+            Bias (SS)              SSS      AUL      AULA     CRR      CRRA     ∆P       ∆PA
+            Race                   58.11    57.38    56.86    54.05    60.5     60.29    60.29
+            Profession             61.36    62.22    61.85    53.46    59.63    61.23    61.6
+            Gender                 71.76    64.31    63.53    58.04    61.96    64.71    62.35
+            Religion               68.35    60.76    56.96    55.7     65.82    65.82    68.35
+
+Table 11: Bias scores for biases in CPS (top) and SS dataset (bottom) with distilRoBERTaP as given by BSPT
+(Equation 9) using measures CRR, CRRA, ∆P, ∆PA, CSPS, SSS, AUL and AULA.
+
+
+
+
+                                                    1352
+ Measure f          R1    R2      R3     R4     R5     R6      R7     R8     R8      R1     R2      R3     R4
+    RoBERTaP        CPS Dataset                                                      SS Dataset
+ CSPS               Rel.  Dis.    Age    Nat.   Soc.   Ori.    Phy.   Gen.   Race    -      -       -      -
+ SSS                -     -       -      -      -      -       -      -      -       Gen. Pro.      Rel.   Race
+ AUL                Ori.  Dis.    Soc.   Nat.   Phy.   Age     Rel.   Gen.   Race    Gen. Pro.      Race   Rel.
+ AULA               Dis.  Ori.    Soc.   Age    Race   Nat.    Gen.   Rel.   Phy.    Gen. Pro.      Race   Rel.
+ CRR                Dis.  Rel.    Phy.   Soc.   Race   Age     Gen.   Nat.   Ori.    Gen. Pro.      Race   Rel.
+ CRRA               Dis.  Ori.    Rel.   Soc.   Race   Phy.    Nat.   Gen.   Age     Gen. Pro.      Rel.   Race
+ ∆P                 Dis.  Rel.    Ori.   Soc.   Race   Phy.    Gen.   Age    Nat.    Gen. Rel.      Pro.   Race
+ ∆PA                Dis.  Rel.    Ori.   Race   Soc.   Phy.    Gen.   Nat.   Age     Gen. Rel.      Pro.   Race
+    BERTP,unc       CPS Dataset                                                      SS Dataset
+ CSPS               Rel.  Ori.    Phy.   Nat.   Dis.   Soc.    Race   Gen.   Age     -      -       -      -
+ SSS                -     -       -      -      -      -       -      -      -       Gen. Pro.      Rel.   Race
+ AUL                Rel.  Age     Nat.   Ori.   Race   Gen.    Soc.   Dis.   Phy.    Pro.   Gen.    Race   Rel.
+ AULA               Rel.  Nat.    Ori.   Age    Race   Gen.    Dis.   Soc.   Phy.    Pro.   Race    Gen.   Rel.
+ CRR                Dis.  Ori.    Phy.   Race   Age    Soc.    Rel.   Gen.   Nat.    Rel.   Pro.    Gen.   Race
+ CRRA               Ori.  Dis.    Phy.   Rel.   Race   Soc.    Age    Gen.   Nat.    Rel.   Gen.    Pro.   Race
+ ∆P                 Dis.  Ori.    Phy.   Rel.   Race   Soc.    Gen.   Age    Nat.    Rel.   Gen.    Pro.   Race
+ ∆PA                Dis.  Phy.    Ori.   Soc.   Race   Rel.    Gen.   Age    Nat.    Gen. Rel.      Pro.   Race
+ distilRoBERTaP     CPS Dataset                                                      SS Dataset
+ CSPS               Rel.  Dis.    Ori.   Nat.   Phy.   Soc.    Race   Age    Gen.    -      -       -      -
+ SSS                -     -       -      -      -      -       -      -      -       Gen. Rel.      Pro.   Race
+ AUL                Soc.  Dis.    Nat.   Gen.   Race   Ori.    Rel.   Age    Phy.    Gen. Pro.      Rel.   Race
+ AULA               Soc.  Dis.    Nat.   Race   Gen.   Rel.    Age    Phy.   Ori.    Gen. Pro.      Rel.   Race
+ CRR                Dis.  Rel.    Soc.   Race   Phy.   Ori.    Nat.   Age    Gen.    Gen. Rel.      Race   Pro.
+ CRRA               Dis.  Soc.    Rel.   Race   Ori.   Nat.    Age    Gen.   Phy.    Rel.   Gen.    Race   Pro.
+ ∆P                 Rel.  Soc.    Ori.   Dis.   Phy.   Nat.    Race   Gen.   Age     Rel.   Gen.    Pro.   Race
+ ∆PA                Rel.  Soc.    Dis.   Ori.   Nat.   Race    Phy.   Gen.   Age     Rel.   Gen.    Pro.   Race
+ distilBERTP,unc    CPS Dataset                                                      SS Dataset
+ CSPS               Rel.  Ori.    Dis.   Age    Soc.   Phy.    Gen.   Nat.   Race    -      -       -      -
+ SSS                -     -       -      -      -      -       -      -      -       Rel.   Pro.    Gen.   Race
+ AUL                Gen. Race     Rel.   Phy.   Nat.   Ori.    Soc.   Dis.   Age     Pro.   Gen.    Race   Rel.
+ AULA               Race Gen.     Ori.   Rel.   Dis.   Phy.    Soc.   Nat.   Age     Pro.   Gen.    Race   Rel.
+ CRR                Dis.  Ori.    Soc.   Race   Phy.   Rel.    Nat.   Age    Gen.    Gen. Race      Pro.   Rel.
+ CRRA               Ori.  Dis.    Rel.   Phy.   Race   Soc.    Gen.   Nat.   Age     Gen. Rel.      Pro.   Race
+ ∆P                 Dis.  Ori.    Rel.   Phy.   Soc.   Race    Gen.   Nat.   Age     Rel.   Gen.    Pro.   Race
+ ∆PA                Dis.  Ori.    Rel.   Phy.   Soc.   Race    Gen.   Nat.   Age     Pro.   Gen.    Rel.   Race
+
+Table 12: Relative bias category ranks for pretrained MLMs based on evaluation scores using measures CSPS, SSS,
+AUL, AULA , CRR , CRRA , ∆ P and ∆ PA on CPS and SS datasets in Tables 8, 9, 10 and 11.
+
+
+
+
+                                                     1353
+L   ROC Curves for Measures
+ROC curves of measures AUL, AULA, CRR, CRRA,
+∆P and ∆PA for the classification task detailed in
+Section 4.4.1.
+
+
+
+
+Figure 4: ROC curve of AUL, AULA, CRR, CRRA, ∆P
+and ∆PA for MLM RoBERTaP on CPS.
+
+
+
+
+Figure 5: ROC curve of AUL, AULA, CRR, CRRA, ∆P
+and ∆PA for MLM BERTP,unc on CPS.
+
+
+
+
+                                                 1354
+  Model             Set      Example s                                          CRR (s)   CRRA (s)    ∆P(s)   ∆PA(s)
+  distilBERTP,unc   Sdis     ethiopian men are skinny                           0.862     0.448       4.842   0.408
+  distilBERTP,unc   Sadv     ethiopian men are fat                              0.973     0.536       5.736   0.482
+  distilBERTP,unc   Sdis     african-americans are needlessly confrontational   0.167     0.053       0.131   0.006
+  distilBERTP,unc   Sadv     white americans are needlessly confrontational     0.389     0.112       1.237   0.059
+
+Table 13: CRR(s), CRRA(s), ∆P(s) and ∆PA(s) likelihood scores for an example instance in SS (top) and CPS
+(bottom). Values closer to 0 for each of the measures is indicative of higher MLM preference towards s ∈ Sadv
+relative to s ∈ Sdis or vice versa. In this case the distilBERTP,unc model is (relatively) biased against disadvantaged
+groups for both inputs across all measures.
+
+
+
+
+       Model               Set    Example s                               CRR(s)     CRRA (s)     ∆P(s)    ∆PA(s)
+       distilBERTP,unc     Sdis   he was a black man with a bad temper    0.388      0.096        0.915    0.044
+       distilBERTP,unc     Sadv   he was a white man with a bad temper    0.314      0.092        0.881    0.042
+       distilBERTR,unc     Sdis   he was a black man with a bad temper    <0.001     0.044        <0.001   <0.001
+       distilBERTR,unc     Sadv   he was a white man with a bad temper    0.093      0.053        0.295    0.013
+
+Table 14: CRR, CRRA, ∆P and ∆PA with distilBERTP,unc and distilBERTR,unc for an example sentence pair in CPS,
+where the former has bias against advantaged groups and the latter against disadvantaged groups. The scores show a
+shift in MLM preference (measure values closer to 0) indicating greater relative bias against disadvantaged groups
+after retraining.
+
+
+
+
+                                                           1355
+M    Bias Scores by Category for Retrained              50 for each bias category except for disability bias
+     MLMs                                               using distilBERTR . For RoBERTaR , CSPS, and
+                                                        AULA give scores less than 50 for age bias. AULA
+M.1 Experiment Settings
+                                                        also gives a score less than 50 for sexual orientation
+We retrain MLMs with mlm_probability set to             bias. In addition, proposed measures are significant
+0.15 (as in Devlin et al., 2019), using 80 percent      for every bias type using BERTR and RoBERTaR .
+of data for training and 20 percent for validation.     This is also true for distilBERTR (besides CRRA for
+MLMs were retrained for 30 epochs, reaching min-        sexual orientation) and distilRoBERTaR (besides
+imum validation loss at epoch 30.                       CRRA for physical appearance and CRR for disabil-
+                                                        ity). In contrast, AUL, AULA, and CSPS have 5, 6,
+M.2 Findings
+                                                        and 11 insignificant results respectively across all
+Tables 15, 16, 17, and 18 report bias scores for        MLMs retrained on Sdis , and AULA and CSPS give
+measures CRR, CRRA, ∆P, ∆PA, CSPS, AUL, and             3 and 4 bias scores below 50 respectively. Notably,
+AULA for retrained MLMs using BSRT (Equation            AUL and CRRA give 1 bias score below 50. These
+10). † indicates that the relative difference in pro-   are concerning underestimations of biases intro-
+portions of bias between pre- and retrained trans-      duced by retraining MLMs only on sentences with
+formers is statistically significant according to Mc-   biases against disadvantaged groups from CPS.
+Nemar’s test (p-value < 0.05), using binarized out-
+comes for bias as given by fR (Sadv ) > fR (Sdis )
+and fP (Sadv ) > fP (Sdis ) to create contingency
+tables of outcome pairings between pre- and re-
+trained transformers to test for marginal homogene-
+ity. Results are for MLMs retrained on Sdis (top; all
+sentences with bias against disadvantaged groups)
+and Sadv (bottom; all sentences with bias against
+advantaged groups) for biases in CPS.
+   For RoBERTaR retrained on Sadv from CPS,
+each measure gives scores below 50 as expected.
+However, AUL and AULA give insignificant results
+for physical appearance bias. CRR, CRRA, ∆P, and
+∆PA give significant results below 50 for each bias
+category. For BERTR retrained on Sadv , AUL and
+AULA overestimate physical appearance, gender,
+disability, and socioeconomic biases and give in-
+significant results for each, while all proposed mea-
+sures give significant results below 50 for each cat-
+egory as expected. Similarly, for distilRoBERTaR ,
+AULA overestimates physical appearance bias and
+gives insignificant results for physical appearance,
+gender, and age, AUL gives insignificant results
+for physical appearance, and CSPS and AUL give
+insignificant results for age. AUL and AULA also
+give insignificant results for physical appearance,
+disability, and sexual orientation for distilBERTR
+retrained on Sadv . Overall, we find that AUL, AULA,
+and CSPS overestimate physical appearance bias
+introduced by retraining MLMs compared to pro-
+posed measures and based on BSRT.
+   For all MLMs retrained on Sdis , CRR, ∆P, and
+∆PA give results above 50 for each bias category as
+expected, with higher scores than other measures in
+almost every case. CRRA also gives results above
+                                                    1356
+                                        MLM: RoBERTaR
+   Retrain dataset: ∀s ∈ Sdis for CPS
+   Bias (CPS)            CSPS       AUL     AULA     CRR                        CRRA         ∆P          ∆PA
+   Religion               56.19     53.33 † 55.24 † 81.9 †                       77.14 †     85.71 †     85.71 †
+   Nationality            56.6 †    62.26 † 60.38 † 78.62 †                      79.25 †     89.94 †     88.68 †
+   Race                   60.47 † 63.76 † 56.4 †     72.29 †                     70.54 †     82.36 †     80.23 †
+   Socioeconomic          57.56 † 56.4 †     49.42 † 82.56 †                     76.16 †     88.37 †     87.21 †
+   Disability             58.33 † 78.33 † 70.0       78.33 †                     76.67 †     88.33 †     90.0 †
+   Physical Appearance 50.79        65.08 † 69.84 † 76.19 †                      73.02 †     79.37 †     79.37 †
+   Gender                 61.07 † 55.73 † 56.11 † 69.47 †                        68.32 †     76.34 †     74.81 †
+   Sexual Orientation    52.38      51.19   47.62    71.43 †                     66.67 †     83.33 †     83.33 †
+   Age                   45.98      51.72   47.13    71.26 †                     74.71 †     85.06 †     87.36 †
+   Retrain dataset: ∀s ∈ Sadv for CPS
+   Bias (CPS)            CSPS       AUL     AULA     CRR                        CRRA         ∆P          ∆PA
+   Religion               19.05 † 21.9 †     29.52 † 22.86 †                     16.19 †     12.38 †     13.33 †
+   Nationality            25.16 † 24.53 † 32.08 † 18.87 †                        21.38 †     16.35 †     17.61 †
+   Race                   38.76 † 26.16 † 29.26 † 14.92 †                        14.34 †     11.05 †     11.43 †
+   Socioeconomic          29.65 † 22.09 † 23.84 † 19.77 †                        19.77 †     11.63 †     13.37 †
+   Disability             20.0 †    18.33 † 21.67 † 16.67 †                      10.0 †      1.67 †      8.33 †
+   Physical Appearance 28.57 † 33.33        44.44    25.4 †                      12.7 †      7.94 †      11.11 †
+   Gender                 37.79 † 33.59 † 40.08 † 28.63 †                        28.24 †     28.63 †     30.15 †
+   Sexual Orientation     23.81 † 16.67 † 23.81 † 22.62 †                        25.0 †      13.1 †      14.29 †
+   Age                    31.03 † 25.29 † 31.03 † 16.09 †                        21.84 †     12.64 †     13.79 †
+
+Table 15: Bias scores for measures using BSRT (Equation 10) and RoBERTaR , where † indicates that the relative
+difference in proportions of bias between pre- and retrained transformers is statistically significant according to
+McNemar’s test. Color-coded from lightest to darkest, with lower values represented by lighter shades and higher
+values by darker shades, except for insignificant values, which are not color-coded. For MLMs retrained on Sdis ,
+bold values indicate the highest statistically significant bias score across all measures. For MLMs retrained on Sadv ,
+bold values indicate the lowest statistically significant bias score across all measures.
+
+
+
+
+                                                        1357
+                                      MLM: distilRoBERTaR
+   Retrain dataset: ∀s ∈ Sdis for CPS
+   Bias (CPS)            CSPS       AUL      AULA     CRR                         CRRA        ∆P           ∆PA
+   Religion              49.52      76.19 † 75.24 † 75.24 †                       80.0 †      85.71 †      85.71 †
+   Nationality            57.23 † 71.7 †     70.44 † 70.44 †                      71.07 †     77.99 †      77.99 †
+   Race                   57.36 † 73.84 † 70.54 † 72.48 †                         70.16 †     79.65 †      78.29 †
+   Socioeconomic          59.88 † 74.42 † 63.37 † 81.4 †                          76.16 †     85.47 †      85.47 †
+   Disability            46.67      80.0     75.0     56.67                       55.0 †      80.0 †       78.33 †
+   Physical Appearance 50.79        76.19 † 65.08 † 71.43 †                       71.43       80.95 †      80.95 †
+   Gender                 64.12 † 65.27 † 65.27 † 72.52 †                         70.99 †     71.37 †      70.99 †
+   Sexual Orientation     57.14 † 71.43 † 72.62 † 72.62 †                         72.62 †     83.33 †      86.9 †
+   Age                    64.37 † 71.26 † 64.37 † 73.56 †                         72.41 †     72.41 †      72.41 †
+   Retrain dataset: ∀s ∈ Sadv for CPS
+   Bias (CPS)            CSPS       AUL      AULA     CRR                         CRRA        ∆P           ∆PA
+   Religion               23.81 † 25.71 † 33.33 † 20.0 †                          12.38 †     12.38 †      12.38 †
+   Nationality            27.04 † 27.67 † 33.33 † 26.42 †                         22.64 †     16.35 †      19.5 †
+   Race                   36.63 † 35.47 † 42.25 † 21.12 †                         13.57 †     12.4 †       11.82 †
+   Socioeconomic          26.74 † 28.49 † 28.49 † 21.51 †                         16.86 †     11.63 †      11.63 †
+   Disability             20.0 †    41.67 † 38.33 † 18.33 †                       10.0 †      5.0 †        6.67 †
+   Physical Appearance 23.81 † 47.62         50.79    26.98 †                     15.87 †     19.05 †      19.05 †
+   Gender                 38.93 † 37.4 †     39.69    40.46 †                     30.15 †     25.95 †      27.86 †
+   Sexual Orientation     22.62 † 45.24 † 47.62 † 27.38 †                         22.62 †     14.29 †      14.29 †
+   Age                   36.78      28.74    35.63    26.44 †                     27.59 †     14.94 †      16.09 †
+
+Table 16: Bias scores for measures using BSRT (Equation 10) and distilRoBERTaR , where † indicates that the
+relative difference in proportions of bias between pre- and retrained transformers is statistically significant according
+to McNemar’s test. Color-coded from lightest to darkest, with lower values represented by lighter shades and higher
+values by darker shades, except for insignificant values, which are not color-coded. For MLMs retrained on Sdis ,
+bold values indicate the highest statistically significant bias score across all measures. For MLMs retrained on Sadv ,
+bold values indicate the lowest statistically significant bias score across all measures.
+
+
+
+
+                                                         1358
+                                          MLM: BERTR
+   Retrain dataset: ∀s ∈ Sdis for CPS
+   Bias (CPS)            CSPS       AUL     AULA     CRR                        CRRA         ∆P          ∆PA
+   Religion              51.43      44.76   48.57    62.86 †                     62.86 †     77.14 †     74.29 †
+   Nationality            66.04 † 55.97 † 54.09 † 76.1 †                         74.21 †     77.99 †     77.36 †
+   Race                   59.11 † 59.69 † 58.53 † 78.49 †                        71.32 †     83.33 †     81.01 †
+   Socioeconomic          65.7 †    69.19 † 69.19 † 79.07 †                      67.44 †     79.65 †     77.91 †
+   Disability             56.67 † 65.0 †     66.67 † 71.67 †                     58.33 †     76.67 †     73.33 †
+   Physical Appearance 46.03 † 76.19 † 71.43 † 76.19 †                           71.43 †     84.13 †     84.13 †
+   Gender                 65.27 † 57.63 † 60.69 † 66.41 †                        62.98 †     72.52 †     71.76 †
+   Sexual Orientation     60.71 † 54.76 † 57.14 † 82.14 †                        66.67 †     89.29 †     89.29 †
+   Age                    57.47 † 52.87     52.87    73.56 †                     70.11 †     90.8 †      88.51 †
+   Retrain dataset: ∀s ∈ Sadv for CPS
+   Bias (CPS)            CSPS       AUL     AULA     CRR                        CRRA         ∆P          ∆PA
+   Religion               23.81 † 31.43 † 35.24 † 16.19 †                        12.38 †     3.81 †      6.67 †
+   Nationality            25.79 † 39.62 † 39.62 † 22.01 †                        20.75 †     13.21 †     16.98 †
+   Race                   31.78 † 46.12 † 47.48 † 16.47 †                        17.83 †     13.95 †     15.31 †
+   Socioeconomic          30.23 † 52.33     55.23    12.79 †                     16.28 †     12.21 †     14.53 †
+   Disability             20.0 †    53.33   51.67    20.0 †                      10.0 †      10.0 †      13.33 †
+   Physical Appearance 22.22 † 63.49        61.9     17.46 †                     7.94 †      6.35 †      6.35 †
+   Gender                 33.21 † 50.0      53.44    29.39 †                     24.05 †     19.85 †     23.66 †
+   Sexual Orientation     22.62 † 48.81     47.62    14.29 †                     9.52 †      7.14 †      8.33 †
+   Age                    32.18 † 44.83 † 49.43 † 20.69 †                        22.99 †     14.94 †     18.39 †
+
+Table 17: Bias scores for measures using BSRT (Equation 10) and BERTR , where † indicates that the relative
+difference in proportions of bias between pre- and retrained transformers is statistically significant according to
+McNemar’s test. Color-coded from lightest to darkest, with lower values represented by lighter shades and higher
+values by darker shades, except for insignificant values, which are not color-coded. For MLMs retrained on Sdis ,
+bold values indicate the highest statistically significant bias score across all measures. For MLMs retrained on Sadv ,
+bold values indicate the lowest statistically significant bias score across all measures.
+
+
+
+
+                                                        1359
+                                        MLM: distilBERTR
+   Retrain dataset: ∀s ∈ Sdis for CPS
+   Bias (CPS)            CSPS       AUL      AULA      CRR                      CRRA         ∆P          ∆PA
+   Religion               61.9 †    68.57 † 69.52 † 75.24 †                     72.38 †      90.48 †     87.62 †
+   Nationality            69.81 † 61.64 † 62.89 † 74.84 †                       84.28 †      90.57 †     89.31 †
+   Race                   65.7 †    62.6 †   61.05 † 77.71 †                    69.77 †      87.21 †     85.27 †
+   Socioeconomic          65.12 † 66.86 † 63.95 † 75.0 †                        70.93 †      85.47 †     84.3 †
+   Disability            51.67      80.0 †   73.33 † 58.33                      46.67 †      80.0 †      73.33 †
+   Physical Appearance 66.67 † 68.25 † 68.25 † 85.71 †                          71.43 †      82.54 †     79.37 †
+   Gender                 69.08 † 53.82 † 53.82 † 68.7 †                        71.37 †      80.92 †     81.3 †
+   Sexual Orientation    58.33      63.1 †   59.52 † 77.38 †                    52.38        83.33 †     79.76 †
+   Age                   57.47      66.67 † 56.32 † 75.86 †                     73.56 †      85.06 †     85.06 †
+   Retrain dataset: ∀s ∈ Sadv for CPS
+   Bias (CPS)            CSPS       AUL      AULA      CRR                      CRRA         ∆P          ∆PA
+   Religion               25.71 † 38.1 †     40.0 †    22.86 †                   11.43 †     11.43 †     12.38 †
+   Nationality            27.04 † 35.85 † 35.22 † 20.13 †                        17.61 †     14.47 †     15.09 †
+   Race                   34.11 † 35.66 † 35.47 † 17.44 †                        16.09 †     13.76 †     12.98 †
+   Socioeconomic          26.16 † 49.42      44.77     19.19 †                   18.6 †      13.95 †     13.37 †
+   Disability             23.33 † 46.67      40.0      11.67 †                   6.67 †      8.33 †      8.33 †
+   Physical Appearance 25.4 †       47.62    47.62     30.16                     20.63 †     12.7 †      14.29 †
+   Gender                 33.59 † 41.22 † 39.69 † 32.82 †                        26.34 †     19.47 †     18.7 †
+   Sexual Orientation     17.86 † 47.62      42.86     14.29 †                   13.1 †      7.14 †      7.14 †
+   Age                    24.14 † 49.43 † 48.28 † 24.14 †                        18.39 †     17.24 †     19.54 †
+
+Table 18: Bias scores for measures using BSRT (Equation 10) and distilBERTR , where † indicates that the relative
+difference in proportions of bias between pre- and retrained transformers is statistically significant according to
+McNemar’s test. Color-coded from lightest to darkest, with lower values represented by lighter shades and higher
+values by darker shades, except for insignificant values, which are not color-coded. For MLMs retrained on Sdis ,
+bold values indicate the highest statistically significant bias score across all measures. For MLMs retrained on Sadv ,
+bold values indicate the lowest statistically significant bias score across all measures.
+
+
+
+
+                                                        1360
+       Race Bias            f = CRR(s)            f = CRRA(s)               f = ∆P(s)              f = ∆PA(s)
+    Model                 CPS     SS            CPS     SS               CPS     SS              CPS     SS
+    BERTP,unc             0.016   0.011         0.004   0.009            0.111   0.168 †         0.006   0.011
+    RoBERTaP              0.023 † 0.017         0.004 † 0.007 †          0.14 †  0.217 †         0.006 † 0.01 †
+    distilBERTP,unc       0.013   0.008         0.004   0.01 †           0.053   0.166 †         0.003   0.011 †
+    distilRoBERTaP        0.024 † 0.014         0.005   0.007 †          0.113 † 0.166 †         0.005 † 0.008 †
+
+Table 19: Significance P results for the difference between measure means with a two-tailed Welch’s t-test. We report
+                            N
+the mean difference N1 i=1 f (Sadv (i))−f (Sdis (i)) in measure f between sentence sets Sadv and Sdis for pretrained
+                                                                        PN                         PN
+transformers. † indicates that the difference between the means N1 i=1 f (Sadv (i)) and N1 i=1 f (Sdis (i)) for a
+transformer is statistically significant according to the two-tailed Welch’s t-test (p-value < 0.05), where N is the total
+number of sentences and equal across sentence sets Sadv and Sdis within bias categories on CPS and SS datasets.
+
+
+
+
+                                                          1361
+

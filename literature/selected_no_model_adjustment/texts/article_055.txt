@@ -1,0 +1,1263 @@
+          I am a Strange Dataset: Metalinguistic Tests for Language Models
+
+       Tristan Thrush§ , Jared Moore§ , Miguel Monares†‡ , Christopher Potts§ , Douwe Kiela§¶
+                § Stanford University; † UC San Diego; ‡ Playtest AI; ¶ Contextual AI
+                                       tthrush@stanford.edu
+
+
+
+
+                          Abstract                                                                                 
+                                                                                       if someone asks whether
+        Statements involving metalinguistic self-                               P No. this sentence has a capital 
+        reference (“This paper has six sections.”)                                     letter, the correct answer is
+        are prevalent in many domains. Can current
+        large language models (LLMs) handle such                  Figure 1: An example highlighting the challenge pre-
+        language? In this paper, we present “I am a               sented by our task. All models that we tested on our
+        Strange Dataset”, a new dataset for addressing            dataset are close to chance-level.
+        this question. There are two subtasks: gener-
+        ation and verification. In generation, models
+        continue statements like “The penultimate                 or even consciousness (Hofstadter, 2007; Baars,
+        word in this sentence is” (where a correct                1993). Of course, self-reference is also pervasive in
+        continuation is “is”). In verification, models            how we communicate: at least one paper you read
+        judge the truth of statements like “The
+                                                                  today is bound to contain “In this paper” (Thrush
+        penultimate word in this sentence is sentence.”
+        (false). We also provide minimally different              et al., 2024).
+        metalinguistic non-self-reference examples                   In this paper, we focus on metalinguistic self-
+        to complement the main dataset by probing                 reference, the complex kind of self-reference in
+        for whether models can handle metalinguistic              which language is used to make claims about it-
+        language at all. The dataset is hand-crafted by           self, as in “This sentence has five words” and “This
+        experts and validated by non-expert annotators.           paper has six sections”.1 Using such language in-
+        We test a variety of open-source LLMs (7B
+                                                                  volves reasoning about metalinguistic properties
+        to 70B parameters) as well as closed-source
+        LLMs through APIs. All models perform close               (counting words, naming parts of speech, etc.) and
+        to chance across both subtasks and even on                resolving self-reference. Humans generally have
+        the non-self-referential metalinguistic control           no trouble with such language, and may even enjoy
+        data, though we find some steady improvement              its playful and sometimes paradoxical nature (Hof-
+        with model scale. GPT 4 is the only model to              stadter, 1979, 1985, 2007).
+        consistently do significantly better than chance,            Recently, Large Language Models (LLMs) have
+        and it is still only in the 60% range, while our
+                                                                  demonstrated striking cognitive capabilities (Rad-
+        untrained human annotators score well in the
+        89–93% range. The dataset and evaluation                  ford et al., 2019; Brown et al., 2020; OpenAI, 2022,
+        toolkit are available at https://github.com/              2023; Anthropic, 2023; Touvron et al., 2023; Jiang
+        TristanThrush/i-am-a-strange-dataset.                     et al., 2023; Zhu et al., 2023). But do they have
+                                                                  the same mastery over metalinguistic self-reference
+   1    Introduction                                              as we do? See Figure 1 for an example of the is-
+                                                                  sue that LLMs face. To help address this question,
+   Self-reference plays a crucial role in the way we
+                                                                  we present a new task and dataset called “I am
+   think about mathematics (Gödel, 1931; Tarski,
+                                                                  a Strange Dataset”. We are inspired by Douglas
+   1931), theoretical computer science (Church, 1936),
+                                                                  Hofstadter’s explorations of self-reference in lan-
+   recursive programming (Hofstadter, 1979), un-
+                                                                  guage (Hofstadter, 1979, 1985, 2007), and borrow
+   derstanding complex cases in hate speech detec-
+                                                                  part of the name from one of his books: “I am a
+   tion (Allan, 2017), aptitude tests (Propp, 1993),
+                                                                  Strange Loop” (Hofstadter, 2007).
+   and comedy (Hofstadter, 1985). Some positions in
+   the philosophy of mind consider self-referential ca-               1
+                                                                        Sentences like “I am Douglas Hofstadter” are self-
+   pabilities to be a key aspect of higher intelligence           referential but not metalinguistic in the sense of interest here.
+
+                                                             8888
+Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pages 8888–8907
+                              August 11-16, 2024 ©2024 Association for Computational Linguistics
+                                                            This sentence               This sentence
+   An example in “I am a Strange Dataset” is com-           l                           l
+prised of two self-referential statements that begin        o                           o
+in the same way but have different endings (Fig-            o                           o
+                                                            k                           k
+ure 2). One is true and one is false. Crucially, the        s                           s
+ending flips the truth value of the overall statement.      like a letter               like a letter
+There are two subtasks: generation and verifica-            a                           a
+                                                            n                           n
+tion. In generation, the model must generate the            d                           d
+true statement and reject the false one. In verifi-         i                           i
+cation, models judge the truth of completed state-          t                           t
+                                                            is a capital E.             is a capital F.
+ments. To complement the main self-referential
+data, the dataset also contains metalinguistic non-
+                                                         def a_function ( a_string ):
+self-reference examples. These are minimally dif-            x = " theoretically , this function "
+ferent from the main examples and serve as con-              a_function(“recurses infinitely”)
+trols to assess whether models can reliably handle
+                                                         def a_function ( a_string ):
+metalinguistic statements in the absence of self-            x = " theoretically , this function "
+reference. In addition, all the examples in the              a_function(“stops eventually”)
+dataset are tagged by expert annotators to further
+aid in error analysis.                                      The first and last words of The first and last words of
+   “I am a Strange Dataset” is validated by non-            this sentence are “The” and this sentence are “The” and
+                                                            “respectively”, respectively. “The”, respectively.
+expert annotators. As a group, they have agree-
+ment rates in the 89–93% range, depending on
+                                                         Figure 2: Examples from the dataset. Each example
+which metric we use, as compared to chance rates
+                                                         is comprised of a beginning and two different endings.
+at 50%. This further supports the claim that met-        One of the endings makes the statement true, but it
+alinguistic self-reference is relatively easy for hu-    would make the statement false if it referred only to the
+mans. LLMs, by contrast, struggle: “I am a Strange       beginning. The other ending makes the statement false,
+Dataset” turns out to be so difficult that models are    but it would make the statement true if it referred only
+generally near chance both in generation and verifi-     to the beginning. True endings are on the left and shown
+cation, and do not even succeed in the prerequisite      in blue. False endings are on the right and shown in red.
+                                                         In the case of the code example, the true continuation is
+metalinguistic non-self-reference case. That said,
+                                                         shown above the false one.
+we do find some limited evidence that GPT 4 is get-
+ting some traction on the dataset: it is significantly
+above chance on all tested metrics (and seems to
+                                                         the knowledge required to solve the problems need
+struggle especially with the self-referential data
+                                                         not be. “I am a Strange Dataset” follows a sim-
+as compared to the non-self-referential controls).
+                                                         ple schema that requires self-referential language,
+However, overall, it seems safe to say that “I am
+                                                         and consequently tests an array of metalinguistic
+a Strange Dataset” poses a serious challenge for
+                                                         capabilities. As far as we know, this is the first
+even the best present-day models.
+                                                         AI challenge dataset targeting metalinguistic self-
+                                                         reference, although there are metalinguistic evalua-
+2   Related Work
+                                                         tions (Hu and Levy, 2023; Behzad et al., 2023) and
+AI Challenges. We present our dataset as a chal-         corpuses (Wilson, 2012; Kranzlein et al., 2024).
+lenge for the AI community. There are a range               Self-reference. Ideas involving self-reference
+of AI stress tests and probes that use schemas           have been used to boost LLM performance. LLMs
+targeting coreference resolution (Levesque et al.,       can verify their own outputs either via extra passes
+2012; Sakaguchi et al., 2020), pronoun resolu-           of natural language generation (Weng et al., 2023;
+tion (Rudinger et al., 2018), word order (Sinha          Huang et al., 2023) or by writing code (Zhou et al.,
+et al., 2021; Thrush et al., 2022; Yuksekgonul et al.,   2023). LLMs can also enhance their own inference
+2023), syntax (Linzen et al., 2016; Gulordava et al.,    code to some degree (Zelikman et al., 2023). Much
+2018; Gauthier et al., 2020a; Hu et al., 2020), and      of the previous work on self-reference with LLMs
+interactions between syntax and semantics (Kann          is about a model improving on itself or its outputs.
+et al., 2019; Thrush et al., 2020). Although the         Our dataset is not about that – it is complementary
+schema for these tests can be simple to describe,        work about a model’s ability to generate and in-
+                                                     8889
+terpret metalinguistic and self-referential language.     comprised of 208 examples, and split into 200 ex-
+Still, a statement that refers to itself could be about   amples for the evaluation set, 3 examples for few
+a model that generated it, too: “This sentence was        shot prompts, and 5 examples for use in an onboard-
+generated by me, HAL9000”.                                ing task for non-expert human validators.
+                                                             There are 10 additional examples that are com-
+3   I am a Strange Dataset                                pletely separate from these 208 examples, which
+                                                          we call “I am an Impossible Dataset”. They left
+In this section, we describe how the dataset is con-
+                                                          even expert annotators stumped until they were
+structed and how we measure model performance.
+                                                          given an explanation. We provide examples and
+3.1 Dataset                                               GPT 4 responses in Appendix B and leave it as
+                                                          inspiration for a future challenge.
+We aim to test whether a language model can pro-
+duce and understand self-referential statements,          3.2   Tags
+and has the required metalinguistic capabilities.         After the dataset was created, an expert annotator
+For example, consider this incomplete statement:          came up with a set of 10 tags with which to cate-
+     The penultimate word in this sentence is . . .       gorize all of the examples. By using this set, we 1)
+                                                          ensured that there are at least 20 examples for each
+If we did not understand metalinguistic self-             tag, and 2) captured aspects of the mental facilities
+reference, we might complete the sentence with            that an expert annotator noticed when they tried
+the word “sentence”. It is true that “sentence” is        solving the problems. We show the example counts
+the penultimate word before adding more text, but         for each tag in Table 1, along with representative
+by writing “sentence”, we have just changed the           examples from the dataset. Each example can have
+penultimate word! Here, a correct way to complete         more than one tag. Notice that the Sensory tag
+the statement is by inserting “is”. Completing state-     example in Table 1 is also Hypothetical, the ex-
+ments is an established task format for language          ample for the Existence of Element tag is also a
+models (Paperno et al., 2016), but as far as we           Grammaticality example, and so on. Below, we
+know, we are the first to apply it to metalinguistic      describe the knowledge categories for each tag.
+tasks. Concretely, the schema for examples in our       1. Negation & Scope. Understanding of words
+dataset is as follows:                                     such as all, some, most, none.
+                                                        2. Numerical Operations. Arithmetic (e.g. multi-
+• There is a self-referential statement which must         plication, addition, counting, subtraction). It is
+  be completed by adding text to the end.                  used only if arithmetic is explicitly mentioned.
+• There are two candidate strings, with the same        3. Location of Element. Where items are located
+  number of words, that can be used to complete            in a sentence relative to everything else.
+  the statement:                                        4. Sub-Word. Understanding of characters, mor-
+    1. One of the candidate strings would make the         phemes, syllables, and other word components.
+       statement true if the statement refers to itself 5. Sensory. Perceptual knowledge about how emo-
+       before the addition of the string, but false if     jis look, how words are arranged visually, how
+       it refers to itself after adding the string. An     words sound, how something might taste, etc.
+       example is the answer “sentence” above.          6. Existence of Element. Whether an element is
+    2. The other candidate string would make the           present in a statement.
+       statement true if the statement refers to itself 7. Grammaticality. Knowing grammar terms.
+       after the addition of the string, but false if   8. Multi-Channel. Knowledge of at least two
+       it refers to itself before the addition of the      mediums. A medium might be Python code,
+       string. An example is the answer “is” above.        English, Hebrew, C code, internet slang, etc.
+                                                        9. Hypothetical. Reasoning about hypotheticals.
+   The dataset was created by four expert annota- 10. Question. A question is involved.
+tors each with several years of experience in com-
+puter science, linguistics, and/or cognitive science    3.3 Metrics
+and all living in the United States. Each of the        We want to test whether models can generate and
+experts were given the schema and encouraged to         understand self-referential and metalinguistic state-
+be as creative as possible. Overall, the dataset is     ments. To this end, we present several metrics.
+                                                      8890
+          Tag            Count                                           Example
+                                 Beginning                          False End                    True End
+   Negation & Scope       94     The last word you will read be-    not “dog”.                   actually “dog”.
+                                 fore the period is
+ Numerical Operations     62     The number of words in this sen-   eight.                       nine.
+                                 tence is
+  Location of Element     55     This sentence                     nothing wrong has with        something wrong has with
+                                                                   the word order.               the word order.
+       Sub-Word           48     Evary werd en thas sentance iz including the words at the       except the words at the
+                                 mispelled                         end.                          end.
+        Sensory           42         If   you    ate    it,   this only somewhat sour            somewhat sweet and
+                                    sentence would taste              and not sweet .               not only sour .
+  Existence of Element    31     This sentence                     lacks a verb.                 has a verb.
+    Grammaticality        25     The author who wrote this sen- only active voice is used        also passive voice is used
+                                 tence used active voice, and      by them.                      by them.
+     Multi-Channel        24     The penultimate word of this sen- Inglés language.              Español language.
+                                 tence is in the
+     Hypothetical         24     If you added a word here: _ this eleven words.                  thirteen words.
+                                 sentence would be
+       Question           22     Is there an answer that follows No.                             Yes.
+                                 this question?
+
+Table 1: All of the example tags in “I am a Strange Dataset” sorted by count. Examples can have more than one tag.
+
+
+3.3.1 Generation                                              judge a given self-referential statement as true or
+The primary capability that we want to test (and              false. To test for this, we include the self-referential
+seemingly, the hardest) is whether language mod-              statement in a prompt along with instructions that
+els generate true self-referential statements with            tell the model to answer whether the statement is
+greater likelihood than false ones. To test for this,         true or not. In principle, the instructions could be
+we take an example from the dataset and compare               anything. For our experiments, we write a standard
+the losses of the continuation that makes the overall         zero-shot (ZS), few shot (FS), and chain of thought
+statement true versus the continuation that makes             (CoT) (Wei et al., 2022) prompt. We provide the
+the overall statement false. If the loss of the cor-          full prompts in Appendix A.
+rect continuation is lower, then the model is said               For the ZS and FS prompts, we use the method
+to have gotten that example correct, otherwise it             established for the Generation metric above, ex-
+is incorrect. Comparing a language model’s sur-               cept this time we compare the loss of “False” to
+prisal of an incorrect continuation versus a correct          the loss of “True”. Overall, the FS and ZS valida-
+continuation is a common method used to test for              tion score for an example’s true prompt pt (i.e. the
+syntax-comprehension (Linzen et al., 2016; Gau-               true full sentence plus any instructions), and false
+thier et al., 2020b) and reasoning (Gao et al., 2021;         prompt pf , is given by Eq. 2. The blue parts are
+McKenzie et al., 2022). Surprisal is generally pro-           associated with correct model judgements and the
+portional to the loss, L, of the language model in            red parts are associated with incorrect ones.
+our case. So, we define the generation score for                                
+                                                                                1    if L(“True”|pt ) < L(“False”|pt )
+an example’s beginning b, true ending et , and false                            
+                                                                                
+                                                                                
+                                                                                
+                                                                                     and L(“True”|pf ) > L(“False”|pf )
+ending ef , as given by Eq. 1.                                                  
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                     (                                                          
+                                                                                
+                                                                                 1
+                                                                                      if L(“True”|pt ) < L(“False”|pt )
+                      1 if L(et |b) < L(ef |b)                                  
+                                                                                 2
+                                                                                
+                                                                                     and L(“True”|pf ) ≤ L(“False”|pf )
+    g(b, et , ef ) =                              (1)                           
+                      0 otherwise                               v(pt , pf ) =
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                  1
+                                                                                      if L(“True”|pt ) ≥ L(“False”|pt )
+   The generation metric does not use a prompt. It                              
+                                                                                 2
+                                                                                
+                                                                                     and L(“True”|pf ) > L(“False”|pf )
+                                                                                
+                                                                                
+is based on the loss that a model assigns to contin-                            
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+uations, given only the beginning of a statement.                               
+                                                                                
+                                                                                0    if L(“True”|pt ) ≥ L(“False”|pt )
+                                                                                
+                                                                                      and L(“True”|pf ) ≤ L(“False”|pf )
+3.3.2 Validation                                                                                                        (2)
+A secondary capability that we want to test is                   We can compute the FS and ZS validation scores
+whether a language model can at least correctly               differently. Above, we compare the loss of “False”
+                                                         8891
+versus “True”, given one context at a time. We can
+                                                                   Out out of of all all the the words words in in this this
+also compare the ratios of the “True” and “False”                  sentence sentence literally literally all all of of them
+loss, in the false versus true contexts. We call this              them are repeated.
+the relative validation score because it compares
+a model’s judgement for the truth of one sentence
+in an example relative to the truth of the sister                  GPT 4: Every word in the sentence is indeed repeated.
+                                                                   So, the statement is true.
+sentence. This metric is given by Eq. 3.
+
+                  (                                            Figure 3: GPT 4 misses the last words are not repeated.
+                          L(“True”|pt )    L(“True”|p )
+                   1   if L(“False”|pt)
+                                        < L(“False”|pff )
+vr (pt , pf ) =
+                   0   otherwise                                   Out out of of all all the the words words in in the the
+                                                 (3)               following following sentence sentence literally literally
+   For the CoT metric, the model is prompted to                    all all of of them them are repeated.
+output its reasoning steps as text. We do string                   Out out of of all all the the words words in in
+matching to determine the answer. Eq. 4 gives us                   this this sentence sentence literally literally all all of of
+                                                                   them them are repeated.
+the validation CoT score, where G is the function
+that gives the model’s generated text after lower-
+casing. Instead of string matching, we could also                  GPT 4: Every word in the sentence is indeed repeated.
+insert a follow-up question after the model’s gener-               So, the statement is true.
+ation that requires a “True” or “False” and then
+compare log probabilities (henceforth “logprobs”).
+But it is useful to have a metric in our repository            Figure 4: An example of GPT 4 getting a non-self-
+that does not use logprobs, which model APIs do                referential version of the problem from Figure 3 wrong.
+not always provide.
+                                                              be self-referential) is true. This new task is still
+             
+             1     if “true” ∈ G(pt ), “false” ∈
+                                                / G(pt )      metalinguistic, but not self-referential.
+             
+             
+             
+             
+                   and “true” ∈/ G(pf ), “false” ∈ G(pf )       It turns out that, for 97 of the sentence begin-
+             
+             
+             
+             
+                                                             nings in “I am a Strange Dataset”, we can replace
+             
+                   if “true” ∈ G(pt ), “false” ∈            “this sentence” with “the following sentence”, and
+               1
+             
+                                               / G(pt )
+             
+             2     and ¬(“true” ∈/ G(pf ), “false” ∈ G(pf )) then copy the original self-referential statement be-
+vc (pt , pf ) =
+                
+                
+                
+                                                             low the new sentence. We can then test models for
+                
+                
+                  1
+                    if ¬(“true” ∈ G(pt ), “false” ∈
+                                                  / G(pt ))
+                
+                
+                
+                
+                  2
+                    and “true” ∈/ G(pf ), “false” ∈ G(pf )
+                                                              their ability to judge whether this non-self-referent
+                
+                
+                
+                
+                
+                                                              version  of the same statement is true. We use 2 of
+                
+                
+                 0 otherwise                                  these 97 examples in the few shot and CoT prompts,
+                                                        (4)   because 2 of the examples in the original prompts
+                                                              cannot be turned into the non self-referent format.
+3.4 Non-Self-Referential Control                              See Appendix A for the non-self-referent prompts.
+Is the self-referent part of self-referential state-          This  leaves us with 95 non-self-referent examples
+ments (e.g. “this sentence ...”) the “hard” part of           and 95 original examples with which to compare
+metalinguistic self-reference? There are metalin- results. GPT 4’s response to a statement from the
+guistic problem categories that are not exclusive to          main dataset is shown in Figure 3, along with its
+self-referential language: recursive phrase count- response to the analagous non-self-referential con-
+ing, character-level manipulation, understanding              trol statement in Figure 4. The responses happen
+hypothetical sentence-editing scenarios, etc.                 to be the same in this case.
+   Instead of giving a language model a sentence
+                                                               4     Human Experiment Details
+that refers to itself, we could give it an equivalent
+sentence that refers to that self-referential sentence.        To get a human baseline for our main task, we show
+This way, the language model would not have to                 each of the 400 self-referential statements (2 from
+know whether a self-referential sentence is true.              each of the 200 examples) to at most 10 Mechani-
+It would only have to know whether a sentence                  cal Turk (Amazon, Retrieved 2023) workers. We
+that refers to another sentence (which happens to              separate statements from the same pair into differ-
+                                                            8892
+ Model         Params   Chat         GenL         Val ZSL         Val FSL      Valrel ZSL      Valrel FSL       Val CoTT
+ MTurk              -      -              -              -   89.25 ± 3.38               -    93.00 ± 3.75               -
+ Random             -      -   50.00 ± 0.00   50.00 ± 0.00   50.00 ± 0.00    50.00 ± 0.00    50.00 ± 0.00    50.00 ± 0.00
+ Llama 2          7B      N    55.50 ± 7.00   50.00 ± 1.25   50.50 ± 2.38    48.50 ± 7.00    55.50 ± 7.00     5.25 ± 2.12
+ Llama 2          7B      Y    52.50 ± 7.00   52.25 ± 2.75   50.00 ± 0.75    52.50 ± 7.00    55.50 ± 6.75    14.00 ± 3.38
+ Mistral 0.1      7B      N    53.00 ± 6.75   52.25 ± 2.50   49.50 ± 1.50    56.50 ± 6.75    54.50 ± 7.00     0.00 ± 0.00
+ Starling α       7B      Y    53.50 ± 7.00   54.00 ± 2.75   50.75 ± 1.50    57.00 ± 7.00    55.00 ± 6.75    35.00 ± 4.63
+ Mistral 0.2      7B      Y    52.50 ± 7.00   53.00 ± 4.26   52.25 ± 3.63    53.50 ± 7.00    53.50 ± 7.00    49.25 ± 4.50
+ Llama 2         13B      N    56.00 ± 7.00   51.50 ± 3.25   53.75 ± 3.50    50.50 ± 7.00    59.50 ± 6.75     4.50 ± 2.00
+ Llama 2         13B      Y    55.00 ± 7.00   52.50 ± 3.75   51.50 ± 2.25    52.50 ± 7.00    50.00 ± 7.00     9.50 ± 3.00
+ Mixtral 0.1    8x7B      N    53.50 ± 7.00   58.50 ± 3.75   51.75 ± 2.12    57.00 ± 7.00    57.00 ± 7.00     3.50 ± 1.88
+ Mixtral 0.1    8x7B      Y    53.50 ± 7.00   52.25 ± 3.75   53.50 ± 3.25    54.50 ± 7.00    55.50 ± 7.00    44.00 ± 4.75
+ Llama 2         70B      N    57.00 ± 7.00   53.25 ± 3.25   55.25 ± 2.88    60.00 ± 6.75    57.50 ± 6.75     2.50 ± 1.38
+ Llama 2         70B      Y    52.50 ± 7.00   54.25 ± 4.25   50.00 ± 2.00    56.00 ± 7.00    57.50 ± 6.75    23.50 ± 4.00
+ Claude 2           -     Y               -              -              -               -               -    52.75 ± 4.00
+ GPT 3.5 T          -     Y               -   53.00 ± 3.00   53.00 ± 3.37    56.50 ± 7.00    61.00 ± 6.75    51.00 ± 4.63
+ GPT 4              -     Y               -   59.25 ± 4.25   60.25 ± 4.50    64.50 ± 6.50    66.00 ± 6.50    66.00 ± 4.75
+
+Table 2: Comparison of models on “I am a Strange Dataset”. Models perform fairly close to chance across all
+metrics. We bootstrap 95% confidence intervals with the “basic” SciPy method (SciPy, Retrieved 2023). Metrics
+marked with L are logprobs-based. Metrics marked with T are based on generated text. We used full precision for
+all open source models - except the 70B models, which we used at half precision. Temperature = 0 for all models.
+
+
+ent experiment batches. As instructions, we give
+                                                                  The numerical digit symbol “1” appears in this sentence
+the annotators the few shot prompt in Appendix A,                 exactly 1 plus one times.
+plus an extra paragraph:
+Do not use any AI assistants such as ChatGPT to help
+you; AI assistants perform very poorly at this task               GPT 4: The text has 1 numerical digit symbol “1” and
+and so will get many of the answers wrong. Although,              the word “one” appears once. So, the statement is true.
+you can otherwise feel free to search online for any
+information that would help you answer confidently.
+For example, a few statements may contain a language
+besides English. So, you can feel free to use Google          Figure 5: Arguably, an example where GPT 4 should
+Translate. You can also search for the definitions of         not have gotten points. This is an example where GPT 4
+words that you are unfamiliar with.                           chooses the correct true/false response, but with incor-
+   To ensure a validator quality baseline, we re-             rect reasoning. The “1” symbol appears twice.
+quire that all turkers are “master” annotators, are
+in the US only, have had 1000 or more previous                                               true                false
+                                                              puting ratios, e.g. #responded      and #responded       .
+HITs approved, have a 95% or higher HIT approval                                        10                  10
+                                                              The human scores are 89.25 and 93.00 on the Val
+rate, and pass a custom qualification test which we
+                                                              FS and Valrel FS metrics, as shown in Table 2.
+release along with the dataset. The test involves cor-
+                                                              Compared to the highest scoring model, the perfor-
+rectly answering “True” or “False” to five state-
+                                                              mance difference is 29 and 27, respectively. The hu-
+ments from the “I am a Strange Dataset” example
+                                                              man instructions are nearly identical to the few shot
+distribution. These five statements are not used
+                                                              prompt, so the human responses are most compara-
+in the official evaluation set of 200 examples. The
+                                                              ble to the models’ few shot validation responses.
+qualification test involves an acknowledgement that
+the annotator is familiar with basic Python pro-              5    Results
+gramming or can search online to answer basic
+questions about it, because there are a few exam-             Table 2 showcases our results on a variety of open-
+ples that require a limited understanding of code.            source (Touvron et al., 2023; Jiang et al., 2023;
+We include a screenshot of the Mechanical Turk                Zhu et al., 2023; Jiang et al., 2024) and closed-
+annotator interface in Appendix C.                            source (Brown et al., 2020; OpenAI, 2023; An-
+   Because there are up to 10 human judgements for            thropic, 2023) models. Overall, the models per-
+each statement, we get an analog to the “loss” for            form close to the level of chance. The only model
+humans, and compute our metrics for humans in an              to achieve scores significantly above random on all
+analogous way to models. We can do this by com-               metrics tested is GPT 4, and even so, the perfor-
+                                                        8893
+       Tag        Question      Existence of Element           Negation & Scope        Grammaticality          Sensory
+      Count        62.55               61.01                         57.33                 56.32                55.69
+
+   Tag         Multi-Channel      Numerical Operations           Sub-Word        Hypothetical      Location of Element
+  Count            55.16                 51.75                     51.52           48.61                  47.72
+
+Table 3: Results for all of the example tags in “I am a Strange Dataset” sorted by score. Scores are averaged for all
+models and all logprobs-based metrics (so each score here is an average from 63 scores).
+
+ Model          Params   Chat        ∆ GenL      ∆ Val ZSL       ∆ Val FSL     ∆ Val ZSL (R)   ∆ Val FSL (R)     ∆ Val CoTT
+ Llama 2           7B      N     -4.21 ± 9.47   -1.58 ± 4.21     1.05 ± 3.16     8.42 ± 9.47    4.21 ± 10.53     30.53 ± 6.07
+ Llama 2           7B      Y    -2.11 ± 10.00   -2.11 ± 4.21     0.53 ± 0.79    1.05 ± 10.53   -1.05 ± 12.11     27.37 ± 6.58
+ Mistral 0.1       7B      N    -3.16 ± 10.00   -4.74 ± 3.68     1.58 ± 2.11    5.26 ± 10.53    1.05 ± 10.00      0.00 ± 0.00
+ Starling α        7B      Y      0.00 ± 9.47   -3.16 ± 3.68    -1.58 ± 2.37    0.00 ± 11.58   -6.32 ± 11.58      4.21 ± 8.68
+ Mistral 0.2       7B      Y    -4.21 ± 10.00   -2.63 ± 7.89    -3.16 ± 5.79    2.11 ± 11.58    2.11 ± 11.05     -8.95 ± 8.68
+ Llama 2          13B      N    -9.47 ± 10.00   -0.53 ± 5.26     0.53 ± 5.26    -2.11 ± 7.37    4.21 ± 11.58     23.68 ± 6.32
+ Llama 2          13B      Y    -3.16 ± 10.00   -1.05 ± 5.26    -2.11 ± 3.42     2.11 ± 9.47    2.11 ± 11.58     16.32 ± 6.32
+ Mixtral 0.1     8x7B      N    -1.05 ± 10.00   -2.63 ± 4.74    -0.53 ± 2.63   -2.11 ± 10.53    6.32 ± 11.58     -1.05 ± 2.11
+ Mixtral 0.1     8x7B      Y    -5.26 ± 10.00    5.26 ± 6.84     4.74 ± 5.26    7.37 ± 11.58    3.16 ± 11.58    -25.26 ± 9.21
+ Llama 2          70B      N    -7.37 ± 10.03    2.11 ± 5.79    -3.68 ± 5.26    5.26 ± 10.53    6.32 ± 11.05     -0.53 ± 0.79
+ Llama 2          70B      Y    -1.05 ± 10.53   -1.58 ± 5.79     1.58 ± 4.21     3.16 ± 9.47     5.26 ± 8.42    -25.79 ± 5.79
+ Claude 2            -     Y                -              -               -               -               -      3.16 ± 6.84
+ GPT 3.5 T           -     Y                -    4.21 ± 6.84     3.16 ± 6.32   -2.11 ± 11.58   -2.11 ± 11.58     -3.68 ± 8.95
+ GPT 4               -     Y                -   12.11 ± 6.84     3.68 ± 6.84   10.53 ± 10.53    6.32 ± 10.53      1.05 ± 7.37
+
+Table 4: The difference between scores on “I am a Strange Dataset” when the referent is “the following sentence”
+instead of “this sentence” (scores for the first minus the latter). Overall, the problems that LLMs have with
+self-referential statements do not stem only from issues understanding the self-referential referent itself. Differences
+outside of the 95% confidence interval (computed the same way as for Table 2) are shown in bold.
+
+
+mance is well below the non-expert human scores.                  independent of the statement with the alternative
+   Results in this paper for Claude 2 (Anthropic,                 continuation. The dataset schema calls for sen-
+2023), GPT 3.5 Turbo (Brown et al., 2020), and                    tences which are either true or false, but in practice,
+GPT 4 (OpenAI, 2023) were collected through the                   language can be ambiguous. Figure 6 illustrates. A
+gpt-4, gpt-3.5-turbo, and claude-2 endpoints                      fairer gauge of model capability may be to compare
+on their respective APIs on Jan 7, 2024 (unless                   the continuations with each other, as the generation
+otherwise stated). Note that the Claude 2 API does                and relative validation metrics do.
+not support logprobs, so the only metric that we                     Tags. We present the average logprobs-based
+report for it is the text-based CoT validation metric.            model scores for the tags in Table 3. We opt to leave
+The OpenAI API supports top-5 logprobs access,                    CoT scores out due to their high variance (many of
+and it turns out that this is enough to get logprobs              the open-source models do not even return either
+for “True” vs “False” in our experiments. It is                   “true” or “false” in their answers). Full tables
+not enough to get the multi-token logprobs required               for the tags are in Appendix E.
+for the generation metric, though.                                   Non-Self-Referential Control. We provide the
+   The CoT metric gives us extra insight into the                 difference in scores between the non-self-referent
+limitations of models because we can see if their                 examples and analogous original examples in Ta-
+reasoning aligns with their final answer. In many                 ble 4. The significant values in the CoT col-
+cases, they make fairly obvious mistakes as seen                  umn are not particularly compelling because the
+in Figure 3. In some cases, the models choose                     open-source models are below chance regardless
+the correct answer even though their reasoning is                 of whether there is self-reference. For this met-
+flawed, as seen in Figure 5.                                      ric, the open-source models are extremely sensitive
+   It is important to note that there are limitations             to prompting – many of them do not even output
+with the CoT validation metric, and the ZS and                    “true” or “false” for every example. Although
+FS non-relative validation metrics too. These met-                stronger models do so reliably - only 7 out of all
+rics are about judging a statement as true or false,              of GPT 4’s responses contain both a “true” and a
+                                                               8894
+                                                                                   Params vs Avg logprobs-based Score
+    Why doesn’t this question have an answer? It does,
+    though.                                                               56
+
+
+
+    GPT 4: The statement is asking why it doesn’t have an                 55
+    answer, but it does have an answer. So, the statement is
+    false.
+                                                                  Score   54
+
+Figure 6: This is a particularly ambiguous example that
+is assigned the gold label of true. The response from                     53
+GPT 4 is marked as incorrect, although one could make
+a case that the statement is false because of the false
+presupposition which is corrected later in the answer.                    52
+The generation and relative validation metrics are robust                      0    10    20    30   40     50   60     70
+to these situations. For these metrics, the losses from                                        Params (B)
+“It does though.” versus “It just doesn’t.” (the
+alternative continuation) are compared directly. Regard-          Figure 7: Parameters to average “I am a Strange Dataset”
+less of ambiguity about whether a statement is true out-          score across all of the logprobs-based metrics. We only
+right, we can notice a higher confidence for “It just             evaluate five 7B models, and two models for each of the
+doesn’t.” as the false continuation.                              other sizes, so computing confidence intervals for each
+                                                                  point is not particularly informative. Under the null
+                                                                  hypothesis that parameter size has no effect on score,
+“false”, or neither.                                              we can compute the p-value for these results as a whole
+   We find that our dataset is so hard due to non-                nonparametrically: there are 24 ways that these 4 points
+                                                                  can be arranged and in only 1 of the ways do they all
+self-referential metalinguistic aspects that models
+                                                                  increase with the parameter count: p = 1/24 = 0.042.
+score around chance here too, with the exception
+of GPT 4. It is the only model which is strong
+enough to perform significantly above chance for                  understand self-referential statements, and under-
+every metric tested on the main dataset in Table                  stand the prerequisite metalinguistic reasoning. All
+2, and to have all positive values in Table 4 for                 models that we tested perform fairly close to the
+every metric tested, including logprobs-based met-                level of chance. GPT 4 is the only model to score
+rics (meaning that the self-referential version was               significantly above chance on all of the metrics
+harder for it). Although, only the Val ZS value for               tested, and still it is not by much. The poor per-
+GPT 4 is well outside of the 95% confidence inter-                formance may be indicative of a larger issue about
+val, and GPT 4 is also still not particularly good                the limitations of even today’s best causal language
+at the non-self-referential version. Figure 4 shows               models. Even though the task is straightforward
+that GPT 4 struggles with the non-self-referent ver-              for people, we find evidence that scale beyond 70B
+sion of the Figure 3 example. There is some signal                parameters may be needed for the emergence of
+that the challenge posed by self-referents will re-               comparable performance from models.
+main as LLMs gain competence at other metalin-                       Our results indicate that this dataset is hard not
+guistic problems, but the dataset is so hard that we              only due to the self-referent part of a self-referential
+do not have overwhelming evidence.                                statement. The challenge also comes from other
+   Model Scale. If we exclude the high-variance                   metalinguistic aspects, such as recursively applying
+CoT metric, we see a clear scaling trend that mod-                arithmetic operations on sentences. Still, there is
+els with more parameters score higher on the test.                some limited evidence that GPT 4 struggles more
+See Figure 7. Will this trend continue? For addi-                 with self-referential metalinguistic problems than
+tional discussion, see Appendix D.                                analogous non-self-referential problems.
+
+6    Conclusion                                                   7       Dataset Release Strategy
+A grasp of self-reference is important in a variety               We release the dataset on GitHub.                at
+of domains, and is a notable aspect of human in-                  https://github.com/TristanThrush/
+telligence. We introduced a novel task and dataset                i-am-a-strange-dataset.          The data is en-
+to assess the capacity of models to generate and                  crypted, but the decryption script is provided. Our
+                                                               8895
+goal is not to hide the dataset from people, but to           Ben Wang, Kevin Wang, and Andy Zou. 2021. A
+hide the dataset from any processes that scrape               framework for few-shot language model evaluation.
+training data from the web. We encourage the rest          Jon Gauthier, Jennifer Hu, Ethan Wilcox, Peng Qian,
+of the community to take up this practice when               and Roger Levy. 2020a. SyntaxGym: An online
+releasing evaluation datasets in a public repository.        platform for targeted evaluation of language models.
+                                                             In Proceedings of the 58th Annual Meeting of the
+8   Limitations                                              Association for Computational Linguistics: System
+                                                             Demonstrations, pages 70–76, Online. Association
+It is possible that the self-reference aspect of “I am       for Computational Linguistics.
+a Strange Dataset” will turn out to be the bottleneck      Jon Gauthier, Jennifer Hu, Ethan Wilcox, Peng Qian,
+for many models, but it is also true that models are         and Roger Levy. 2020b. Syntaxgym: An online
+largely failing at the purely metalinguistic aspect.         platform for targeted evaluation of language mod-
+                                                             els. ACL System Demos.
+Although the schema targets metalinguistic self-
+reference, it is difficult to make a specific claim        Kristina Gulordava, Piotr Bojanowski, Edouard Grave,
+about why models fail without running more exper-            Tal Linzen, and Marco Baroni. 2018. Colorless green
+iments and without waiting until models become               recurrent networks dream hierarchically. In NAACL:
+                                                             Human Language Technologies.
+more competent.
+                                                           Kurt Gödel. 1931. Über formal unentscheidbare sätze
+9   Ethical Considerations                                   der principia mathematica und verwandter systeme I.
+                                                             Monatshefte für Mathematik und Physik.
+We aimed to pay crowdworkers 15 USD hourly
+                                                           Douglas Hofstadter. 1979. Gödel, Escher, Bach: an
+based on an estimated task completion time.                  Eternal Golden Braid. Basic Books.
+                                                           Douglas Hofstadter. 1985. Metamagical Themas:
+References                                                   Questing for the Essence of Mind and Pattern. Basic
+                                                             Books.
+Richard Allan. 2017. Hard questions: Who should
+  decide what is hate speech in an online global com-      Douglas Hofstadter. 2007. I Am a Strange Loop. Basic
+  munity?                                                    Books.
+Amazon. Retrieved 2023. Mechanical turk.                   Jennifer Hu, Jon Gauthier, Peng Qian, Ethan Wilcox,
+                                                             and Roger Levy. 2020. A systematic assessment
+Anthropic. 2023. Claude.                                     of syntactic generalization in neural language mod-
+                                                             els. In Proceedings of the 58th Annual Meeting of
+Bernard J. Baars. 1993. A cognitive theory of conscious-     the Association for Computational Linguistics, pages
+  ness. Cambridge University Press.                          1725–1744, Online. Association for Computational
+                                                             Linguistics.
+Shabnam Behzad, Keisuke Sakaguchi, Nathan Schnei-
+  der, and Amir Zeldes. 2023. ELQA: A corpus of            Jennifer Hu and Roger Levy. 2023. Prompting is not
+  metalinguistic questions and answers about English.        a substitute for probability measurements in large
+  In ACL.                                                    language models. EMNLP.
+Tom B. Brown, Benjamin Mann, Nick Ryder, Melanie           Jie Huang, Xinyun Chen, Swaroop Mishra,
+  Subbiah, Jared Kaplan, Prafulla Dhariwal, Arvind            Huaixiu Steven Zheng, Adams Wei Yu, Xiny-
+  Neelakantan, Pranav Shyam, Girish Sastry, Amanda            ing Song, and Denny Zhou. 2023. Large language
+  Askell, Sandhini Agarwal, Ariel Herbert-Voss,               models cannot self-correct reasoning yet. arXiv.
+  Gretchen Krueger, Tom Henighan, Rewon Child,
+  Aditya Ramesh, Daniel M. Ziegler, Jeffrey Wu,            Albert Q. Jiang, Alexandre Sablayrolles, Arthur Men-
+  Clemens Winter, Christopher Hesse, Mark Chen, Eric         sch, Chris Bamford, Devendra Singh Chaplot, Diego
+  Sigler, Mateusz Litwin, Scott Gray, Benjamin Chess,        de las Casas, Florian Bressand, Gianna Lengyel, Guil-
+  Jack Clark, Christopher Berner, Sam McCandlish,            laume Lample, Lucile Saulnier, Lélio Renard Lavaud,
+  Alec Radford, Ilya Sutskever, and Dario Amodei.            Marie-Anne Lachaux, Pierre Stock, Teven Le Scao,
+  2020. Language models are few-shot learners. arXiv.        Thibaut Lavril, Thomas Wang, Timothée Lacroix,
+                                                             and William El Sayed. 2023. Mistral 7b. arXiv.
+Alonzo Church. 1936. An unsolvable problem of ele-
+  mentary number theory. American Journal of Mathe-        Albert Q. Jiang, Alexandre Sablayrolles, Antoine
+  matics.                                                    Roux, Arthur Mensch, Blanche Savary, Chris
+                                                             Bamford, Devendra Singh Chaplot, Diego de las
+Leo Gao, Jonathan Tow, Stella Biderman, Sid Black,           Casas, Emma Bou Hanna, Florian Bressand, Gi-
+  Anthony DiPofi, Charles Foster, Laurence Golding,          anna Lengyel, Guillaume Bour, Guillaume Lam-
+  Jeffrey Hsu, Kyle McDonell, Niklas Muennighoff,            ple, Lélio Renard Lavaud, Lucile Saulnier, Marie-
+  Jason Phang, Laria Reynolds, Eric Tang, Anish Thite,       Anne Lachaux, Pierre Stock, Sandeep Subramanian,
+
+                                                       8896
+  Sophia Yang, Szymon Antoniak, Teven Le Scao,            Tristan Thrush, Ryan Jiang, Max Bartolo, Aman-
+  Théophile Gervet, Thibaut Lavril, Thomas Wang,             preet Singh, Douwe Kiela, and Candace Ross. 2022.
+  Timothée Lacroix, and William El Sayed. 2024. Mix-        Winoground: Probing vision and language models
+  tral of experts. arXiv.                                    for visio-linguistic compositionality. CVPR.
+Katharina Kann, Alex Warstadt, Adina Williams, and        Tristan Thrush, Jared Moore, Miguel Monares, Christo-
+  Samuel R. Bowman. 2019. Verb argument structure            pher Potts, and Douwe Kiela. 2024. I am a strange
+  alternations in word and sentence embeddings. In           dataset: Metalinguistic tests for language models.
+  Proceedings of the Society for Computation in Lin-        ACL.
+  guistics (SCiL) 2019, pages 287–297.
+Michael Kranzlein, Nathan Schneider, and Kevin To-        Tristan Thrush, Ethan Wilcox, and Roger Levy. 2020.
+  bia. 2024. CuRIAM: Corpus re interpretation and            Investigating novel verb learning in BERT: Selec-
+  metalanguage in U.S. Supreme Court opinions. In            tional preference classes and alternation-based syn-
+  LREC-COLING.                                               tactic generalization. In Proceedings of the Third
+                                                            BlackboxNLP Workshop on Analyzing and Interpret-
+Hector Levesque, Ernest Davis, and Leora Morgenstern.        ing Neural Networks for NLP.
+  2012. The winograd schema challenge. In Confer-
+  ence on the Principles of Knowledge Representation      Hugo Touvron, Louis Martin, Kevin Stone, Peter Al-
+  and Reasoning.                                            bert, Amjad Almahairi, Yasmine Babaei, Nikolay
+                                                            Bashlykov, Soumya Batra, Prajjwal Bhargava, Shruti
+Tal Linzen, Emmanuel Dupoux, and Yoav Goldberg.             Bhosale, Dan Bikel, Lukas Blecher, Cristian Canton
+  2016. Assessing the ability of lstms to learn syntax-     Ferrer, Moya Chen, Guillem Cucurull, David Esiobu,
+  sensitive dependencies. TACL.                             Jude Fernandes, Jeremy Fu, Wenyin Fu, Brian Fuller,
+                                                            Cynthia Gao, Vedanuj Goswami, Naman Goyal, An-
+Ian McKenzie, Alexander Lyzhov, Alicia Parrish,             thony Hartshorn, Saghar Hosseini, Rui Hou, Hakan
+   Ameya Prabhu, Aaron Mueller, Najoung Kim, Sam            Inan, Marcin Kardas, Viktor Kerkez, Madian Khabsa,
+   Bowman, and Ethan Perez. 2022. The inverse scaling       Isabel Kloumann, Artem Korenev, Punit Singh Koura,
+   prize.                                                   Marie-Anne Lachaux, Thibaut Lavril, Jenya Lee, Di-
+OpenAI. 2022. ChatGPT.                                      ana Liskovich, Yinghai Lu, Yuning Mao, Xavier Mar-
+                                                            tinet, Todor Mihaylov, Pushkar Mishra, Igor Moly-
+OpenAI. 2023. GPT-4 technical report. arXiv.                bog, Yixin Nie, Andrew Poulton, Jeremy Reizen-
+                                                            stein, Rashi Rungta, Kalyan Saladi, Alan Schelten,
+Denis Paperno, Germán Kruszewski, Angeliki Lazari-          Ruan Silva, Eric Michael Smith, Ranjan Subrama-
+  dou, Quan Ngoc Pham, Raffaella Bernardi, Sandro           nian, Xiaoqing Ellen Tan, Binh Tang, Ross Tay-
+  Pezzelle, Marco Baroni, Gemma Boleda, and Raquel          lor, Adina Williams, Jian Xiang Kuan, Puxin Xu,
+  Fernández. 2016. The LAMBADA dataset: Word                Zheng Yan, Iliyan Zarov, Yuchen Zhang, Angela Fan,
+  prediction requiring a broad discourse context. In        Melanie Kambadur, Sharan Narang, Aurelien Ro-
+  ACL.                                                      driguez, Robert Stojnic, Sergey Edunov, and Thomas
+                                                            Scialom. 2023. Llama 2: Open foundation and fine-
+James Propp. 1993. Self-referential aptitude test.          tuned chat models. arXiv.
+Alec Radford, Jeffrey Wu, Rewon Child, David Luan,
+                                                          Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten
+  Dario Amodei, , and Ilya Sutskever. 2019. Language
+                                                             Bosma, Brian Ichter, Fei Xia, Ed Chi, Quoc Le, and
+  models are unsupervised multitask learners. Techni-
+                                                             Denny Zhou. 2022. Chain-of-thought prompting elic-
+  cal Report.
+                                                             its reasoning in large language models. arXiv.
+Rachel Rudinger, Jason Naradowsky, Brian Leonard,
+  and Benjamin Van Durme. 2018. Gender bias               Yixuan Weng, Minjun Zhu, Fei Xia, Bin Li, Shizhu He,
+  in coreference resolution.   In arXiv preprint            Shengping Liu, Bin Sun, Kang Liu, and Jun Zhao.
+  arXiv:1804.09301.                                         2023. Large language models are better reasoners
+                                                            with self-verification. EMNLP 2023 Findings.
+Keisuke Sakaguchi, Ronan Le Bras, Chandra Bhagavat-
+  ula, and Yejin Choi. 2020. Winogrande: An adver-        Shomir Wilson. 2012. The creation of a corpus of En-
+  sarial winograd schema challenge at scale. In AAAI.       glish metalanguage. In ACL.
+SciPy. Retrieved 2023. Scipy bootstrap.
+                                                          Mert Yuksekgonul, Federico Bianchi, Pratyusha Kalluri,
+Koustuv Sinha, Robin Jia, Dieuwke Hupkes, Joelle            Dan Jurafsky, and James Zou. 2023. When and why
+  Pineau, Adina Williams, and Douwe Kiela. 2021.           vision-language models behave like bags-of-words,
+  Masked language modeling and the distributional hy-       and what to do about it? In ICLR.
+  pothesis: Order word matters pre-training for little.
+  In EMNLP.                                               Eric Zelikman, Eliana Lorch, Lester Mackey, and
+                                                            Adam Tauman Kalai. 2023. Self-taught optimizer
+Alfred Tarski. 1931. The concept of truth in formalized     (stop): Recursively self-improving code generation.
+  languages. Logic, Semantics, Metamathematics.             arXiv.
+
+                                                      8897
+Aojun Zhou, Ke Wang, Zimu Lu, Weikang Shi, Sichun
+  Luo, Zipeng Qin, Shaoqing Lu, Anya Jia, Linqi Song,
+  Mingjie Zhan, and Hongsheng Li. 2023. Solving
+  challenging math word problems using GPT-4 code
+  interpreter with code-based self-verification. arXiv.
+Banghua Zhu, Hiteshi Sharma, Felipe Vieira Frujeri,
+  Shi Dong, Chenguang Zhu, Michael I. Jordan, and
+  Jiantao Jiao. 2023. Fine-tuning language models with
+  advantage-induced policy alignment. arXiv.
+
+
+
+
+                                                      8898
+A   Model Prompts                                     t
+                                                      t
+In this section, we provide the full model prompts    e
+that we used for the validation metrics. The gener-   r
+                                                      "p"
+ation metric does not use a prompt (generation is
+conditioned on the beginning of a statement). For     Answer: True
+each prompt, $example is replaced by one of the
+400 full statements before being given to a model.    Example:
+The few-shot examples were selected to match the
+                                                      this sentence
+author’s judgements about what best represents the    l             o
+task as a whole; they were not selected randomly.     o             o
+                                                      k             s
+A.1 Zero Shot                                         a bit like the
+                                                      l
+Overview:                                             e
+                                                      t
+Your task is to say whether a self-referential        t
+statement is true or false. In cases where you        e
+think that the answer is ambiguous, you should        r
+use your best judgement and still say either          "o"
+'True' or 'False'.
+                                                      Answer: False
+Example:
+                                                      Example:
+$example
+                                                      here in reversed is order word the.
+Answer:
+                                                      Answer: True
+A.2 Few Shot
+Overview:
+                                                      Example:
+Your task is to say whether a self-referential
+statement is true or false. In cases where you        here in fine is order word the.
+think that the answer is ambiguous, you should
+use your best judgement and still say either          Answer: False
+'True' or 'False'. Make sure that you understand
+the given examples before continuing.
+                                                      Now it is your turn to complete an example.
+                                                      Fill in the answer.
+Example:
+                                                      Example:
+I am the text you are reading.
+My last line has how many words?                      $example
+Two words.
+                                                      Answer:
+Answer: True
+                                                      A.3   Chain of Thought
+Example:                                              Overview:
+
+I am the text you are reading.                        Your task is to say whether a self-referential
+My last line has how many words?                      statement is true or false. In cases where you
+Seven words.                                          think that the answer is ambiguous, you should
+                                                      use your best judgement and still say either
+Answer: False                                         'True' or 'False'. Make sure that you understand
+                                                      the given examples before continuing.
+
+Example:
+                                                      Example:
+this sentence
+l              o                                      I am the text you are reading.
+o              o                                      My last line has how many words?
+k              s                                      Two words.
+a bit like the
+l                                                     Answer: The text has 3 lines. The last line is
+e                                                     "Two words". The number of words in "Two words"
+
+                                                   8899
+is 2. So the statement is true.                        fine in here". In the original reversed statement,
+                                                       the word order is not fine. So the statement is
+                                                       false.
+Example:
+
+I am the text you are reading.                         Now it is your turn to complete an example.
+My last line has how many words?                       Fill in the answer.
+Seven words.
+                                                       Example:
+Answer: The text has 3 lines. The last line is
+"Seven words". The number of words in "Seven words"    $example
+is 2. So the statement is false.
+                                                       Answer:
+
+Example:                                               A.4   Zero Shot (Non-Self-Referent)
+this sentence                                          Overview:
+l              o
+o              o                                       Your task is to say whether a statement about a
+k              s                                       sentence is true or false. In cases where you think
+a bit like the                                         that the answer is ambiguous, you should use your
+l                                                      best judgement and still say either 'True' or
+e                                                      'False'.
+t
+t
+e                                                      Example:
+r
+"p"                                                    $example
+
+Answer: Visually, the words and letters of the         Answer:
+sentence are arranged to look like a "p" on the
+page. So, the statement is true.                       A.5   Few Shot (Non-Self-Referent)
+                                                       Overview:
+
+Example:                                               Your task is to say whether a statement about a
+                                                       sentence is true or false. In cases where you think
+this sentence                                          that the answer is ambiguous, you should use your
+l              o                                       best judgement and still say either 'True' or
+o              o                                       'False'. Make sure that you understand the given
+k              s                                       examples before continuing.
+a bit like the
+l
+e                                                      Example:
+t
+t                                                      The number of words in the following sentence is
+e                                                      nine.
+r
+"o"                                                    The number of words in this sentence is nine.
+
+Answer: Visually, the words and letters of the         Answer: True
+sentence are arranged to look like a "p" on the
+page, not an "o". So, the statement is false.
+                                                       Example:
+
+Example:                                               The number of words in the following sentence is
+                                                       eight.
+here in reversed is order word the.
+                                                       The number of words in this sentence is eight.
+Answer: We have to notice that, if the word order is
+reversed, the statement reads: "the word order is      Answer: False
+reversed in here". In the original reversed
+statement, that is true. So the statement is true.
+                                                       Example:
+
+Example:                                               the following sentence
+                                                       l             o
+here in fine is order word the.                        o             o
+                                                       k             s
+Answer: We have to notice that, if the word order is   a bit like the
+reversed, the statement reads: "the word order is      l
+
+                                                   8900
+e                                                     The food words that this sentence contains are
+t                                                     guava and cake but not carrot.
+t
+e                                                     Answer: False
+r
+"p"
+                                                      Now it is your turn to complete an example.
+this sentence                                         Fill in the answer.
+l              o
+o              o                                      Example:
+k              s
+a bit like the                                        $example
+l
+e                                                     Answer:
+t
+t
+e                                                     A.6   Chain of Thought (Non-Self-Referent)
+r                                                     Overview:
+"p"
+                                                      Your task is to say whether a statement about a
+Answer: True                                          sentence is true or false. In cases where you think
+                                                      that the answer is ambiguous, you should use your
+                                                      best judgement and still say either 'True' or
+Example:                                              'False'. Make sure that you understand the given
+                                                      examples before continuing.
+the following sentence
+l              o
+o              o                                      Example:
+k              s
+a bit like the                                        The number of words in the following sentence is
+l                                                     nine.
+e
+t                                                     The number of words in this sentence is nine.
+t
+e                                                     Answer: Counting the number of words in the
+r                                                     sentence, we see that there are nine words. So,
+"o"                                                   the statement is true.
+
+this sentence
+l              o                                      Example:
+o              o
+k              s                                      The number of words in the following sentence is
+a bit like the                                        eight.
+l
+e                                                     The number of words in this sentence is eight.
+t
+t                                                     Answer: Counting the number of words in the
+e                                                     sentence, we see that there are nine words,
+r                                                     not eight. So, the statement is false.
+"o"
+
+Answer: False                                         Example:
+
+                                                      the following sentence
+Example:                                              l             o
+                                                      o             o
+The food words that the following sentence contains   k             s
+are guava and cake and also carrot.                   a bit like the
+                                                      l
+The food words that this sentence contains are        e
+guava and cake and also carrot.                       t
+                                                      t
+Answer: True                                          e
+                                                      r
+                                                      "p"
+Example:
+                                                      this sentence
+The food words that the following sentence contains   l             o
+are guava and cake but not carrot.                    o             o
+                                                      k             s
+
+                                                  8901
+a bit like the                                        is false.
+l
+e
+t                                                     Now it is your turn to complete an example.
+t                                                     Fill in the answer.
+e
+r                                                     Example:
+"p"
+                                                      $example
+Answer: Visually, the words and letters of
+the sentence are arranged to look like a "p"          Answer:
+on the page. So, the statement is true.
+                                                      B      I am an Impossible Dataset
+Example:
+                                                      The schema of “I am a Strange Dataset” does not
+the following sentence                                place any limits on the complexity of an example.
+l              o                                      One of the expert annotators in particular took full
+o              o
+k              s                                      advantage of this while they were creating exam-
+a bit like the                                        ples. They generated 10 examples that another
+l                                                     expert annotator could not understand without an
+e
+t                                                     explanation. These examples are not in our main
+t                                                     dataset, where we verify that non-expert people
+e                                                     can perform well. We release these 10 examples
+r
+"o"                                                   separately to showcase just how hard examples fit-
+                                                      ting this self-referential schema can get. We also
+this sentence                                         hope that when language models improve, these 10
+l              o
+o              o                                      examples can be a useful initial probe into their rea-
+k              s                                      soning capabilities. We provide two examples from
+a bit like the
+l
+                                                      this seemingly “Impossible” set in Figure 8. We
+e                                                     also provide GPT 4’s output on another example
+t                                                     from this dataset in Figure 9 below.
+t
+e                                                         Now, I list a digit thirteens: Now, I list a digit thirteens:
+r                                                         pi. Letter count the words. pi. Letter count the words.
+"o"                                                       Conceded? Errorless.           Conceded? Erroneous.
+Answer: Visually, the words and letters of the            Answer: fbdi yqtf lq xlmw      Answer: fbdi yqtf lq xlmw
+sentence are arranged to look like a "p" on the           hnumjw ynolzy if vul.          hnumjw ynolzy if one.
+page, not an "o". So, the statement is false.
+                                                      Figure 8: Examples from “I am an Impossible Dataset”.
+                                                      Examples from this dataset still follow our schema, but
+Example:
+                                                      the expert annotators needed to see an explanation be-
+The food words that the following sentence contains   fore they understood. The first example says that the
+are guava and cake and also carrot.                   letter count of each of the words are the thirteen first
+                                                      digits of π: 3.141592653589. The beginning of the
+The food words that this sentence contains are        second example uses a Caesar cipher which shifts by
+guava and cake and also carrot.
+                                                      one each successive word and reads “each word in this
+Answer: The food words mentioned are indeed guava,    cipher shifts by”. “vul” with a shift of 7 is “one”.
+cake, and carrot. So, the statement is true.
+
+
+Example:
+
+The food words that the following sentence contains
+are guava and cake but not carrot.
+
+The food words that this sentence contains are
+guava and cake but not carrot.
+
+Answer: The food words mentioned in the sentence
+are guava, cake, and carrot. It is not true that
+carrot is not in the sentence. So, the statement
+
+                                                   8902
+                                                                  D.1   A Test of the Tokenizer?
+    “Fivetune favors the bold.”
+    “After that meal, I was snined.”                              Our tests are related to whether a model truly “sees”
+    “Each of the number sounds in these sentences, includ-
+    ing this sentence, are increased by two.”
+                                                                  text in the same way as people. Metalinguistic state-
+                                                                  ments may refer to the number of characters that
+                                                                  they have, how text is arranged on the page, capi-
+    GPT 4: The first sentence “Fivetune favors the bold.”         talization of certain letters, and relative positions
+    has the number sound “five” instead of “fortune”. The         of words. A human can easily count the charac-
+    second sentence “After that meal, I was snined.” has the
+    number sound “nine” instead of “sated”. The third sen-        ters that they see in a sentence, but models tend to
+    tence “Each of the number sounds in these sentences,          encode text in tokens, not characters. We do not
+    including this sentence, are increased by two.” sug-          provide tests to disentangle the impact of different
+    gests that each number sound should be increased by
+    two. However, “five” increased by two is “seven”, not         tokenizers, so this section is speculative.
+    “fortune”, and “nine” increased by two is “eleven”, not
+    “sated”. So, the statement is false.                          D.2   Training Data Limitations
+                                                                  Practically speaking, it is unlikely that there
+                                                                  are many examples of metalinguistic statements
+Figure 9: GPT 4’s Dec 26, 2023 output on an example
+                                                                  in training datasets. They are incredibly time-
+from “I am an Impossible Dataset”. It understands that
+some of the original words should be “fortune” (e.g.              intensive to generate, even if they are easy to
+4tune) and “sated” (e.g. s8ed). But GPT 4 misses that             verify. Yet people, who have almost surely seen
+the statement is trying to say that the number sounds in          even fewer examples, can do much better at this
+every sentence are increased by one. The last sentence            task than models. This “hard-to-create, easy-to-
+cannot say “one” explicitly - it needs to say “two” in            verify” feature of hard evaluation datasets is true
+order for the statement to stay true. We would not expect         of Winoground (Thrush et al., 2022) too, which is
+a typical person to understand this example, but will a
+                                                                  a vision and language evaluation dataset that has
+language model eventually grasp it?
+                                                                  remained unsaturated for well over a year. This
+                                                                  goes to show that our models still have the wrong
+                                                                  biases - will they change simply with model scale?
+C     Mechanical Turk Annotator Interface
+                                                                  E Results by Tag
+Here, we show a screenshot of the interface used
+by Mechanical Turk workers in Figure 10.                          In this section, we provide results in a table for
+                                                                  each of the 10 tags.
+
+
+
+
+Figure 10: A screenshot of the Mechanical Turk worker
+interface for validating statements.
+
+
+
+
+D     Supplemental Discussion
+
+Here, we present supplemental discussion about
+why models are showing poor performance on “I
+am a Strange Dataset”.
+                                                               8903
+ Model         Params   Chat            GenL        Val ZSL         Val FSL     Val ZSL (R)      Val FSL (R)      Val CoTT
+ Llama 2          7B       N   62.90 ± 12.10    49.19 ± 1.21   49.19 ± 4.84    46.77 ± 12.90   50.00 ± 12.90    6.45 ± 4.03
+ Llama 2          7B       Y   58.06 ± 12.90    50.81 ± 1.21   50.00 ± 0.00    37.10 ± 11.29   56.45 ± 12.90   16.94 ± 6.85
+ Mistral 0.1      7B       N   53.23 ± 12.90    50.00 ± 2.42   50.81 ± 1.21    56.45 ± 12.90   51.61 ± 12.90    0.00 ± 0.00
+ Starling α       7B       Y   54.84 ± 12.90    49.19 ± 2.42   49.19 ± 1.21    54.84 ± 12.90   51.61 ± 12.90   32.26 ± 8.87
+ Mistral 0.2      7B       Y   51.61 ± 12.90    50.00 ± 6.45   50.00 ± 5.65    46.77 ± 12.10   53.23 ± 12.10   53.23 ± 8.06
+ Llama 2         13B       N   62.90 ± 11.29    47.58 ± 3.63   52.42 ± 5.24    41.94 ± 12.10   58.06 ± 12.90    4.03 ± 3.23
+ Llama 2         13B       Y   59.68 ± 12.90    49.19 ± 4.84   51.61 ± 3.23    46.77 ± 12.90   50.00 ± 12.90    7.26 ± 4.44
+ Mixtral 0.1    8x7B       N   54.84 ± 12.90    53.23 ± 4.84   50.00 ± 0.00    48.39 ± 12.90   48.39 ± 12.10    3.23 ± 2.82
+ Mixtral 0.1    8x7B       Y   53.23 ± 12.90    49.19 ± 4.84   45.97 ± 5.65    53.23 ± 12.90   48.39 ± 12.90   36.29 ± 8.06
+ Llama 2         70B       N   61.29 ± 11.29    52.42 ± 5.65   50.81 ± 4.03    59.68 ± 11.29   50.00 ± 12.90    3.23 ± 2.82
+ Llama 2         70B       Y   51.61 ± 12.90    53.23 ± 6.45   49.19 ± 3.23    56.45 ± 12.90   46.77 ± 12.90   31.45 ± 7.26
+ Claude 2           -      Y               -               -              -                -               -   48.39 ± 6.85
+ GPT 3.5 T          -      Y               -    48.39 ± 4.84   50.81 ± 5.65    56.45 ± 12.90   50.00 ± 12.90   44.35 ± 7.26
+ GPT 4              -      Y               -    53.23 ± 8.06   53.23 ± 8.06    54.84 ± 12.90   53.23 ± 12.90   55.65 ± 9.27
+
+Table 5: Results for the 62 example pairs with the Numerical Operations tag. Scores with 95% confidence intervals
+above chance are shown in bold.
+
+
+
+ Model         Params   Chat            GenL        Val ZSL         Val FSL     Val ZSL (R)      Val FSL (R)      Val CoTT
+ Llama 2          7B       N    54.35 ± 9.78    49.46 ± 2.17   51.63 ± 3.53    47.83 ± 10.33    66.30 ± 9.78    3.80 ± 2.72
+ Llama 2          7B       Y    48.91 ± 9.78    54.35 ± 5.16   50.54 ± 0.82     60.87 ± 9.78    61.96 ± 9.78   13.04 ± 4.35
+ Mistral 0.1      7B       N    51.09 ± 9.78    55.43 ± 4.89   49.46 ± 2.17     63.04 ± 9.78    56.52 ± 9.78    0.00 ± 0.00
+ Starling α       7B       Y    50.00 ± 9.78    59.24 ± 5.43   51.63 ± 2.17     60.87 ± 9.78    61.96 ± 9.78   38.04 ± 6.79
+ Mistral 0.2      7B       Y    51.09 ± 9.78    54.35 ± 6.79   52.17 ± 5.98     56.52 ± 9.78    57.61 ± 9.78   50.00 ± 6.52
+ Llama 2         13B       N    53.26 ± 9.78    54.89 ± 5.98   56.52 ± 5.98     55.43 ± 9.78    65.22 ± 9.78    5.98 ± 3.26
+ Llama 2         13B       Y    48.91 ± 9.78    55.98 ± 6.52   52.17 ± 4.35     57.61 ± 9.78    50.00 ± 9.78   11.96 ± 5.16
+ Mixtral 0.1    8x7B       N    55.43 ± 9.78    63.59 ± 6.52   52.72 ± 4.35     64.13 ± 9.78    60.87 ± 9.78    3.80 ± 2.99
+ Mixtral 0.1    8x7B       Y   55.43 ± 10.33    57.07 ± 6.52   57.07 ± 4.62     61.96 ± 9.78   57.61 ± 10.33   50.00 ± 7.07
+ Llama 2         70B       N    55.43 ± 9.78    57.07 ± 5.43   59.24 ± 4.89     66.30 ± 9.78    63.04 ± 9.78    1.09 ± 1.36
+ Llama 2         70B       Y   51.09 ± 10.33    59.24 ± 7.07   52.72 ± 3.80     61.96 ± 9.78    65.22 ± 9.78   21.74 ± 6.25
+ Claude 2           -      Y               -               -              -                -               -   55.98 ± 7.07
+ GPT 3.5 T          -      Y               -    54.89 ± 4.89   55.98 ± 5.72     57.61 ± 9.78    71.74 ± 9.24   55.98 ± 6.25
+ GPT 4              -      Y               -    63.04 ± 6.52   61.96 ± 6.52     70.65 ± 9.24    71.74 ± 9.24   72.83 ± 6.52
+
+Table 6: Results for the 94 example pairs with the Negation & Scope tag. Scores with 95% confidence intervals
+above chance are shown in bold.
+
+
+
+ Model         Params   Chat          GenL          Val ZSL         Val FSL      Val ZSL (R)     Val FSL (R)       Val CoTT
+ Llama 2          7B      N    45.83 ± 20.83    50.00 ± 0.00    50.00 ± 6.25   58.33 ± 20.83   58.33 ± 20.83     8.33 ± 7.29
+ Llama 2          7B      Y    45.83 ± 20.83    52.08 ± 6.25    50.00 ± 0.00   62.50 ± 20.83   70.83 ± 18.75   22.92 ± 10.42
+ Mistral 0.1      7B      N    45.83 ± 20.83    52.08 ± 6.25    54.17 ± 5.21   66.67 ± 18.75   70.83 ± 18.75     0.00 ± 0.00
+ Starling α       7B      Y    45.83 ± 20.83   56.25 ± 10.42    47.92 ± 3.12   66.67 ± 18.75   66.67 ± 18.75   37.50 ± 12.50
+ Mistral 0.2      7B      Y    54.17 ± 20.83   54.17 ± 10.42   62.50 ± 12.50   62.50 ± 20.83   66.67 ± 18.75   47.92 ± 12.50
+ Llama 2         13B      N    45.83 ± 20.83    52.08 ± 6.25    56.25 ± 8.33   54.17 ± 20.83   58.33 ± 20.83     2.08 ± 3.12
+ Llama 2         13B      Y    45.83 ± 20.83   52.08 ± 10.42    52.08 ± 3.12   58.33 ± 20.83   66.67 ± 18.75   18.75 ± 11.46
+ Mixtral 0.1    8x7B      N    37.50 ± 18.75   64.58 ± 10.42    54.17 ± 5.21   62.50 ± 18.75   62.50 ± 20.83    12.50 ± 9.38
+ Mixtral 0.1    8x7B      Y    50.00 ± 20.83    47.92 ± 8.33   54.17 ± 10.42   50.00 ± 20.83   58.33 ± 20.83   41.67 ± 14.58
+ Llama 2         70B      N    45.83 ± 20.83    50.00 ± 8.33   56.25 ± 12.50   54.17 ± 20.83   62.50 ± 18.75    12.50 ± 8.33
+ Llama 2         70B      Y    50.00 ± 20.83   43.75 ± 10.42    47.92 ± 3.12   54.17 ± 20.83   58.33 ± 20.83    10.42 ± 8.33
+ Claude 2           -     Y                -               -               -               -               -   47.92 ± 12.50
+ GPT 3.5 T          -     Y                -    50.00 ± 0.00    47.92 ± 6.25   54.17 ± 20.83   58.33 ± 20.83   52.08 ± 12.50
+ GPT 4              -     Y                -   54.17 ± 10.42   66.67 ± 13.54   58.33 ± 20.83   62.50 ± 18.75   60.42 ± 14.58
+
+Table 7: Results for the 24 example pairs with the Multi-Channel tag. Scores with 95% confidence intervals above
+chance are shown in bold.
+
+
+                                                           8904
+ Model         Params   Chat          GenL         Val ZSL        Val FSL     Val ZSL (R)      Val FSL (R)     Val CoTT
+ Llama 2          7B      N    50.00 ± 12.96   48.15 ± 2.31   48.15 ± 3.70   35.19 ± 12.96   46.30 ± 12.96    6.48 ± 4.17
+ Llama 2          7B      Y    44.44 ± 12.96   48.15 ± 4.63   49.07 ± 1.39   46.30 ± 12.96   38.89 ± 12.96   12.04 ± 5.56
+ Mistral 0.1      7B      N    46.30 ± 12.96   47.22 ± 3.24   47.22 ± 3.24   37.04 ± 12.96   44.44 ± 12.96    0.00 ± 0.00
+ Starling α       7B      Y    48.15 ± 12.96   48.15 ± 5.09   50.93 ± 1.39   44.44 ± 12.96   46.30 ± 12.96   28.70 ± 8.33
+ Mistral 0.2      7B      Y    46.30 ± 12.96   52.78 ± 7.41   48.15 ± 7.41   44.44 ± 12.96   37.04 ± 12.96   43.52 ± 8.33
+ Llama 2         13B      N    48.15 ± 12.96   48.15 ± 5.56   49.07 ± 5.56   44.44 ± 12.96   44.44 ± 12.96    3.70 ± 3.24
+ Llama 2         13B      Y    44.44 ± 12.96   47.22 ± 7.41   48.15 ± 4.63   38.89 ± 12.96   35.19 ± 12.96    8.33 ± 5.09
+ Mixtral 0.1    8x7B      N    46.30 ± 12.96   54.63 ± 5.56   49.07 ± 3.70   44.44 ± 12.96   46.30 ± 12.96    1.85 ± 2.31
+ Mixtral 0.1    8x7B      Y    44.44 ± 12.96   51.85 ± 8.33   50.00 ± 6.48   44.44 ± 12.96   53.70 ± 12.96   44.44 ± 9.26
+ Llama 2         70B      N    50.00 ± 12.96   50.00 ± 4.63   50.93 ± 3.70   51.85 ± 12.96   44.44 ± 12.96    0.00 ± 0.00
+ Llama 2         70B      Y    44.44 ± 12.96   46.30 ± 7.41   47.22 ± 4.17   44.44 ± 12.96   51.85 ± 12.96   29.63 ± 8.33
+ Claude 2           -     Y                -              -              -               -               -   50.00 ± 7.41
+ GPT 3.5 T          -     Y                -   51.85 ± 5.09   46.30 ± 6.48   51.85 ± 12.96   55.56 ± 12.96   54.63 ± 9.26
+ GPT 4              -     Y                -   56.48 ± 7.41   58.33 ± 9.26   64.81 ± 12.96   62.96 ± 12.96   71.30 ± 8.80
+
+Table 8: Results for the 55 example pairs with the Location of Element tag. Scores with 95% confidence intervals
+above chance are shown in bold.
+
+
+
+ Model         Params   Chat          GenL         Val ZSL        Val FSL     Val ZSL (R)      Val FSL (R)     Val CoTT
+ Llama 2          7B      N    66.67 ± 14.29   50.00 ± 0.00   47.62 ± 4.76   52.38 ± 14.29   52.38 ± 14.29    7.14 ± 5.36
+ Llama 2          7B      Y    61.90 ± 14.29   54.76 ± 5.36   48.81 ± 1.79   54.76 ± 14.29   52.38 ± 14.29   25.00 ± 8.93
+ Mistral 0.1      7B      N    66.67 ± 14.29   50.00 ± 0.00   47.62 ± 2.98   52.38 ± 14.29   52.38 ± 14.29    0.00 ± 0.00
+ Starling α       7B      Y    66.67 ± 14.29   53.57 ± 5.36   51.19 ± 3.57   59.52 ± 14.29   54.76 ± 14.29   32.14 ± 9.52
+ Mistral 0.2      7B      Y    57.14 ± 14.29   48.81 ± 8.33   54.76 ± 7.14   50.00 ± 14.29   50.00 ± 14.29   55.95 ± 8.33
+ Llama 2         13B      N    73.81 ± 13.10   45.24 ± 5.95   54.76 ± 5.36   52.38 ± 14.29   54.76 ± 14.29    3.57 ± 4.17
+ Llama 2         13B      Y    71.43 ± 13.10   55.95 ± 8.33   48.81 ± 1.79   59.52 ± 14.29   52.38 ± 14.29   13.10 ± 6.55
+ Mixtral 0.1    8x7B      N    57.14 ± 14.29   55.95 ± 7.14   46.43 ± 4.17   52.38 ± 14.29   54.76 ± 14.29    3.57 ± 4.17
+ Mixtral 0.1    8x7B      Y    57.14 ± 14.29   53.57 ± 7.14   52.38 ± 6.55   42.86 ± 14.29   54.76 ± 14.29   34.52 ± 8.33
+ Llama 2         70B      N    69.05 ± 14.29   52.38 ± 7.14   61.90 ± 6.55   61.90 ± 14.29   61.90 ± 14.29    2.38 ± 2.98
+ Llama 2         70B      Y    64.29 ± 14.29   55.95 ± 8.33   50.00 ± 3.57   59.52 ± 14.29   61.90 ± 14.29   13.10 ± 7.74
+ Claude 2           -     Y                -              -              -               -               -   59.52 ± 8.33
+ GPT 3.5 T          -     Y                -   48.81 ± 4.76   53.57 ± 7.14   64.29 ± 14.29   61.90 ± 14.29   47.62 ± 9.52
+ GPT 4              -     Y                -   50.00 ± 7.14   58.33 ± 7.14   59.52 ± 14.29   59.52 ± 14.29   55.95 ± 9.52
+
+Table 9: Results for the 42 example pairs with the Sensory tag. Scores with 95% confidence intervals above chance
+are shown in bold.
+
+
+
+ Model         Params   Chat          GenL         Val ZSL        Val FSL     Val ZSL (R)      Val FSL (R)     Val CoTT
+ Llama 2          7B      N    62.50 ± 13.54   50.00 ± 0.00   48.96 ± 6.25   41.67 ± 14.58   41.67 ± 14.58    9.38 ± 5.21
+ Llama 2          7B      Y    58.33 ± 14.58   48.96 ± 6.25   50.00 ± 0.00   31.25 ± 12.50   62.50 ± 14.58    8.33 ± 5.21
+ Mistral 0.1      7B      N    62.50 ± 13.54   46.88 ± 4.17   48.96 ± 3.12   41.67 ± 13.54   43.75 ± 14.58    0.00 ± 0.00
+ Starling α       7B      Y    64.58 ± 13.54   48.96 ± 3.12   48.96 ± 1.56   39.58 ± 13.54   52.08 ± 14.58   31.25 ± 8.85
+ Mistral 0.2      7B      Y    64.58 ± 13.54   45.83 ± 8.33   50.00 ± 6.25   47.92 ± 14.58   41.67 ± 14.58   46.88 ± 8.33
+ Llama 2         13B      N    60.42 ± 13.54   48.96 ± 6.25   47.92 ± 8.33   43.75 ± 14.58   47.92 ± 14.58    5.21 ± 4.17
+ Llama 2         13B      Y    56.25 ± 14.58   46.88 ± 7.29   48.96 ± 4.69   45.83 ± 14.58   39.58 ± 14.58    5.21 ± 4.17
+ Mixtral 0.1    8x7B      N    54.17 ± 14.58   52.08 ± 6.25   50.00 ± 0.00   33.33 ± 13.54   52.08 ± 14.58    2.08 ± 2.60
+ Mixtral 0.1    8x7B      Y    60.42 ± 14.58   52.08 ± 7.29   52.08 ± 6.25   50.00 ± 14.58   60.42 ± 14.58   46.88 ± 8.33
+ Llama 2         70B      N    60.42 ± 13.54   47.92 ± 6.25   53.12 ± 5.21   52.08 ± 14.58   47.92 ± 14.58    1.04 ± 1.56
+ Llama 2         70B      Y    54.17 ± 14.58   50.00 ± 7.29   47.92 ± 4.17   41.67 ± 14.58   56.25 ± 13.54   23.96 ± 8.33
+ Claude 2           -     Y                -              -              -               -               -   57.29 ± 7.29
+ GPT 3.5 T          -     Y                -   52.08 ± 4.17   53.12 ± 6.25   54.17 ± 14.58   60.42 ± 13.54   45.83 ± 9.38
+ GPT 4              -     Y                -   61.46 ± 6.77   62.50 ± 7.81   72.92 ± 12.50   70.83 ± 12.50   62.50 ± 9.38
+
+Table 10: Results for the 48 example pairs with the Sub-Word tag. Scores with 95% confidence intervals above
+chance are shown in bold.
+
+
+                                                          8905
+ Model         Params   Chat          GenL          Val ZSL         Val FSL     Val ZSL (R)      Val FSL (R)       Val CoTT
+ Llama 2          7B      N    64.52 ± 16.13    51.61 ± 2.42    53.23 ± 6.45   54.84 ± 16.13   70.97 ± 16.13     4.84 ± 5.65
+ Llama 2          7B      Y    54.84 ± 16.13    56.45 ± 7.26    50.00 ± 0.00   67.74 ± 16.13   54.84 ± 16.13    11.29 ± 7.26
+ Mistral 0.1      7B      N    58.06 ± 16.13    58.06 ± 6.45    51.61 ± 2.42   67.74 ± 16.13   67.74 ± 16.13     0.00 ± 0.00
+ Starling α       7B      Y    51.61 ± 16.13    62.90 ± 7.26    53.23 ± 4.03   67.74 ± 16.13   54.84 ± 17.74   46.77 ± 11.29
+ Mistral 0.2      7B      Y    61.29 ± 16.13   53.23 ± 12.90    54.84 ± 9.68   64.52 ± 16.13   61.29 ± 16.13   53.23 ± 11.29
+ Llama 2         13B      N    67.74 ± 16.13    59.68 ± 9.68   59.68 ± 10.48   67.74 ± 16.13   77.42 ± 14.52     8.06 ± 6.45
+ Llama 2         13B      Y    58.06 ± 16.13    62.90 ± 9.68    56.45 ± 5.65   67.74 ± 16.13   64.52 ± 16.13     8.06 ± 7.26
+ Mixtral 0.1    8x7B      N    58.06 ± 16.13    69.35 ± 9.68    54.84 ± 4.84   74.19 ± 16.13   61.29 ± 16.13     1.61 ± 2.42
+ Mixtral 0.1    8x7B      Y    54.84 ± 17.74    50.00 ± 9.68    54.84 ± 6.45   58.06 ± 16.13   38.71 ± 16.13    41.94 ± 9.68
+ Llama 2         70B      N    64.52 ± 16.13    66.13 ± 9.68    62.90 ± 7.26   67.74 ± 16.13   67.74 ± 16.13     1.61 ± 2.42
+ Llama 2         70B      Y    61.29 ± 17.74   67.74 ± 12.10    50.00 ± 4.84   70.97 ± 16.13   74.19 ± 14.52   25.81 ± 11.29
+ Claude 2           -     Y                -               -               -               -               -    59.68 ± 9.68
+ GPT 3.5 T          -     Y                -    54.84 ± 5.65    64.52 ± 8.06   58.06 ± 16.13   64.52 ± 16.13   46.77 ± 12.10
+ GPT 4              -     Y                -   64.52 ± 11.29   61.29 ± 11.29   67.74 ± 16.13   70.97 ± 16.13   75.81 ± 12.10
+
+Table 11: Results for the 31 example pairs with the Existence of Element tag. Scores with 95% confidence intervals
+above chance are shown in bold.
+
+
+
+
+ Model         Params   Chat          GenL          Val ZSL         Val FSL     Val ZSL (R)      Val FSL (R)       Val CoTT
+ Llama 2          7B      N    58.33 ± 20.83    50.00 ± 0.00    50.00 ± 0.00   41.67 ± 20.83   41.67 ± 20.83     6.25 ± 6.25
+ Llama 2          7B      Y    58.33 ± 18.75    43.75 ± 6.25    50.00 ± 0.00   54.17 ± 20.83   58.33 ± 20.83   29.17 ± 10.42
+ Mistral 0.1      7B      N    41.67 ± 20.83    43.75 ± 7.29    52.08 ± 3.12   45.83 ± 20.83   54.17 ± 20.83     0.00 ± 0.00
+ Starling α       7B      Y    37.50 ± 20.83    50.00 ± 6.25    47.92 ± 3.12   45.83 ± 20.83   58.33 ± 20.83   22.92 ± 12.50
+ Mistral 0.2      7B      Y    45.83 ± 20.83   50.00 ± 10.42    47.92 ± 8.33   41.67 ± 20.83   50.00 ± 20.83   41.67 ± 12.50
+ Llama 2         13B      N    58.33 ± 20.83    45.83 ± 5.21    54.17 ± 8.33   25.00 ± 16.67   50.00 ± 20.83     4.17 ± 5.21
+ Llama 2         13B      Y    54.17 ± 20.83    50.00 ± 8.33    47.92 ± 3.12   50.00 ± 20.83   41.67 ± 20.83    16.67 ± 9.38
+ Mixtral 0.1    8x7B      N    50.00 ± 20.83    50.00 ± 8.33    47.92 ± 3.12   45.83 ± 20.83   50.00 ± 20.83     2.08 ± 3.12
+ Mixtral 0.1    8x7B      Y    41.67 ± 20.83    43.75 ± 8.33   47.92 ± 10.42   37.50 ± 18.75   37.50 ± 18.85   29.17 ± 12.50
+ Llama 2         70B      N    50.00 ± 20.83    45.83 ± 8.33   54.17 ± 10.42   41.67 ± 20.83   45.83 ± 20.83     4.17 ± 5.21
+ Llama 2         70B      Y    54.17 ± 20.83    52.08 ± 7.29    45.83 ± 5.21   41.67 ± 20.83   54.17 ± 20.83   22.92 ± 10.42
+ Claude 2           -     Y                -               -               -               -               -   41.67 ± 10.42
+ GPT 3.5 T          -     Y                -    54.17 ± 5.21    45.83 ± 8.33   70.83 ± 16.67   54.17 ± 20.83   50.00 ± 10.42
+ GPT 4              -     Y                -    47.92 ± 9.38   52.08 ± 14.58   41.67 ± 20.83   62.50 ± 18.75   45.83 ± 12.50
+
+Table 12: Results for the 24 example pairs with the Hypothetical tag. Scores with 95% confidence intervals above
+chance are shown in bold.
+
+
+
+
+ Model         Params   Chat          GenL          Val ZSL         Val FSL     Val ZSL (R)      Val FSL (R)       Val CoTT
+ Llama 2          7B      N    44.00 ± 20.00    50.00 ± 6.00    50.00 ± 6.00   40.00 ± 20.00   56.00 ± 20.00     2.00 ± 3.00
+ Llama 2          7B      Y    60.00 ± 20.00   50.00 ± 10.00    50.00 ± 0.00   52.00 ± 20.00   56.00 ± 20.00     6.00 ± 6.00
+ Mistral 0.1      7B      N    64.00 ± 18.00    50.00 ± 8.00    46.00 ± 5.00   52.00 ± 20.00   60.00 ± 20.00     0.00 ± 0.00
+ Starling α       7B      Y    64.00 ± 20.00   54.00 ± 10.00    50.00 ± 0.00   56.00 ± 20.00   60.00 ± 20.00   44.00 ± 15.00
+ Mistral 0.2      7B      Y    48.00 ± 20.00   56.00 ± 12.00   58.00 ± 10.00   60.00 ± 20.00   60.00 ± 20.00   58.00 ± 12.00
+ Llama 2         13B      N    60.00 ± 20.00    56.00 ± 8.00   50.00 ± 12.00   52.00 ± 20.00   68.00 ± 18.00     6.00 ± 7.00
+ Llama 2         13B      Y    56.00 ± 20.00   54.00 ± 12.00    54.00 ± 8.00   52.00 ± 20.00   52.00 ± 20.00     8.00 ± 9.00
+ Mixtral 0.1    8x7B      N    60.00 ± 20.00   58.00 ± 10.00    54.00 ± 8.00   64.00 ± 20.00   52.00 ± 20.00     2.00 ± 3.00
+ Mixtral 0.1    8x7B      Y    60.00 ± 20.00   44.00 ± 12.00    54.00 ± 5.00   60.00 ± 20.00   56.00 ± 20.00   52.00 ± 16.00
+ Llama 2         70B      N    56.00 ± 20.00    60.00 ± 8.00    56.00 ± 6.00   56.00 ± 20.00   56.00 ± 20.00     0.00 ± 0.00
+ Llama 2         70B      Y    56.00 ± 20.00   52.00 ± 10.00    48.00 ± 3.00   56.00 ± 20.00   56.00 ± 20.00   30.00 ± 10.00
+ Claude 2           -     Y                -               -               -               -               -   68.00 ± 10.00
+ GPT 3.5 T          -     Y                -    56.00 ± 8.00    54.00 ± 8.00   56.00 ± 20.00   72.00 ± 18.00   42.00 ± 13.05
+ GPT 4              -     Y                -   68.00 ± 13.00   64.00 ± 13.00   84.00 ± 14.00   80.00 ± 16.00   80.00 ± 11.00
+
+Table 13: Results for the 25 example pairs with the Grammaticality tag. Scores with 95% confidence intervals above
+chance are shown in bold.
+
+
+                                                           8906
+ Model         Params   Chat          GenL          Val ZSL         Val FSL     Val ZSL (R)      Val FSL (R)       Val CoTT
+ Llama 2          7B      N    59.09 ± 20.45    52.27 ± 6.82   59.09 ± 10.23   59.09 ± 18.18   54.55 ± 20.45     2.27 ± 3.41
+ Llama 2          7B      Y    59.09 ± 20.45   63.64 ± 13.64    52.27 ± 3.41   59.09 ± 18.18   54.55 ± 22.73   20.45 ± 10.23
+ Mistral 0.1      7B      N    36.36 ± 20.45   63.64 ± 11.36    50.00 ± 0.00   86.36 ± 13.64   59.09 ± 20.45     0.00 ± 0.00
+ Starling α       7B      Y    50.00 ± 20.45   63.64 ± 11.36    52.27 ± 6.82   63.64 ± 20.45   54.55 ± 22.73   38.64 ± 13.64
+ Mistral 0.2      7B      Y    54.55 ± 22.73   59.09 ± 14.77   50.00 ± 11.36   63.64 ± 20.45   68.18 ± 18.18   43.18 ± 12.50
+ Llama 2         13B      N    59.09 ± 20.45   61.36 ± 13.64   70.45 ± 13.64   68.18 ± 18.18   77.27 ± 18.18     2.27 ± 3.41
+ Llama 2         13B      Y    63.64 ± 20.45   56.82 ± 13.64   59.09 ± 11.36   59.09 ± 20.45   63.64 ± 18.18   13.64 ± 12.50
+ Mixtral 0.1    8x7B      N    59.09 ± 20.45   72.73 ± 14.77    65.91 ± 9.09   72.73 ± 18.18   68.18 ± 18.18     0.00 ± 0.00
+ Mixtral 0.1    8x7B      Y    45.45 ± 20.45   61.36 ± 15.91    65.91 ± 9.09   72.73 ± 18.18   68.18 ± 18.18   52.27 ± 13.64
+ Llama 2         70B      N    63.64 ± 20.45   59.09 ± 13.64   54.55 ± 11.36   72.73 ± 18.18   72.73 ± 18.18     0.00 ± 0.00
+ Llama 2         70B      Y    63.64 ± 20.45   68.18 ± 14.77    56.82 ± 9.09   72.73 ± 18.18   68.18 ± 18.18    9.09 ± 10.23
+ Claude 2           -     Y                -               -               -               -               -   47.73 ± 13.64
+ GPT 3.5 T          -     Y                -   65.91 ± 13.64   63.64 ± 13.64   59.09 ± 20.45   72.73 ± 18.18   63.64 ± 11.36
+ GPT 4              -     Y                -   61.36 ± 11.36   59.09 ± 13.64   86.36 ± 13.64   81.82 ± 15.91   72.73 ± 10.23
+
+Table 14: Results for the 22 example pairs with the Question tag. Scores with 95% confidence intervals above
+chance are shown in bold.
+
+
+
+
+                                                           8907
+

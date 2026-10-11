@@ -1,0 +1,1517 @@
+                     Context versus Prior Knowledge in Language Models
+                       Kevin DuD Vésteinn SnæbjarnarsonR Niklas StoehrD
+                        Jennifer C. WhiteN Aaron Schein@ Ryan CotterellD
+                              D
+                                ETH Zürich R University of Copenhagen
+                        N
+                          University of Cambridge @ The University of Chicago
+               kevin.du@inf.ethz.ch vesn@di.ku.dk         niklas.stoehr@inf.ethz.ch
+              jw2088@cam.ac.uk schein@uchicago.edu ryan.cotterell@inf.ethz.ch
+
+                            Abstract                               Contexts              Entities                Susceptibility
+                                                                    The Beatles are
+                                                                    the best.
+         To answer a question, language models of-                  Harry plays chess
+         ten need to integrate prior knowledge learned              with Phoebe.
+                                                                           ...
+         during pretraining and new information pre-                Homer is an actor.
+
+         sented in context. We hypothesize that models
+                                                                                                                   Persuasion
+         perform this integration in a predictable way
+         across different questions and contexts: models             c: Homer is the
+
+         will rely more on prior knowledge for ques-                 best employee of
+                                                                     all time.
+         tions about entities (e.g., persons, places, etc.)
+         that they are more familiar with due to higher            Figure 1: In answering a given query, a model may be
+         exposure in the training corpus, and be more              more susceptible to context for some entities than others,
+         easily persuaded by some contexts than oth-               while some contexts may be more persuasive than oth-
+         ers. To formalize this problem, we propose                ers (as indicated in this figure by color darkness in the
+         two mutual information-based metrics to mea-              rightmost column). We introduce mutual information-
+         sure a model’s dependency on a context and                based metrics to evaluate how much impact the context
+         on its prior about an entity: first, the persua-          has relative to the prior knowledge of a model.
+         sion score of a given context represents how
+         much a model depends on the context in its de-
+                                                                   hypothesize that models will not behave identically
+         cision, and second, the susceptibility score of
+         a given entity represents how much the model              for all contexts and entities. For example, if a
+         can be swayed away from its original answer               language model is prompted with Harry hugged
+         distribution about an entity. We empirically              Voldemort. How friendly are Harry Potter and
+         test our metrics for their validity and reliabil-         Lord Voldemort?, we might expect the prior knowl-
+         ity. Finally, we explore and find a relationship          edge learned from training data describing the ri-
+         between the scores and the model’s expected               valry between these two characters to significantly
+         familiarity with an entity, and provide two use           influence the model’s answer. However, if the
+         cases to illustrate their benefits.
+                                                                   model lacks a strong prior on, say, Susie and Alia,
+                https://github.com/kdu4108/                        then we might expect its answer to be primarily
+                measureLM                                          context-driven when prompted with Susie hugged
+                                                                   Alia. How friendly are Susie and Alia?.
+     1   Introduction
+                                                                      We formalize this problem through the lens of
+     Language models have displayed remarkable abil-               evaluating the change in a model’s answer distribu-
+     ities to answer factual queries about entities, sug-          tion for different contexts and entities. We present
+     gesting that they encode knowledge about these                two mutual information-based metrics that allow us
+     entities learned during pretraining (Petroni et al.,          to explore differences in the effect of specific con-
+     2019; Brown et al., 2020; Roberts et al., 2020; Geva          texts on model behavior for different entities. The
+     et al., 2021). For prompts that extend a question             persuasion score of a given context measures how
+     with additional information or context, the model             much a model’s answer distribution is affected by
+     can draw on both its prior knowledge and the addi-            the context when prompted with a particular query
+     tional context to answer the query (Kwiatkowski               about a given entity. The susceptibility score of
+     et al., 2019; Joshi et al., 2017; Berant et al., 2013;        a given entity measures how much the model’s
+     Kasai et al., 2023). While previous research has              answer distribution can be swayed for a particu-
+     investigated how often a model will rely on prior             lar query about that entity, marginalized over all
+     knowledge over conflicting contextual information             contexts. Given their basis in mutual information,
+     in answering questions (Longpre et al., 2021), we             our metrics are natural operationalizations of per-
+                                                               13211
+                                                                 1
+Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pages 13211–13235
+                               August 11-16, 2024 ©2024 Association for Computational Linguistics
+suasion and susceptibility. Furthermore, we offer       2018; Peng et al., 2020; Wang et al., 2022) or
+empirical evidence of the validity and reliability of   leverage (Yamada et al., 2020; Zhou and Chen,
+these measures by comparing them against simi-          2022) entity bias for improved performance on the
+lar metrics and showing their robustness to para-       task. Wang et al. (2022) note that entities can carry
+phrases and different samples.                          both useful semantic information about their roles,
+   To study how language models behave for dif-         e.g., whether the entity is a person or a place, and
+ferent contexts and entities, we create a syn-          spurious information which can bias the model to-
+thetic dataset of queries covering 122 topic ar-        ward relations not mentioned in the target sentence,
+eas extracted from the YAGO knowledge graph             e.g., the model may link Switzerland with the
+(Suchanek et al., 2007), entities extracted from        relation countries_of_residence at inference time
+YAGO and generated with GPT-4 (OpenAI, 2023),           for a sentence that does not mention this relation,
+and contexts constructed with different qualities,      due to their frequent co-occurrence in the training
+e.g., relevancy and assertiveness. We apply our new     data. Additional studies on machine reading com-
+metrics to Pythia models ranging from 70m to 12b        prehension (MRC) tasks, e.g., SQuAD (Rajpurkar
+parameters (Biderman et al., 2023) to find evidence     et al., 2016), TriviaQA (Joshi et al., 2017), and
+that relevant contexts are consistently more persua-    NaturalQuestions (Kwiatkowski et al., 2019), have
+sive than irrelevant ones, and assertive contexts are   found substituting different entity names can result
+more persuasive than less assertive ones for yes–no     in meaningful changes in model predictions and
+questions. In a deep dive into one model, we find       overall evaluation performance (Yan et al., 2022).
+evidence that entities with high expected familiar-
+ity, as measured by both training data frequency        2.2   Context and Entity Bias
+and entity degree statistics in the YAGO knowledge
+graph, have lower susceptibility scores.                The existence of entity bias naturally raises the
+   We further conduct case studies to show how          question of how it interacts with context to shape
+these metrics could be useful in applied settings. In   a model’s response. Several papers (Longpre et al.,
+a study on friend–enemy stance measurement, we          2021; Chen et al., 2022; Xie et al., 2023) approach
+find evidence that enemy duos are less susceptible      this by inducing and exploring knowledge
+than friend duos. Applying our metrics to gender        conflicts, where a context preceding a query
+bias, we find evidence for a difference in suscepti-    proposes information that conflicts with a model’s
+bility between stereotypically masculine and fem-       prior knowledge about that query. They measure
+inine names for gender-biased contexts. Through         the model’s reliance on pretrained entity bias and
+this, we show how our proposed metrics can be           context by computing the memorization ratio:
+used to better analyze the effects of context and       the proportion of knowledge conflict examples
+prior knowledge, with the potential for application     for which the model maintains its answer from
+toward greater control over model behavior.             prior knowledge. Pezeshkpour (2023) measures
+                                                        a model’s prior knowledge of a fact by comparing
+2   Context and Prior Knowledge                         the entropy of a queried model’s answer distri-
+                                                        bution before and after stating the fact in context.
+Much prior work has noted that language models          Several studies further propose interventions to
+develop biases about entities during training and       reduce entity bias and favor in-context information.
+investigated the tension between this entity bias       These approaches include prompting (Zhou et al.,
+and additional information provided in the context.     2023; Onoe et al., 2023), modifying training data
+                                                        (Wang et al., 2023), fine-tuning (Li et al., 2023),
+2.1 Entity Bias                                         and neuron-level interventions (Yu et al., 2023) at
+Loosely defined across studies as model bias from       inference time.
+spurious correlations between entity mentions and          However, the metrics used to quantify model
+a target characteristic in the training data, entity    reliance on context and entity bias in these
+bias has been mainly examined in relation extrac-       papers—excepting Pezeshkpour (2023)—are
+tion (RE), where a model extracts relationships         limited in several ways. First, most previous work
+between entities from text (Zelenko et al., 2002;       does not develop entity-specific or context-specific
+Zhou et al., 2005). Different studies on RE have        metrics for the strength of the entity bias or context
+attempted to either mitigate (Zhang et al., 2017,       persuasiveness. Instead, their metrics produce only
+                                                   13212
+                                                     2
+a single number to summarize the model’s overall                    assign a persuasion score ψ to represent how suc-
+reliance on entity bias. Second, their setups are                   cessful that context is at altering a model’s answer
+limited to adversarial cases in which a context is                  distribution. This score depends on the specific
+chosen to go against the entity bias. Indeed, we                    queried entity e, because contexts themselves are
+may well wish to measure the interplay of context                   often entity-dependent. Intuitively, a context’s per-
+and entity bias in other cases, such as when context                suasion score should measure how much the proba-
+reinforces entity bias or when they do not clearly                  bility distribution of possible answers changes, av-
+disagree. Therefore, we seek to define a metric                     eraged across all possible answers. More precisely,
+that measures how much the model depends on a                       we define our persuasion score ψ(c, q(e)) as the
+given context or entity with rigorous, theoretically                half-pointwise mutual information (half-PMI) be-
+grounded interpretations.                                           tween the context c and the answer random variable
+                                                                    A, conditioned on the fixed query about an entity:
+3    Our Formalization
+We now formalize the problem setting in which we                       ψ(c, q(e)) ≜ I(C = c; A | q(E) = q(e))
+define metrics for the susceptibility of an entity and                        X                       p(a | c, q(e))
+                                                                          =        p(a | c, q(e)) log                        (2)
+the persuasiveness of a context for a given model.                            a∈Σ∗
+                                                                                                       p(a | q(e))
+Let Σ be an alphabet. Consider a language model
+                                                                           = KL(p(A | c, q(e)) || p(A | q(e))),
+pM over Σ, i.e., pM is a distribution over the Kleene
+closure Σ∗ . Furthermore, we assume that pM was
+                                                                    where p(A | c, q(e)) and p(A | q(e)) can be
+estimated from a corpus D ⊂ Σ∗ . Let E ⊂ Σ∗ be
+                                                                    derived by marginalizing and conditioning Eq. (1).
+the subset of strings that could correspond to string
+                                                                       The persuasion score of a context can then be
+representations of entities.1 Let Q = {q n }N  n=1 be a
+                                                                    interpreted as the degree (in nats) to which the
+set of N slotted query templates of type q n : E →
+                                                                    context was able to change the model’s answer
+Σ∗ that fill the slot with the argument to each q n .
+                                                                    distribution when prepended to a query. When the
+We can think of a query template q ∈ Q as slotting
+                                                                    persuasion score is at its lower bound of 0 nats, it in-
+an entity into a query, e.g., slotting the entity Slove-
+                                                                    dicates the context is completely unpersuasive, i.e.,
+nia into the query template q(e) = The capital of
+                                                                    it did not change the model’s answer distribution at
+e is produces the string The capital of Slovenia is.
+                                                                    all. Contexts with higher persuasion scores change
+   Now, consider three random variables. First, let
+                                                                    the answer distribution more, which is consistent
+C be a Σ∗ -valued random variable that stands for
+                                                                    when viewed through the lens of KL-divergence.2
+a context. Second, let A be a Σ∗ -valued random
+variable whose values are answers. Let E be a E-                    3.2   Susceptibility Score
+valued random variable. The pushforward q(E),
+then, is a Σ∗ -valued random variable over slottings                For a given query template applied to an entity
+of entities according to query q ∈ Q. The random                    q(e), we further wish to assign a susceptibility
+variables C, q(E) and A are jointly distributed                     score χ to q(e) which represents how easy it is to
+according to the following probability distribution                 change a model’s answer distribution. Intuitively,
+                                                                    the susceptibility score should measure how much
+                                          △
+ p(C = c, q(E) = q(e), A = a) ∝ pM (cq(e)a),                        a model’s answer distribution to a query changes
+                                              (1)                   when prompted with additional context, averaged
+where cq(e)a ∈ Σ∗ is string concatenation. To                       across all possible contexts and answers. More pre-
+formalize persuasion and susceptibility, we make                    cisely, we define the susceptibility score χ(q(e))
+use of the joint distribution p heavily in the                      as the mutual information between the context and
+proceeding subsections.                                             answer random variables, conditioned on a fixed
+                                                                    query about an entity:
+3.1 Persuasion Score
+                                                                                           X
+For each context c that is prepended to a query tem-                         χ(q(e)) ≜            p(c)ψ(c, q(e))
+plate with a given entity slotted in, q(e), we wish to                                     c∈Σ∗                              (3)
+      1
+        In practice, an entity can have different verbalizations,                      = I(C; A | q(E) = q(e)),
+e.g., Sherlock and Sherlock Holmes. . And, whether a specific
+                                                                        2
+string refers to an entity may very well depend on the context            We include details on further equivalencies of half-PMI
+in which it occurs. Thus, our set E is an approximation at best.    and other concepts in information theory in App. A.
+
+                                                               13213
+                                                                 3
+where p(c) is the marginal distribution over                    susceptibility scores for each entity according to
+contexts. Equivalent to the difference in entropy               Eq. (3) for each of the four query forms for six
+H(A | q(E) = q(e)) − H(A | C, q(E) = q(e)),                     Pythia models of different sizes7 trained on the
+the susceptibility score represents the reduction in            deduplicated Pile (Wolf et al., 2020; Dettmers et al.,
+answer distribution uncertainty (in nats) when a                2022; Biderman et al., 2023). Due to computational
+query is preceded by a context. A high suscepti-                constraints, we approximate the model’s answer
+bility score means the model is highly influenced               distribution with the next-token distribution over
+by context for the query about that entity, with                the model’s vocabulary.8 The detailed setup can be
+its upper bound of H(A) indicating that context                 found in App. C.
+fully determines the answer. A low score indicates
+the model’s response is robust to context, with its             4.2       Empirically Validating Our Metrics
+lower bound of 0 indicating no influence of context             4.2.1      Estimating Scores
+on the answer distribution. We can use suscepti-                Because persuasion and susceptibility scores both
+bility to answer the question “How much does the                involve a countably infinite sum, we opt for a
+model’s answer depend on its entity bias?” with an              stochastic approximation scheme. Specifically, we
+information-theoretically grounded, interpretable               construct a Monte Carlo estimator. We sample from
+scale based on the model’s full behavior.                       a narrower set of constructed contexts and approxi-
+                                                                mate the answer distribution with the next token dis-
+3.3 Entity-Independent Persuasion Score
+                                                                tribution over the model’s vocabulary, as described
+Persuasion scores can be further marginalized over              in §4.1. We take a sample size of 600 contexts.
+entities. Analogous to our definition of the suscep-            While the Monte Carlo approximation itself results
+tibility score, we define the entity-independent                in a consistent estimator, the additional approxi-
+persuasion score of a context as how much the                   mations mean we do not have a guarantee on the
+log probability distribution of possible answers                quality of the approximation as a whole. In Fig. 4,
+changes, averaged across all possible entities and              we exhibit the variance of our estimator across three
+answers. We describe this further in App. B.                    random seeds, i.e., sampled sets of context.
+4   Experiments                                                 4.2.2      Validating Persuasion Scores
+We now provide empirical evidence to further vali-              Convergent Validity. According to existing mea-
+date our metrics, characterize model behavior using             surement modeling methods (Loevinger, 1957;
+the susceptibility and persuasion scores, and inves-            Messick, 1987; Jackman, 2008; Hand, 2004; Quinn
+tigate reasons behind differences in susceptibility             et al., 2010; Jacobs and Wallach, 2021), observing
+scores for different entities.                                  a relationship between a new metric and existing
+                                                                ones would serve as additional evidence that the
+4.1 Setup                                                       metric is meaningful. To this end, we explore
+For each of the 122 different relations from the                whether contexts with higher persuasion scores
+YAGO knowledge graph, we collect 100 entities3                  tend to more successfully convince the model to
+and construct 600 random contexts from relation-                agree with the context. Using the Pythia-6.9b-
+specific context templates such that each entity is             deduped model, we generate an answer for each
+mentioned in 6 contexts. The 600 contexts are                   prepended context to a query–entity pair from §4.1
+evenly distributed between assertive,4 base,5 and               and use simple string matching to map the an-
+negation6 context types. We construct four query                swer to whether it agrees with the context, the
+forms of each relation: two closed questions, i.e.,             original answer, or neither. We then apply a per-
+yes–no, and two open questions.                                 mutation test (k = 10000, α = 0.05 with the
+  Using these samples, we compute persuasion                    Benjamini–Hochberg (BH) correction (Benjamini
+scores for each context according to Eq. (2) and                and Hochberg, 1995)) for whether contexts that
+                                                                elicited context-concordant answers have higher
+    3
+       50 are real entities (e.g., Adele) sampled from YAGO,    persuasion scores than those that did not alter the
+and 50 are fake entities (e.g., Udo König) of the same entity
+class (e.g., Person) generated with GPT-4 (OpenAI, 2023).             7
+                                                                      70m, 410m, 1.4b, 2.8b, 6.9b, 12b (8-bit quantized)
+     4
+       E.g., Definitely, the capital of {entity} is {answer}.         8
+                                                                      While it would be more precise to estimate the answer
+     5
+       E.g., The capital of {entity} is {answer}.               distribution by repeatedly sampling many model outputs, this
+     6
+       E.g., The capital of {entity} is not {answer}.           is very computationally expensive.
+
+                                                           13214
+                                                             4
+                               Persuasion scores vs sampled answer                                                           Susceptibility score vs memorization ratio (binned)
+                                open                           closed                                                                open                            closed
+                  4
+                                                                   0.15
+
+
+Mean persuasion score                            Mean persuasion score
+                                                                                                                       3
+
+
+                                                                                                      Susceptibility score                             Susceptibility score
+                                                                                                                                                                        0.2
+                  2                                                0.10                                                2
+
+                                                                                                                       1                                                0.1
+                                                                   0.05
+                  0
+                                                                   0.00                                                0
+                        Original Context Other                            Original Context Other                             0.2 0.4 0.6 0.8 1.0                              0.2 0.4 0.6 0.8 1.0
+                          Sampled answer type                               Sampled answer type                               Memorization ratio bin                           Memorization ratio bin
+
+    Figure 2: The x-axis represents bins for whether the                                                  Figure 3: Susceptibility score (y-axis) against the MR di-
+    model’s answer agreed with its prior, the context, or                                                 vided into 5 bins between 0 and 1 (x-axis) for all entities
+    neither. For open (left) queries, the persuasion scores of                                            and queries. The opacity represents the proportion of
+    contexts that persuaded the model to output an answer                                                 points in each bin. For both open queries (•) and closed
+    matching the context (Context) are higher than those of                                               queries (•), we see a decreasing upper bound between
+    contexts that did not (Original, Other).                                                              the MR and susceptibility score. While the quartiles
+                                                                                                          of the open queries generally decrease (except for the
+                                                                                                          lowest bin), the opposite occurs for closed queries.
+   model from the original answer for each of the 122
+   query topics. Within a query topic, we run separate                                                   4.2.3 Validating Susceptibility Scores
+   tests for open and closed queries, since the entropy
+                                                                                                         Convergent Validity. We compare susceptibility
+   of the answer distribution for closed queries tends
+                                                                                                         scores to per-entity memorization ratio (MR)9 as
+   to be much lower than the entropy for open queries.
+                                                                                                         further evidence for the meaningfulness of our
+   We find that for 59% of open queries, contexts
+                                                                                                         metric, using the setup from §4.1 for the Pythia-
+   that persuade the model to output the in-context
+                                                                                                         6.9b-deduped model. Fig. 3 shows a decreasing
+   answer have significantly higher persuasion scores
+                                                                                                         upper-bounding relationship between susceptibility
+   than non-persuasive ones. Curiously, this behavior
+                                                                                                         scores and MR for both open queries and closed
+   holds for only 34% of closed queries. We discuss
+                                                                                                         queries. While not a straightforward correlation,
+   this surprising result more in §6. We further show
+                                                                                                         this pattern supports the convergent validity of
+   a summary of the mean persuasion scores for the
+                                                                                                         susceptibility scores and can be explained by the
+   different kinds of elicited answers in Fig. 2.
+                                                                                                         scores’ nature of measuring a difference in entropy.
+                                                                                                         That is, if the model’s answer was often changed
+   Construct Reliability. To show construct reli-                                                        (low MR), this could correspond to a wide range
+   ability, we provide evidence that persuasion scores                                                   of entropy change (low or high susceptibility),
+   do not strongly vary for inputs that differ only in                                                   depending on the model’s confidence without
+   phrasing, i.e., query form. For example, the persua-                                                  the context. If the model’s answer was mostly
+   sion score of The capital of Slovenia is Oz. should                                                   unchanged (high MR), the entropy likely remained
+   be similar when prepended to either Is Slovenia’s                                                     similar (low susceptibility). We discuss these
+   capital Ljubljana? or Is Ljubljana the capital of                                                     results further in App. D.2.
+   Slovenia?. We compute persuasion scores using
+   the setup from §4.1 with two query forms for both                                                      Construct Reliability. Following the setup used
+   closed and open queries, keeping contexts that                                                         in §4.2.2, we consider the same two query forms
+   appeared for the same query and entity for all seeds.                                                  for both open and closed questions to test for
+   We then compute the variance across the query                                                          reliability (low variance) for susceptibility scores.
+   forms to test for reliability. Fig. 4 shows strong                                                     Fig. 4 shows strong evidence for the reliability of
+   evidence that the metric is reliable. The variance                                                     susceptibility scores. Similarly to the persuasion
+   is very low across different closed query forms, as                                                    scores, the variance for both open and closed
+   expected. While open query forms have higher vari-                                                     queries is very low across closed query forms;
+   ance, this is not unexpected because the question-                                                     open query forms have higher variance because
+   answering query form, e.g., Q: What is the capital                                                     they have meaningfully different possible answers,
+   of Slovenia?\nA: is more specific than the sentence-                                                   as discussed in §4.2.2.
+   completion form, e.g., The capital of Slovenia is,                                                          9
+                                                                                                                 Adapted from Longpre et al. (2021) to apply on a per-
+   which has a broader set of plausible answers.                                                          entity basis and describe it in more detail in App. D.
+
+                                                                                                   13215
+                                                                                                     5
+              Variance of susceptibility and persuasion scores                 4.3.2 Assertiveness
+                       Seed                        Query form                  Experiment Setup. Using a similar setup to
+                                                  100
+           10 3                                                                §4.3.1, we explore whether assertive contexts are
+                                                 10 3
+           10 6                                                                more persuasive than base ones by testing whether
+Variance                              Variance
+                                                 10 6
+           10 9
+                                                                               the mean persuasion score of the former group is
+                                                 10 9                          greater than that of the latter for each query.
+       10 12                                 10 12
+                                                                               Results. Fig. 5 (■) shows that consistently across
+                  closed       open                     closed       open
+                      Query type                            Query type         model sizes, assertive contexts tend to be more
+                                                                               persuasive than base contexts for closed queries
+ Figure 4: Summarizing across all 122 queries, we dis-
+                                                                               but not for open queries. Moreover, assertive
+ play the variance of susceptibility scores (blue) and
+ persuasion scores (orange), across three random seeds                         contexts are most persuasive for medium-sized
+ (left) and across two query forms (right), and stratified                     models such as 1.4b and 2.8b. We hypothesize that
+ for both closed and open queries (x-axis). The variance                       smaller models may be less persuaded by assertive
+ is very low across random seeds for both query types,                         contexts because they may be worse at integrating
+ and, for closed queries, across the specific query form.                      context into their answers. Larger models may
+ Variance is high for the different open query forms.                          be less persuaded because of their stronger prior
+                                                                               knowledge/lower susceptibility to context, whether
+ 4.3 What Makes a Context Persuasive?                                          assertive or not. We highlight the significance
+ To better characterize model behavior with                                    test results and effect sizes for all queries for the
+ persuasion scores, we explore several tests for                               Pythia-6.9b-deduped model in Fig. 6 and other
+ qualities that might distinguish more persuasive                              models in App. E.
+ contexts from less persuasive ones: relevance,                                4.3.3 Negation
+ assertiveness, and negation.
+                                                                               Experiment Setup. We use the same setup as
+                                                                               in §4.3.2 and explore whether negation contexts
+ 4.3.1 Relevance                                                               differ in persuasiveness from the base ones, using
+ Experiment Setup. We use the setup described                                  a two-tailed permutation test for each query.
+ in §4.1. For the relevance test, we consider a rel-                           Results. The permutation tests suggest evidence
+ evant context to be one that mentions the queried                             for a significant difference in 88% of the closed
+ entity, and an irrelevant context as one that does not.                       queries and 74% of the open queries for the
+ We hypothesize that relevant contexts should be                               Pythia-6.9b-deduped model. However, there is no
+ more persuasive than irrelevant ones. For each of                             consistent directional pattern; from Fig. 7, we see
+ the 122 queries, we find the mean persuasion score                            that negations are significantly more persuasive for
+ of the relevant contexts and irrelevant contexts and                          some queries while significantly less persuasive
+ use a permutation test to determine whether the                               for others. App. E shows a similar pattern for
+ mean persuasion score for relevant contexts (across                           other models. Fig. 5 (▲) also shows that the
+ entities) is higher than the mean persuasion score                            smallest model is the most sensitive to being
+ for irrelevant contexts, using a significance level of                        persuaded differently by negation vs base contexts.
+ α = 0.05 with the BH correction.                                              For closed queries, this may be due to potential
+                                                                               spurious correlations or token biases between, i.e.,
+ Results. As seen in Fig. 5 (▼), across most model                             seeing the word not and the model’s probability
+ sizes and relations, relevant contexts are signif-                            of outputting No.
+ icantly more persuasive than irrelevant contexts.
+ Specifically, depending on the model, 95–100%                                 4.3.4 Comparing Context Qualities
+ of open queries and 83–100% of closed queries                                 For all models on open queries, the relevance of a
+ showed a significant result. We also see a trend                              context has the greatest effect on persuasion score
+ in which, as model size increases, so too does the                            compared to assertiveness or negation, as measured
+ degree to which relevant contexts are more per-                               by effect size. This is consistent with our intu-
+ suasive, as measured by the mean effect size. We                              ition that the model should be more sensitive to
+ summarize the significance test results and effect                            whether the queried entity is mentioned in the con-
+ sizes for all models and queries in App. E.                                   text than to other context features. However, we
+                                                                            13216
+                                                                              6
+                                           Permutation test results across models and comparisons
+                           open                                              closed                                          open                                             closed
+                                                                                                            2.5                                               2.5
+          1.0                                             1.0
+                                                                                                            2.0                                               2.0
+          0.8                                             0.8
+                                                                                                            1.5                                               1.5
+
+% of queries                                    % of queries                                  Effect size                                       Effect size
+          0.6                                             0.6                                               1.0                                               1.0
+          0.4                                             0.4                                               0.5                                               0.5
+
+          0.2                                             0.2                                               0.0                                               0.0
+                                                                                                            0.5                                               0.5
+          0.0                                             0.0
+                70m 410m 1.4b 2.8b 6.9b 12b                     70m 410m 1.4b 2.8b 6.9b 12b                       70m 410m 1.4b 2.8b 6.9b 12b                       70m 410m 1.4b 2.8b 6.9b 12b
+                        Model size                                      Model size                                        Model size                                        Model size
+                       (a) % of queries with significant result                                                                     (b) Mean effect size
+
+  Figure 5: The plots in Fig. 5a indicate the proportion of queries for which (▼) relevant contexts are significantly
+  more persuasive than irrelevant contexts, (•) unfamiliar entities are significantly more susceptible than familiar
+  entities, (■) assertive contexts are significantly more persuasive than base contexts, and (▲) negation contexts are
+  significantly more persuasive than base contexts. We further provide the average effect size over queries of those
+  comparisons in Fig. 5b. We highlight specific findings in §4.3 and §4.4.
+
+                      Effect sizes for assertive vs base contexts                                                        Effect sizes for negation vs base contexts
+                         closed                        open                           100                                    closed                       open                            100
+          5.0                                     5.0                                                             2.5                                     2.5
+Effect size                              Effect size                                              Effect size                               Effect size
+                                                                                      10 1                                                                                                10 1
+          2.5                                     2.5                                                             0.0                                     0.0
+                                                                                      10 2                                                                                                10 2
+          0.0                                     0.0                                                             2.5                                     2.5
+                                                                                      10 3                                                                                                10 3
+                          Query                                      Query                                                    Query                                        Query
+  Figure 6: These plots show, for the Pythia-6.9b-deduped                                           Figure 7: These plots show, for the Pythia-6.9b-deduped
+  model, the effect size between base and assertive                                                 model, the effect size (y-axis) and p-values (red is
+  contexts (y-axis) and p-values (red is significant, blue                                          significant, blue is insignificant) of the null hypothesis
+  is insignificant) of the null hypothesis that persuasion                                          that persuasion scores of negation contexts are the same
+  scores of assertive contexts are not greater than those                                           as those of base contexts, for each of the 122 queries
+  of base contexts, for each of the 122 queries (x-axis).                                           (x-axis). While many queries are significant, some
+  The evidence suggests that assertive contexts are                                                 queries exhibit a significantly positive effect while
+  significantly more persuasive than assertive contexts                                             others exhibit a significantly negative one.
+  for most closed queries, but few open queries.
+
+                                                                                                     ble than the unknown fake entities.10 The detailed
+  can see in Fig. 5 that for medium-sized models on                                                  setup can be found in App. C.
+  closed queries, the other context comparisons have
+  stronger effect sizes, e.g., assertiveness and nega-                                              Results. For the Pythia-6.9b-deduped model,
+                                                                                                                       73
+  tion for the 2.8b model. This could be explained by                                               we find that with 122  queries (open questions) and
+                                                                                                     61
+  potential spurious correlations/token biases associ-                                              122 queries (closed questions), familiar entities
+  ating, i.e., the word not with the model outputting                                               have significantly lower susceptibility scores than
+  No or the word definitely with outputting Yes.                                                    unfamiliar fake entities. We conjecture that for
+                                                                                                    the remaining queries, the model may not have
+  4.4 What Makes an Entity Susceptible?                                                             strong prior biases about the sampled entities for
+                                                                                                    these queries. Indeed, further analysis (App. F.1)
+  4.4.1 Familiar vs Unfamiliar Entities                                                             finds some evidence supporting the hypothesis
+  We hypothesize that the model should have lower                                                   that queries with smaller effect sizes or less
+  susceptibility scores for entities encountered during                                             significant p-values feature less familiar entities,
+  pretraining compared to unfamiliar, fake entities.                                                as we find a small correlation between effect size
+                                                                                                    and entity frequency in the training set. Fig. 8
+  Experiment Setup. We use the setup described                                                      shows the distribution of susceptibility scores for
+  in §4.1 to compute susceptibility scores for known                                                real and fake entities for an example query with
+  and unknown entities. We use a permutation test                                                   a particularly strong effect size.
+  with α = 0.05 and the BH correction to test                                                            10
+                                                                                                            We filter out fake entities that appear in the training data
+  whether the known real entities are less suscepti-                                                 to better represent unknown entities in our analysis.
+
+                                                                                            13217
+                                                                                              7
+             Susceptibility scores for real vs fake entities                   Susceptibility Score to Frequency
+                                                                                  Open                      Closed
+
+
+Susceptibility score
+                                                                                                    0.15
+                 1.0
+                                                                                                    0.10
+                                                                       Score
+                                                                           1                    Score
+                 0.5                                                                                0.05
+                                                                           0                        0.00
+                 0.0                                                            101       103              101       103
+                           (a)                   (b)                             Frequency                  Frequency
+                                  Query form
+                                                                  Figure 9: For both open (•) and closed (•) queries, the
+   Figure 8: The officialLanguage query topic exhibits a          upper bound of the mean susceptibility scores for entity-
+   particularly strong effect in which real entities (•) have     answer pairs decreases as co-occurrence frequency in
+   lower susceptibility scores than fake entities (•) for open    the Pile increases (Pythia-6.9b-deduped).
+   questions. This plot shows susceptibility scores for 100
+   real and fake entities, for two different query forms: (a)
+   Q: What is the official language of {entity}?\nA:, and         Entity Degree in a Knowledge Graph. Training
+   (b) The official language of {entity} is.
+                                                                  data can be noisy, difficult, and expensive to search
+                                                                  through for entity co-occurrences and more com-
+                                                                  plex frequency statistics. Knowledge graphs offer
+       Generally, as model size increases, so too does
+                                                                  a more precise alternative as they represent entities
+    the significance and effect size of unfamiliar
+                                                                  and relations extracted from common corpora like
+    entities being more susceptible than familiar
+                                                                  Wikipedia in a structured way. For example, within
+    entities, as seen by the generally increasing blue
+                                                                  the pretraining data, it is very difficult to identify
+    lines (•) in all four plots in Fig. 5. This trend is
+                                                                  the number of different answers with which an
+    consistent with our expectation that bigger models
+                                                                  entity will co-occur within the context of a specific
+    have stronger prior knowledge of entities and are
+                                                                  relation. However, with a knowledge graph, we
+    therefore less susceptible to familiar entities. The
+                                                                  can easily identify the exact number of objects with
+    smallest model (70m) does not have a significant
+                                                                  which an entity might share a given relation. Thus,
+    difference in susceptibility between familiar and
+                                                                  we explore the relationship between the relation-
+    unfamiliar entities, which could indicate it is too
+                                                                  dependent degree of an entity in a knowledge graph
+    small to have strong prior knowledge.
+                                                                  and the susceptibility score. Like with training
+                                                                  data frequency, we find that comparing against
+    4.4.2 Degrees of Familiarity                                  this degree yields a similar-looking plot with a
+   Training Data Frequency. Since language                        decreasing upper bound between susceptibility
+   models are parameterized with knowledge from                   scores and the degree. Such a trend suggests that
+   their training corpora, we hypothesize that the                unfamiliar entities have the potential to be highly
+   model is less susceptible for entities with which              susceptible, while very familiar entities tend to
+   it is more familiar, i.e., more frequently occurring           have lower susceptibility. In App. F.2, we show
+   in the training data. We investigate this relation-            this trend is shared across all model sizes and
+   ship between the Pythia models’ behavior and                   provide our methodology in more detail.
+   frequency statistics in the Pile dataset on which
+   they were trained (Gao et al., 2020). To capture the           5      Applications
+   model’s familiarity with an entity–answer relation,            We examine how knowing susceptibility scores can
+   we count the number of co-occurrences between                  be useful for analyzing model behavior in two dif-
+   the entity and its corresponding answer within a 50-           ferent applications. Here, we highlight one key
+   word window. We compare the susceptibility score               finding per application; however, we emphasize
+   to this co-occurrence frequency and find a signif-             that future work can conduct a more detailed anal-
+   icant correlation (Spearman ρ = −0.23) for the                 ysis of these and other applications.
+   Pythia-6.9b-deduped model. We see in Fig. 9 that
+   as the training data frequency increases, the suscep-          Social Sciences Measurement. Social scientists
+   tibility scores’ upper bound decreases. This trend             use large language models (LLMs) for annotating
+   is shared across all model sizes (see App. F.2).               data and descriptive data analysis, yet such use may
+                                                               13218
+                                                                 8
+                       Susceptibility scores for friend duos and enemy duos                               Susceptibility Scores from Stereotypes
+                 0.4                                                                               0.24
+
+
+Susceptibility score
+                 0.3                                                                               0.22
+                                                                                               score
+                 0.2                                                                               0.20
+                 0.1                                                                               0.18
+                               {} and {} are       The relationship between {} and {} is                    M         M*             F      F*
+                                               Query form                                                                  context
+                                                                                              Figure 11: Susceptibility scores for the gendered names
+   Figure 10: Susceptibility scores for different entity-pairs
+                                                                                              (masculine (•), feminine (•)) over the stereotypical con-
+   which are either friends or enemies. Enemy duos (•)
+                                                                                              texts. M and F are the original stereotypes, and M* and
+   appear to have lower susceptibility than friend duos (•).
+                                                                                              F* correspond to the swapped genders.
+
+
+   inadvertently incorporate entity biases and skew                                           6    Discussion and Conclusion
+   model behavior (Ziems et al., 2024; Gilardi et al.,
+                                                                                              We have made the case that the persuasion score
+   2023; Zhang et al., 2023; O’Hagan and Schein,
+                                                                                              and susceptibility score are both valid and reliable
+   2023). To better contextualize model annotations
+                                                                                              in measuring their respective constructs, following
+   for a case study on friend–enemy stance detection
+                                                                                              a well-established measurement modeling frame-
+   (Choi et al., 2016; Stoehr et al., 2023), we aim to
+                                                                                              work. Throughout our experiments, we find a
+   understand how susceptibility scores may differ
+                                                                                              common theme in the results: there is a strong,
+   between friend and enemy-based entity pairs
+                                                                                              negative, possibly linear relationship between
+   for the query The relationship between {entity1}
+                                                                                              the upper bound of the susceptibility score and
+   and {entity2} is, e.g., are famous friend-based
+                                                                                              (a) the entity’s memorization ratio (Fig. 3), (b)
+   relationships more susceptible than enemy-based
+                                                                                              the log-co-occurrence frequency in the training
+   relationships? From Fig. 10, we see that with the
+                                                                                              data (Fig. 9), and (c) the log-relation-dependent
+   Pythia-6.9b-deduped model for two specific query
+                                                                                              degree in a knowledge graph. That is, as each
+   forms, enemy duos are less susceptible than friend
+                                                                                              of those three values increases, we see a clear
+   duos, which can inform social scientists that a
+                                                                                              pattern indicating that the highest susceptibility
+   model’s annotation for friend pairs may be more
+                                                                                              scores tend to decrease. This is consistent with
+   easily influenced by the context than enemy pairs.
+                                                                                              our hypothesis that the induced bias of an entity
+   We provide more details in App. G.
+                                                                                              increases for a model as the model’s expected
+                                                                                              familiarity with the entity increases. Furthermore,
+    Exploring Gender Bias. Since higher suscep-                                               we find a difference in behavior between scores
+    tibility scores indicate weaker induced biases                                            for open and closed queries; while in many
+    for entities, we conjecture that this can relate                                          experiments, we see similar patterns between the
+    to being underrepresented in the training data.                                           two, susceptibility and persuasion appear to have
+    Based on this, we consider how the susceptibility                                         a stronger relationship with memorization ratio for
+    score can be used to study gender bias in LLMs.                                           open queries, while assertive contexts appear to
+    Using GPT-4, we collect stereotypically biased                                            be significantly more persuasive than base contexts
+    contexts, gendered names, and neutral queries                                             primarily for closed queries. This difference is a
+    and run several experiments to identify gender                                            surprising phenomenon that warrants future study;
+    discrepancies in susceptibility scores; see App. G                                        we hypothesize closed queries may behave this
+    for full details. We highlight a result where                                             way due to common token biases (with its output
+    masculine names have a higher susceptibility than                                         space of Yes and No) or the influence of mentioning
+    feminine names when swapping the genders in                                               both an entity and an answer in the query. Finally,
+    the stereotypical contexts, as seen in Fig. 11. This                                      while we applied these metrics to analyze model
+    could indicate that the model is more surprised                                           behavior in two case studies, in future work we
+    to see contexts claiming men follow feminine                                              aim to apply them to unearth new perspectives
+    stereotypes, and therefore could suggest less                                             in other context and prior knowledge-dependent
+    representation of feminine stereotypes in the                                             problems such as retrieval-augmented generation,
+    training data than masculine ones.                                                        model editing and control, and few-shot learning.
+                                                                                           13219
+                                                                                             9
+Limitations                                                  Conference on Empirical Methods in Natural Lan-
+                                                             guage Processing, pages 1533–1544.
+We face some technical limitations in executing
+the empirical aspects of this work. First, while §3       Stella Biderman, Hailey Schoelkopf, Quentin Anthony,
+defines the output space of A as the set of all pos-         Herbie Bradley, Kyle O’Brien, Eric Hallahan, Mo-
+                                                             hammad Aflah Khan, Shivanshu Purohit, USVSN Sai
+sible outputs Σ∗ , in practice, it is computationally        Prashanth, Edward Raff, Aviya Skowron, Lintang
+expensive to estimate that probability distribution.         Sutawika, and Oskar van der Wal. 2023. Pythia:
+Instead, we look only at the model’s probability dis-        A suite for analyzing large language models across
+tribution of the next token, which could be a noisy          training and scaling. In International Conference on
+                                                            Machine Learning, pages 2397–2430. PMLR.
+signal, especially in cases where the answer sug-
+gested by a context and the answer suggested from         Tom Brown, Benjamin Mann, Nick Ryder, Melanie
+prior knowledge share the same first token. Second,         Subbiah, Jared D Kaplan, Prafulla Dhariwal, Arvind
+it is difficult to go through the whole Pile to count       Neelakantan, Pranav Shyam, Girish Sastry, Amanda
+                                                            Askell, Sandhini Agarwal, Ariel Herbert-Voss,
+answer–entity co-occurrences without noise. Third,          Gretchen Krueger, Tom Henighan, Rewon Child,
+the scores depend on the sampled contexts, which            Aditya Ramesh, Daniel Ziegler, Jeffrey Wu, Clemens
+may not be representative of all applications.              Winter, Chris Hesse, Mark Chen, Eric Sigler, Ma-
+                                                            teusz Litwin, Scott Gray, Benjamin Chess, Jack
+Ethics Statement                                            Clark, Christopher Berner, Sam McCandlish, Alec
+                                                            Radford, Ilya Sutskever, and Dario Amodei. 2020.
+As LLM capabilities grow more advanced and their            Language models are few-shot learners. In Ad-
+                                                            vances in Neural Information Processing Systems,
+usage proliferates throughout the real world, we
+                                                            volume 33, pages 1877–1901.
+acknowledge that their development can exacer-
+bate risks to people, especially those historically       Hung-Ting Chen, Michael Zhang, and Eunsol Choi.
+underrepresented or misrepresented to these mod-            2022. Rich knowledge sources bring complex knowl-
+                                                            edge conflicts: Recalibrating models to reflect con-
+els. Our work aims to make model behavior more
+                                                            flicting evidence. In Proceedings of the 2022 Con-
+transparent by providing a new tool to analyze the          ference on Empirical Methods in Natural Language
+interaction between context and prior knowledge             Processing, pages 2292–2307, Abu Dhabi, United
+in LMs, which is especially important as people             Arab Emirates. Association for Computational Lin-
+interact with them in chat, question-answering, and         guistics.
+other prompt-based settings. We foresee no particu-       Eunsol Choi, Hannah Rashkin, Luke Zettlemoyer, and
+lar ethical concerns and hope this paper contributes        Yejin Choi. 2016. Document-level sentiment infer-
+to developing tools that can identify and mitigate          ence with social, faction, and discourse context. In
+ethical concerns in the future.                             Proceedings of the 54th Annual Meeting of the As-
+                                                            sociation for Computational Linguistics (Volume 1:
+                                                            Long Papers), pages 333–343, Berlin, Germany. As-
+Acknowledgements                                            sociation for Computational Linguistics.
+We thank Alex Warstadt, Tiago Pimentel, Anej              Thomas M. Cover and Joy A. Thomas. 2006. Elements
+Svete, Alexandra Butoi, Benjamin Dayan, and Leo             of Information Theory. Wiley-Interscience.
+Du for helpful comments, discussion, and feedback.
+Niklas Stoehr acknowledges funding through the            Tim Dettmers, Mike Lewis, Younes Belkada, and Luke
+                                                            Zettlemoyer. 2022. LLM.int8(): 8-bit matrix multi-
+Swiss Data Science Center (SDSC) Fellowship.                plication for transformers at scale. In Advances in
+Vésteinn Snæbjarnarson is supported by the Pio-             Neural Information Processing Systems, volume 35,
+neer Centre for AI, DNRF grant number P1.                   pages 30318–30332.
+
+                                                          Leo Gao, Stella Biderman, Sid Black, Laurence Gold-
+References                                                  ing, Travis Hoppe, Charles Foster, Jason Phang,
+                                                            Horace He, Anish Thite, Noa Nabeshima, Shawn
+Yoav Benjamini and Yosef Hochberg. 1995. Control-           Presser, and Connor Leahy. 2020. The Pile: An
+  ling the false discovery rate: A practical and pow-       800GB dataset of diverse text for language modeling.
+  erful approach to multiple testing. Journal of the        arXiv preprint.
+  Royal Statistical Society. Series B (Methodological),
+  57(1):289–300.                                          Mor Geva, Roei Schuster, Jonathan Berant, and Omer
+                                                           Levy. 2021. Transformer feed-forward layers are
+Jonathan Berant, Andrew Chou, Roy Frostig, and Percy       key-value memories. In Proceedings of the 2021
+  Liang. 2013. Semantic parsing on Freebase from           Conference on Empirical Methods in Natural Lan-
+  question-answer pairs. In Proceedings of the 2013        guage Processing, pages 5484–5495.
+
+                                                     13220
+                                                      10
+Fabrizio Gilardi, Meysam Alizadeh, and Maël Kubli.         Yasumasa Onoe, Michael Zhang, Shankar Padmanab-
+  2023. ChatGPT outperforms crowd workers for                han, Greg Durrett, and Eunsol Choi. 2023. Can LMs
+  text-annotation tasks. Proceedings of the National         learn new entities from descriptions? challenges in
+  Academy of Sciences, 120(30).                              propagating injected knowledge. In Proceedings
+                                                             of the 61st Annual Meeting of the Association for
+David J. Hand. 2004. Measurement Theory and Prac-            Computational Linguistics (Volume 1: Long Papers),
+  tice: The World Through Quantification. Wiley-             pages 5469–5485.
+  Blackwell.
+Simon Jackman. 2008. Measurement. In The Oxford            OpenAI. 2023. GPT-4 technical report. arXiv preprint.
+  Handbook of Political Methodology. Oxford Univer-
+  sity Press.                                              Hao Peng, Tianyu Gao, Xu Han, Yankai Lin, Peng Li,
+                                                             Zhiyuan Liu, Maosong Sun, and Jie Zhou. 2020.
+Abigail Z. Jacobs and Hanna Wallach. 2021. Measure-          Learning from Context or Names? An Empirical
+  ment and fairness. In Proceedings of the 2021 ACM          Study on Neural Relation Extraction. In Proceed-
+  Conference on Fairness, Accountability, and Trans-         ings of the 2020 Conference on Empirical Methods
+  parency, page 375–385.                                     in Natural Language Processing (EMNLP), pages
+                                                             3661–3672.
+Mandar Joshi, Eunsol Choi, Daniel Weld, and Luke
+ Zettlemoyer. 2017. TriviaQA: A large scale distantly      Fabio Petroni, Tim Rocktäschel, Sebastian Riedel,
+ supervised challenge dataset for reading comprehen-         Patrick Lewis, Anton Bakhtin, Yuxiang Wu, and
+ sion. In Proceedings of the 55th Annual Meeting of          Alexander Miller. 2019. Language models as knowl-
+ the Association for Computational Linguistics (Vol-         edge bases? In Proceedings of the 2019 Conference
+ ume 1: Long Papers), pages 1601–1611.                       on Empirical Methods in Natural Language Process-
+Jungo Kasai, Keisuke Sakaguchi, Yoichi Takahashi,            ing and the 9th International Joint Conference on
+  Ronan Le Bras, Akari Asai, Xinyan Velocity Yu,             Natural Language Processing, pages 2463–2473.
+  Dragomir Radev, Noah A. Smith, Yejin Choi, and
+  Kentaro Inui. 2023. RealTime QA: What’s the an-          Pouya Pezeshkpour. 2023. Measuring and modifying
+  swer right now? In Thirty-seventh Conference on            factual knowledge in large language models. arXiv
+  Neural Information Processing Systems Datasets and         preprint.
+  Benchmarks Track.
+                                                           Kevin M. Quinn, Burt L. Monroe, Michael Colaresi,
+Tom Kwiatkowski, Jennimaria Palomaki, Olivia Red-            Michael H. Crespin, and Dragomir R. Radev. 2010.
+  field, Michael Collins, Ankur Parikh, Chris Alberti,       How to analyze political attention with minimal as-
+  Danielle Epstein, Illia Polosukhin, Jacob Devlin, Ken-     sumptions and costs. American Journal of Political
+  ton Lee, Kristina Toutanova, Llion Jones, Matthew          Science, 54(1):209–228.
+  Kelcey, Ming-Wei Chang, Andrew M. Dai, Jakob
+  Uszkoreit, Quoc Le, and Slav Petrov. 2019. Natu-         Pranav Rajpurkar, Jian Zhang, Konstantin Lopyrev, and
+  ral questions: A benchmark for question answering           Percy Liang. 2016. SQuAD: 100,000+ questions
+  research. Transactions of the Association for Compu-        for machine comprehension of text. In Proceedings
+  tational Linguistics, 7:452–466.                            of the 2016 Conference on Empirical Methods in
+Daliang Li, Ankit Singh Rawat, Manzil Zaheer, Xin            Natural Language Processing, pages 2383–2392.
+  Wang, Michal Lukasik, Andreas Veit, Felix Yu, and
+  Sanjiv Kumar. 2023. Large language models with           Adam Roberts, Colin Raffel, and Noam Shazeer. 2020.
+  controllable working memory. In Findings of the As-        How much knowledge can you pack into the param-
+  sociation for Computational Linguistics: ACL 2023,         eters of a language model? In Proceedings of the
+  pages 1774–1793.                                           2020 Conference on Empirical Methods in Natural
+                                                             Language Processing (EMNLP), pages 5418–5426.
+Jane Loevinger. 1957. Objective tests as instruments
+  of psychological theory. Psychological Reports,          Niklas Stoehr, Pengxiang Cheng, Jing Wang, Daniel
+  3(3):635–694.                                              Preotiuc-Pietro, and Rajarshi Bhowmik. 2024. Unsu-
+                                                             pervised contrast-consistent ranking with language
+Shayne Longpre, Kartik Perisetla, Anthony Chen,              models. In Proceedings of the 18th Conference of
+  Nikhil Ramesh, Chris DuBois, and Sameer Singh.             the European Chapter of the Association for Compu-
+  2021. Entity-based knowledge conflicts in question         tational Linguistics (Volume 1: Long Papers), pages
+  answering. In Proceedings of the 2021 Conference           900–914.
+  on Empirical Methods in Natural Language Process-
+  ing, pages 7052–7063.                                    Niklas Stoehr, Lucas Torroba Hennigen, Josef Valvoda,
+Samuel Messick. 1987. Validity. ETS Research Report          Robert West, Ryan Cotterell, and Aaron Schein. 2023.
+  Series, 1987(2):i–208.                                     An ordinal latent variable model of conflict intensity.
+                                                             In Proceedings of the 61st Annual Meeting of the
+Sean O’Hagan and Aaron Schein. 2023. Measurement             Association for Computational Linguistics (Volume
+  in the age of LLMs: An application to ideological          1: Long Papers), pages 4817–4830, Toronto, Canada.
+  scaling. arXiv preprint.                                   Association for Computational Linguistics.
+
+                                                      13221
+                                                       11
+Fabian M. Suchanek, Gjergji Kasneci, and Gerhard            Wenxuan Zhang, Yue Deng, Bing Liu, Sinno Jialin Pan,
+  Weikum. 2007. Yago: A core of semantic knowledge.           and Lidong Bing. 2023. Sentiment analysis in the
+  In Proceedings of the 16th International Conference         era of large language models: A reality check. arXiv
+  on World Wide Web, page 697–706.                            preprint.
+
+Fei Wang, Wenjie Mo, Yiwei Wang, Wenxuan Zhou,              Yuhao Zhang, Peng Qi, and Christopher D. Manning.
+  and Muhao Chen. 2023. A causal view of entity               2018. Graph convolution over pruned dependency
+  bias in (large) language models. In Findings of the         trees improves relation extraction. In Proceedings
+  Association for Computational Linguistics: EMNLP            of the 2018 Conference on Empirical Methods in
+  2023, pages 15173–15184.                                    Natural Language Processing, pages 2205–2215.
+
+Yiwei Wang, Muhao Chen, Wenxuan Zhou, Yujun                 Yuhao Zhang, Victor Zhong, Danqi Chen, Gabor Angeli,
+  Cai, Yuxuan Liang, Dayiheng Liu, Baosong Yang,              and Christopher D. Manning. 2017. Position-aware
+  Juncheng Liu, and Bryan Hooi. 2022. Should we               attention and supervised data improve slot filling. In
+  rely on entity mentions for relation extraction? debi-      Proceedings of the 2017 Conference on Empirical
+  asing relation extraction with counterfactual analysis.     Methods in Natural Language Processing, pages 35–
+  In Proceedings of the 2022 Conference of the North          45.
+  American Chapter of the Association for Computa-
+                                                            GuoDong Zhou, Jian Su, Jie Zhang, and Min Zhang.
+  tional Linguistics: Human Language Technologies,
+                                                              2005. Exploring various knowledge in relation ex-
+  pages 3071–3081.
+                                                              traction. In Proceedings of the 43rd Annual Meet-
+                                                              ing of the Association for Computational Linguistics
+Thomas Wolf, Lysandre Debut, Victor Sanh, Julien
+                                                              (ACL’05), pages 427–434.
+  Chaumond, Clement Delangue, Anthony Moi, Pier-
+  ric Cistac, Tim Rault, Remi Louf, Morgan Funtowicz,       Wenxuan Zhou and Muhao Chen. 2022. An improved
+  Joe Davison, Sam Shleifer, Patrick von Platen, Clara       baseline for sentence-level relation extraction. In Pro-
+  Ma, Yacine Jernite, Julien Plu, Canwen Xu, Teven           ceedings of the 2nd Conference of the Asia-Pacific
+  Le Scao, Sylvain Gugger, Mariama Drame, Quentin            Chapter of the Association for Computational Lin-
+  Lhoest, and Alexander Rush. 2020. Transformers:            guistics and the 12th International Joint Conference
+  State-of-the-Art natural language processing. In Pro-      on Natural Language Processing (Volume 2: Short
+  ceedings of the 2020 Conference on Empirical Meth-         Papers), pages 161–168.
+  ods in Natural Language Processing: System Demon-
+  strations, pages 38–45.                                   Wenxuan Zhou, Sheng Zhang, Hoifung Poon, and
+                                                             Muhao Chen. 2023. Context-faithful prompting for
+Jian Xie, Kai Zhang, Jiangjie Chen, Renze Lou, and           large language models. In Findings of the Associa-
+   Yu Su. 2023. Adaptive Chameleon or Stubborn Sloth:        tion for Computational Linguistics: EMNLP 2023,
+   Revealing the Behavior of Large Language Models           pages 14544–14556.
+   in Knowledge Conflicts. ArXiv:2305.13300 [cs].
+                                                            Caleb Ziems, William Held, Omar Shaikh, Jiaao Chen,
+Ikuya Yamada, Akari Asai, Hiroyuki Shindo, Hideaki            Zhehao Zhang, and Diyi Yang. 2024. Can large lan-
+  Takeda, and Yuji Matsumoto. 2020. LUKE: Deep                guage models transform computational social sci-
+  contextualized entity representations with entity-          ence? Computational Linguistics, pages 1–55.
+  aware self-attention. In Proceedings of the 2020
+  Conference on Empirical Methods in Natural Lan-
+  guage Processing (EMNLP), pages 6442–6454.
+
+Jun Yan, Yang Xiao, Sagnik Mukherjee, Bill Yuchen
+  Lin, Robin Jia, and Xiang Ren. 2022. On the ro-
+  bustness of reading comprehension models to entity
+  renaming. In Proceedings of the 2022 Conference
+  of the North American Chapter of the Association
+  for Computational Linguistics: Human Language
+  Technologies, pages 508–520.
+
+Qinan Yu, Jack Merullo, and Ellie Pavlick. 2023. Char-
+  acterizing mechanisms for factual recall in language
+  models. In Proceedings of the 2023 Conference on
+  Empirical Methods in Natural Language Processing,
+  pages 9924–9959.
+
+Dmitry Zelenko, Chinatsu Aone, and Anthony
+ Richardella. 2002. Kernel methods for relation ex-
+ traction. In Proceedings of the ACL-02 Conference
+ on Empirical Methods in Natural Language Process-
+ ing - Volume 10, EMNLP ’02, page 71–78.
+
+                                                       13222
+                                                        12
+A   A Primer on Half-pointwise Mutual Information
+Half-pointwise mutual information (HPMI) is a non-standard concept. There is, for example, no mention
+of it in standard references on information theory (Cover and Thomas, 2006). In this brief primer, we
+give various properties of HPMI and show how it relates to other concepts in information theory. Given
+random variable X over the discrete space X , random variable Y over the discrete space Y, and x ∈ X ,
+the half-PMI of X = x, Y is defined as:
+                                                  X                p(y | x)
+                             HPMI(X = x; Y ) ≜        p(y | x) log                                  (4)
+                                                                     p(y)
+                                                     y∈Y
+
+such that
+                                                                                          
+                                                               X                   p(y | x) 
+                     E [HPMI(X = x; Y )] = E                      p(y | x) log                        (5a)
+                    x∼X                             x∼X                              p(y)
+                                                            y∈Y
+                                                    XX                               p(y | x)
+                                                =                p(x)p(y | x) log                      (5b)
+                                                                                       p(y)
+                                                    x∈X y∈Y
+                                                    XX                          p(x, y)
+                                                =                p(x, y) log                           (5c)
+                                                                               p(x)p(y)
+                                                    x∈X y∈Y
+
+                                                = MI(X; Y )                                            (5d)
+  We now state and prove three Propositions about HPMI.
+Proposition 1. Given random variable X over the discrete space X , random variable Y over the discrete
+space Y, and x ∈ X , then:
+                          HPMI(X = x; Y ) = H(X = x) − H(X = x | Y )                                    (6)
+Proof.
+                                      X                    p(y | x)
+               HPMI(X = x; Y ) ≜            p(y | x) log                                               (7a)
+                                                             p(y)
+                                      y∈Y
+                                      X                     p(x, y)
+                                  =         p(y | x) log                                               (7b)
+                                                           p(x)p(y)
+                                      y∈Y
+                                      X                    p(x | y)
+                                  =         p(y | x) log                                               (7c)
+                                                            p(x)
+                                      y∈Y
+                                        X                                X
+                                  =−          p(y | x) log p(x) +              p(y | x) log p(x | y)   (7d)
+                                       y∈Y                               y∈Y
+                                                      X
+                                  = − log p(x) +               p(y | x) log p(x | y)                   (7e)
+                                                     y∈Y
+
+                                    = H(X = x) − H(X = x | Y )                                         (7f)
+                                                           P
+Note that to get from Eq. (7e) to Eq. (7f), H(X = x | Y ) ≜ y∈Y p(y | x) log p(x | y) because
+                                                    
+                           X                             XX
+                      E        p(y | x) log p(x | y) =      p(x, y) log p(x | y)                     (7g)
+                   x∼X
+                          y∈Y                                  x∈X y∈Y
+                                                               XX                      p(x, y)
+                                                       =                 p(x, y) log                   (7h)
+                                                                                        p(y)
+                                                               x∈X y∈Y
+
+                                                       = H(X | Y )                                     (7i)
+                                                                                                        ■
+                                                    13223
+                                                     13
+Proposition 2. Given random variable X over the discrete space X , random variable Y over the discrete
+space Y, and x ∈ X , then:
+                              HPMI(X = x; Y ) = Hx (Y ) − H(Y | X = x)                                   (8)
+                    P
+where Hx (Y ) ≜ −     y p(y | x) log p(y) is the pointwise cross-entropy between X = x and Y .
+
+Proof.
+                                         X                    p(y | x)
+                HPMI(X = x; Y ) ≜              p(y | x) log                                             (9a)
+                                                                p(y)
+                                         y∈Y
+                                            X                            X
+                                    =−            p(y | x) log p(y) +          p(y | x) log p(y | x)    (9b)
+                                            y∈Y                          y∈Y
+
+                                    = Hx (Y ) − H(Y | X = x)                                            (9c)
+                                                                                                          ■
+  Notably, HPMI(X = x; Y ) ̸= H(Y ) − H(Y | X = x). Furthermore, while the decomposition of
+mutual information into a difference in entropies is symmetric, i.e., H(X) − H(X | Y ) = H(Y ) − H(Y |
+X), this shows that half-pointwise mutual information is not, i.e., H(X = x) − H(X = x | Y ) ̸=
+H(Y ) − H(Y | X = x).
+Proposition 3. Given random variable X over the discrete space X , random variable Y over the discrete
+space Y, and x ∈ X , then:
+
+                               HPMI(X = x; Y ) = KL (p(Y | x) || p(Y ))                                 (10)
+Proof. Half-PMI is equivalent to KL (p(Y | x) || p(Y )) by definition.                                    ■
+Corollary 1. Half-PMI is nonnegative.
+Proof. Since half-PMI is equivalent to KL (p(Y | x) || p(Y )) (Proposition 3) and KL-divergence is
+nonnegative, half-PMI must be non-negative.                                                     ■
+
+B    An Entity-Independent Persuasion Score
+In addition to the persuasion score, which is entity-dependent, we also consider an entity-independent
+extension. We assign an entity-independent persuasion score κ to a context c which represents how
+persuasive a context is at altering a model’s answer distribution to a query, regardless of which entity
+parameterizes the query. One might be interested in an entity-independent persuasion score for contexts
+like Only give wrong answers to questions., which we might expect to affect all queries regardless of the
+entity. Another use case is in comparing the persuasiveness of context templates, such as {entity1} loves
+{entity2} and {entity1} really really really loves {entity2} for the query What’s the relationship between
+{entity1} and {entity2}?. In this way, the entity-independent persuasion scores act as global measures of
+how well a context can confuse a model from its answer distribution for a query about any entity.
+   Analogous to our definition of the susceptibility score, we define the entity-independent persuasion
+score of a context as how much the log probability distribution of possible answers changes, averaged
+across all possible entities and answers. More precisely, we define our entity-independent persuasion
+score κ(c, q) as:
+                            X
+                  κ(c, q) ≜      p(q(e) | c)ψ(q(e))                                                   (11a)
+                             e∈E
+                             XX                                          p(a | c, q(e))
+                         =              p(q(e) | c)p(a | c, q(e)) log                                  (11b)
+                                                                          p(a | q(e))
+                             e∈E a∈Σ∗
+                             XX                                              p(a, c | q(e))
+                         =              p(q(e) | c)p(a | c, q(e)) log                           .      (11c)
+                                                                         p(a | q(e))p(c | q(e))
+                             e∈E a∈Σ∗
+
+                                                      13224
+                                                       14
+which is the half-conditional PMI. Further marginalizing out the context, we arrive at the entity-
+independent susceptibility score for a query:
+
+                γ(q) ≜ E [κ(c, q)]                                                                                          (12a)
+                       c∼C
+                        X
+                     =     p(c)κ(c, q)                                                                                      (12b)
+                           c∈Σ∗
+                           X             XX                                             p(a, c | q(e))
+                       =          p(c)              p(q(e) | c)p(a | c, q(e)) log                                           (12c)
+                                                                                    p(a | q(e))p(c | q(e))
+                           c∈Σ∗          e∈E a∈Σ∗
+                           XXX                                       p(a, c | q(e))
+                       =                     p(a, c, q(e)) log                                                              (12d)
+                                                                 p(a | q(e))p(c | q(e))
+                           c∈Σ∗ e∈E a∈Σ∗
+                       = MI(A; C | q(E)).                                                                                   (12e)
+
+The entity-independent persuasion score differs from the persuasion score by additionally marginalizing
+over the entities. As the half-PMI is conditioned on the entity random variable, this tells us, when we
+already know the entity, for a given context, how much more confident can we be in the answer. In some
+sense, then, this can be interpreted as the average persuasiveness of a context across all entities for the
+query.
+
+C        Detailed Experimental Setup
+
+We extract 122 relations from the YAGO knowledge graph (Suchanek et al., 2007), such as alumniOf,
+capital, and highestPoint. For each relation, we do the following:
+
+    • We randomly sample k real entities (and corresponding answers) from YAGO and use GPT-4 11
+      (OpenAI, 2023) to generate k fake entities with the same entity class as the real ones12 .13
+
+    • We construct open and closed query form templates, e.g., (closed) Q: Is {answer} the capital of
+      {entity}?\nA: and (open) Q: What is the capital of {entity}?\nA:, and parameterize them with both
+      real and fake entities (and answers, if applicable), leaving us with 2k queries per query form.
+
+    • We construct context templates of 3 types: base, e.g., The capital of {entity} is {answer}., assertive,
+      e.g., The capital of {entity} is definitely {answer}., and negation (e.g., The capital of {entity} is not
+      {answer}.). We parameterize these context templates with both real and fake entities (and answers, if
+      applicable). From this, we randomly sample 6k contexts, subject to the constraint that each entity is
+      directly mentioned in 6 contexts total (that is, in 2 assertive contexts, 2 base contexts, and 2 negation
+      contexts).
+
+    • We compute the persuasion scores ψ(c, q(e)) for the real and fake entities according to Eq. (2).
+
+    • We compute the susceptibility score χ(q(e)) for the real and fake entities according to Eq. (3). We
+      approximate C with a uniform distribution over the set of sampled contexts and A with the model’s
+      next token probabilities.
+
+    • For the various group comparisons (e.g., relevant vs irrelevant contexts, familiar vs unfamiliar entities,
+      etc.), we use a permutation test over the t-statistic (α = 0.05, with the BH correction) to test our null
+      hypothesis for each comparison.
+    11
+       gpt-4-1106-preview, January 2024
+    12
+       Entity classes: CreativeWork, Event, Intangible, Organization, Person, Place, Product, Taxon, and FictionalEntity.
+    13
+       Real example: Adele. Fake example: Udo König.
+
+                                                             13225
+                                                              15
+D     Entity-Specific Memorization Ratio
+D.1 Definition
+The memorization ratio (MR), as used by Longpre et al. (2021), is defined as follows: Given a set of
+(query, context)-pairs with knowledge conflicts (i.e., the answer in the context disagrees with the original
+answer), MR = pop+p   o
+                        s
+                          , where po is the number of queries for which the model returned the original
+answer and ps is the number of queries for which the model returned the substitute answer presented in
+the context. Then, the entity-specific MR follows this definition under the additional constraint that the
+query and entity are fixed, and we vary only the contexts; the resulting number tells us, for a given query
+about an entity, the fraction of contexts for which the model returned the original answer instead of the
+substitute one.
+
+D.2 Further Discussion on Relation between MR and Susceptibility Score
+In Fig. 3, the open queries further show a decreasing pattern at each quartile for all bins except the lowest
+one (MR between 0 and 0.2). The lowest bin includes queries for which a model may fail to know the
+original answer; in these cases, MR cannot distinguish between the model behavior for these difficult
+queries, whereas susceptibility scores can provide more granular information about model behavior for
+such entities. Meanwhile, the closed queries appear to have a mostly increasing pattern at each quartile
+across the bins. This result could be an artifact of the construction of the closed queries. Since the original
+answer of all closed queries is Yes, it is possible that the contexts increase the confidence in Yes due to
+some model artifact or token bias, which would explain higher susceptibility scores even for higher MR.
+
+E     Persuasion Scores: In-Depth Results
+E.1    Relevant vs Irrelevant Context Persuasion Scores Across Models
+Our null hypothesis is that the mean persuasion score of relevant contexts is not greater than that of
+irrelevant contexts. We summarize the test results (effect size and p-values) for all queries for all models
+in Fig. 12.
+
+E.2    Assertive vs Base Context Persuasion Scores Across Models
+Our null hypothesis is that the mean persuasion score of assertive contexts is not greater than that of base
+contexts. We summarize the test results (effect size and p-values) for all queries for all models in Fig. 13.
+
+E.3    Negation vs Base Context Persuasion Scores Across Models
+Our null hypothesis is that the mean persuasion score of negation contexts is not equal to that of base
+contexts. We summarize the test results (effect size and p-values) for all queries for all models in Fig. 14.
+
+F     Susceptibility Scores: In-Depth Results
+F.1 Unfamiliar vs Familiar Entity Susceptibility Scores Across Models
+Our null hypothesis is that the mean susceptibility score of unfamiliar entities is not greater than that of
+familiar entities. We summarize the test results (effect size and p-values) for all queries for all models in
+Fig. 15. From this figure, we can see the trend of how effect size and percentage of significant queries
+generally increase with model size, and notably the smallest model has no significant results for any query.
+However, even the larger models do not exhibit significant differences in scores between unfamiliar and
+familiar entities for all queries. To investigate the spread further, we plot the p-values and effect size
+against the entity frequencies in the Pile. The results are presented in Fig. 16. There is a significant trend
+for the open queries against the frequency (spearman, ρ is −0.23, p < 0.05), showing that real entities
+tend to be less susceptible the more frequently they appear in the training data. The trend is not significant
+for the closed set.
+                                                    13226
+                                                     16
+                                    Effect sizes for relevant vs irrelevant contexts for Pythia models
+                               pythia-70m-deduped                                      pythia-410m-deduped
+                       open                             closed   100                      open                            closed   100
+
+              1.0                              1.0               10 1            2                               2                 10 1
+     Effect size                      Effect size                       Effect size                     Effect size
+              0.5                              0.5               10 2            1                               1                 10 2
+
+                                                                 10 3            0                               0                 10 3
+                       Query                             Query                            Query                           Query
+                               pythia-1.4b-deduped                                                pythia-2.8b-deduped
+                       open                             closed   100                      open                            closed   100
+
+                                                                 10 1                                                              10 1
+     Effect size                     Effect size                        Effect size                     Effect size
+              2                                2                                 2                               2
+                                                                 10 2                                                              10 2
+                                                                                 0                               0
+              0                                0
+                                                                 10 3                                                              10 3
+                       Query                            Query                             Query                           Query
+                               pythia-6.9b-deduped                                                pythia-12b-deduped
+                       open                             closed   100                      open                            closed   100
+                                                                                 4                               4
+              3                                3
+                                                                 10 1                                                              10 1
+     Effect size                     Effect size                        Effect size                     Effect size
+              2                                2                                 2                               2
+              1                                1                 10 2                                                              10 2
+
+              0                                0                 10 3            0                               0                 10 3
+                       Query                            Query                             Query                           Query
+
+Figure 12: These plots show, for each of the 6 model sizes, the effect size between relevant and irrelevant contexts
+(y-axis) and p-values (red is significant, blue is insignificant) of the null hypothesis that persuasion scores of relevant
+contexts are not greater than those of irrelevant contexts, for each of the 122 queries (x-axis). Across a consistent
+result across all models of primarily positive effect sizes and mostly significant results.
+
+
+                                      Effect sizes for assertive vs base contexts for Pythia models
+                               pythia-70m-deduped                                     pythia-410m-deduped
+                       open                             closed   100                      open                            closed   100
+                   2                                2                                 2                               2
+                                                                 10 1                                                              10 1
+     Effect size                      Effect size                       Effect size                     Effect size
+                   1                                1
+                                                                 10 2                 0                               0            10 2
+                   0                                0
+                   1                                1            10 3                 2                               2            10 3
+                       Query                             Query                            Query                            Query
+                               pythia-1.4b-deduped                                                pythia-2.8b-deduped
+                       open                             closed   100                      open                            closed   100
+              4                                4
+                                                                 10 1                                                              10 1
+     Effect size                     Effect size                        Effect size                     Effect size
+              2                                2                                 5                               5
+                                                                 10 2                                                              10 2
+              0                                0
+                                                                                 0                               0
+                                                                 10 3                                                              10 3
+                       Query                            Query                             Query                           Query
+                               pythia-6.9b-deduped                                                pythia-12b-deduped
+                       open                             closed   100                      open                            closed   100
+              6                                6                                      4                               4
+              4                                4                 10 1                 2                               2            10 1
+     Effect size
+              2                      Effect size
+                                               2                        Effect size                     Effect size
+                                                                 10 2                 0                               0            10 2
+              0                                0
+                                                                 10 3                 2                               2            10 3
+                       Query                            Query                             Query                            Query
+
+Figure 13: These plots show, for each of the 6 model sizes, the effect size between assertive and base contexts
+(y-axis) and p-values (red is significant, blue is insignificant) of the null hypothesis that persuasion scores of relevant
+contexts are not greater than those of irrelevant contexts, for each of the 122 queries (x-axis). Across a consistent
+result across all models of primarily positive effect sizes and mostly significant results.
+
+
+                                                                 13227
+                                                                  17
+                                        Effect sizes for negation vs base contexts for Pythia models
+                                 pythia-70m-deduped                                    pythia-410m-deduped
+                         open                              closed    100                  2
+                                                                                              open                        2
+                                                                                                                              closed   100
+              4                                 4
+                                                                     10 1                                                              10 1
+     Effect size                       Effect size                          Effect size                     Effect size
+              2                                 2                                         0                               0
+                                                                     10 2                                                              10 2
+              0                                 0                                         2                               2
+                                                                     10 3                                                              10 3
+                         Query                             Query                              Query                            Query
+                                 pythia-1.4b-deduped                                                  pythia-2.8b-deduped
+                         open                              closed    100                      open                            closed   100
+                   1                                 1
+                                                                                     4                               4
+                   0                                 0               10 1                                                              10 1
+     Effect size                       Effect size                          Effect size                     Effect size
+                                                                                     2                               2
+                   1                                 1               10 2                                                              10 2
+                                                                                     0                               0
+                   2                                 2
+                                                                     10 3                                                              10 3
+                         Query                              Query                             Query                           Query
+                                 pythia-6.9b-deduped                                                  pythia-12b-deduped
+                         open                              closed    100                      open                            closed   100
+                                                                                          2                               2
+                   2                                 2
+                                                                     10 1                                                              10 1
+     Effect size                       Effect size                          Effect size                     Effect size
+                                                                                          0                               0
+                   0                                 0
+                                                                     10 2                                                              10 2
+                                                                                          2                               2
+                   2                                 2
+                                                                     10 3                                                              10 3
+                         Query                              Query                             Query                            Query
+
+Figure 14: These plots show, for each of the 6 model sizes, the effect size between relevant and irrelevant contexts
+(y-axis) and p-values (red is significant, blue is insignificant) of the null hypothesis that persuasion scores of relevant
+contexts are not greater than those of irrelevant contexts, for each of the 122 queries (x-axis). Across a consistent
+result across all models of primarily positive effect sizes and mostly significant results.
+
+
+                                       Effect sizes for unknown vs known entities for Pythia models
+                                 pythia-70m-deduped                                  pythia-410m-deduped
+                   1.0
+                          open                       1.0
+                                                            closed   100                      open                            closed   100
+                   0.5                               0.5             10 1            1                               1                 10 1
+     Effect size   0.0                 Effect size   0.0                    Effect size                     Effect size
+                                                                     10 2            0                               0                 10 2
+                   0.5                               0.5
+                                                                     10 3                                                              10 3
+                          Query                              Query                            Query                           Query
+                                 pythia-1.4b-deduped                                                  pythia-2.8b-deduped
+                         open                              closed    100                      open                            closed   100
+              4                                 4                                         2                               2
+                                                                     10 1                                                              10 1
+     Effect size                       Effect size                          Effect size                     Effect size
+                                                                                          1                               1
+              2                                 2
+                                                                     10 2                 0                               0            10 2
+              0                                 0
+                                                                     10 3                 1                               1            10 3
+                         Query                             Query                              Query                            Query
+                                 pythia-6.9b-deduped                                                  pythia-12b-deduped
+                         open                              closed    100                  2
+                                                                                              open                        2
+                                                                                                                              closed   100
+              2                                 2
+                                                                     10 1                 1                               1            10 1
+     Effect size                       Effect size                          Effect size   0                 Effect size   0
+              0                                 0                    10 2                                                              10 2
+                                                                                          1                               1
+                                                                     10 3                                                              10 3
+                         Query                             Query                              Query                            Query
+
+Figure 15: These plots show, for each of the 6 model sizes, the effect size between relevant and irrelevant contexts
+(y-axis) and p-values (red is significant, blue is insignificant) of the null hypothesis that persuasion scores of relevant
+contexts are not greater than those of irrelevant contexts, for each of the 122 queries (x-axis). Across a consistent
+result across all models of primarily positive effect sizes and mostly significant results.
+
+
+                                                                     13228
+                                                                      18
+                                         10 7
+                               P-value
+                                     10 16
+                                     10 25
+
+                                                    102   103    104       105   106
+                                                                 Frequency
+
+
+                                                0
+
+                                  Effect size   1
+
+                                                2
+                                                    102   103    104       105   106
+                                                                 Frequency
+
+Figure 16: The significance of the difference in real/fake susceptibility correlates somewhat with the frequency of
+the real entities. Open queries are colored blue, and closed ones are orange. Spearman, ρ for the open, is −0.23,
+p < 0.05; the trend is not significant for the closed set.
+
+
+F.2 Training Data and Susceptibility Scores
+Since language models are parameterized with knowledge from their training corpora, we examine whether
+we can identify correlations between patterns in entity susceptibility scores and their prevalence in the
+training data. Because the Pythia models are all trained on the Pile dataset (Gao et al., 2020) in a single
+pass, we choose to compare the susceptibility scores from the Pythia models to various frequency and
+co-occurrence statistics in the Pile.14
+
+Experiment Setup. Our goal is to understand how the susceptibility score relates to the frequencies
+of entities and their co-occurrences in the training data. For this, we use all of the entities and answers
+selected as described in §4.4 and locate them in the Pile. We only perform rudimentary tokenization of
+each document by removing punctuation and splitting at white spaces, but find this suffices to locate the
+exact terms. As a sanity check, we annotate named entities in 30k documents and cross-reference the list
+of entities. If a supposed entity has a fairly high frequency (>50) and is most often (>75%) not labeled
+as an entity, we exclude it from the calculations. This removes ∼200 entities that are high-frequency
+non-entity words in English and lowers the co-occurrences by 25%. Finally, we calculate the token
+distance for each entity-answer pair for every document in ∼1/3 of the Pile.
+
+Results. We compare the co-occurrences of the entity-answer pairs to the averaged susceptibility scores
+over all queries Qe that apply to the entity e, |Qe |−1 Σq∈Qe χ(q(e)). Our results show a stark difference
+in behavior between the open and closed questions (§4.4). The open questions not only have higher
+susceptibility scores, but the training corpus frequency of the mentioned entities influences them more.
+This is to be expected as there are far more probable candidates for open questions than for closed
+yes–no-style questions. We also find a significant negative correlation (Spearman ρ -0.23, p ≃ 0) between
+frequency and susceptibility scores for the pythia-6.9b-deduped model, indicating that the language model
+is less susceptible to context interference for entity-answer pairs that are more frequently found in the
+training corpus. See Fig. 9 and Fig. 17. Finally, we also notice a big difference in the rank correlation
+depending on the query type. Some query types are more susceptible to context for the given entities than
+others. An overview of this is given in the next section.
+   14
+      We use the same deduplicated 825GiB version of the Pile that the Pythia-6.9b model was trained on. https://huggingface.
+co/datasets/EleutherAI/the_pile_deduplicated.
+
+                                                                13229
+                                                                 19
+Figure 17: Susceptibility scores plotted against frequency for different model sizes. The decreasing lower bound
+trend is generally consistent across all models and both open/closed queries, although it appears to be stronger for
+open queries (especially at larger model sizes).
+
+
+
+
+                                                      13230
+                                                       20
+Figure 18: These plots show, for each of the 6 model sizes, the relationship between entity susceptibility score and
+relation-dependent degree in the knowledge graph. The decreasing lower bound trend is generally consistent across
+all models and both open/closed queries.
+
+
+
+
+                                                      13231
+                                                       21
+Susceptibility and Frequency Analysis We are interested in seeing how different predicate relations
+of the queries from the knowledge graph have different susceptibility scores. We evaluate the relation
+between susceptibility scores and co-occurrence frequencies per entity-answer predicate relation. This
+reveals trends in what types of relations are more susceptible to context than others. A lower correlation
+indicates a stronger drop in susceptibility as the entities become more frequent in the pretraining data.
+
+F.3 Entity Degrees and Susceptibility Scores
+Since knowledge graphs are structured conceptual maps relating entities, we further seek to identify
+whether we can identify any correlations between statistics of the YAGO knowledge graph and an entity’s
+susceptibility scores. Validating against a knowledge graph can be advantageous over validating against
+the actual training data for a number of reasons, including that for most models, the actual training data is
+inaccessible for research, and the scale of the training data can make it prohibitively expensive to trawl
+through efficiently and precisely. For example, with a knowledge graph, we can identify the exact number
+of objects an entity might share an alumniOf relation with, while within the pretraining data, it is very
+difficult to identify the number of different answers an entity will co-occur within the context of the
+specific alumniOf relation.
+
+Experiment Setup. Our goal is to understand how the susceptibility score relates to the degree of
+entities in the YAGO knowledge graph G for specific queries. For this, we extract the number of
+incoming and outgoing edges from an entity e along a relation (or query) q as follows: δ(e, q) =
+|{a | (e, q, a) ∈ G} ∪ {a | (a, q, e) ∈ G}|. We plot δ(e, q) against the susceptibility score χ(q(e)) for all
+entities and queries.
+
+Results. From Fig. 18, we see a decreasing upper bound relationship between susceptibility scores and
+the YAGO degree δ for both open and closed queries for all model sizes. This could be explained as
+follows: consistent with our original hypothesis, very familiar entities to a model have low susceptibility,
+while less familiar entities can have a wider range of susceptibility. The potential for unfamiliar entities to
+be susceptible is much higher than that for very familiar entities, although unfamiliar entities can also
+be less susceptible. Further investigation into traits that characterize the susceptibility of familiar vs less
+familiar entities is needed.
+
+G    Applications
+G.1 Social Sciences Measurement
+Motivation. Large language models (LLMs) are actively used today in empirical social sciences for
+annotating data and descriptive data analysis (e.g., classifying tweets with sentiment and ideology scores
+(Ziems et al., 2024; Gilardi et al., 2023)). However, Zhang et al. (2023) warn that LLMs applied to
+sentiment classification “may inadvertently adopt human biases” and demonstrate that the prompt design,
+i.e., the context persuasiveness, can significantly influence the outcome. O’Hagan and Schein (2023)
+demonstrate that LLMs exhibit biases about different entities when measuring political ideology, based on
+their prior knowledge. Finally, Stoehr et al. (2024) use LLMs to measure the stance of product reviews,
+their setting does not disentangle the effects of prior knowledge and context, thus leaving ambiguous the
+question of whether the measurement is more because of the LLM’s prior bias about the product or the
+review’s actual content.
+
+Experiment Setup. We consider a manually constructed dataset (Tab. 1) of well-known entity-pairs
+which are either friends (e.g., Harry Potter and Ron Weasley) or enemies (e.g., David and Goliath) and
+contexts relating the pair (e.g., Harry loves Ron). We aim to understand how susceptibility scores may
+differ between the two kinds of relationships for the query What’s the relationship between {entity1} and
+{entity2}?, e.g., are famous friend-based relationships more susceptible than enemy-based relationships?
+We compute the susceptibility scores for these entity-pairs using simple template-generated contexts such
+as {entity1} loves {entity2} and {entity1} hates {entity2} and then analyze the results.
+                                                    13232
+                                                     22
+Results. From Fig. 10, we can see that for the open query The relationship between {} and {} is, there
+is a clear difference in susceptibility scores for friend and enemy entity-pairs. We leave to future work
+investigating the exact nature of why some entity-pairs may have lower susceptibility scores than others.
+
+G.2 Exploring Gender Bias
+Motivation. The susceptibility score tells us how the entropy changes for a given entity as we vary
+the prepended contexts. We posit that stronger induced biases for entities lead to lower susceptibility
+scores than for those less represented in the training data. Using this information, we consider how the
+susceptibility score can be used to study gender bias in LLMs.
+Experiment Setup. We collect sentences containing 20 highly stereotypical sentences about men and
+women, respectively, to use as contexts. For instance, Men are not good at multitasking. We also collect
+20 names for each gender and 20 neutral queries that we think may be affected by the contexts, such
+as {entity} spends most of their time. Finally, we also invert the queries by flipping the gendered words,
+giving us non-stereotypical contexts. We then calculate susceptibility scores for each query and gender
+combination over the four different context collections. All scores are calculated using the Pythia-6.9b-
+deduplicated model. All data was generated with GPT-4. The contexts, names, and queries can be
+found below.
+Results. Results are shown in Fig. 11. For all contexts, there is a significant difference between the
+genders (p < 10−6 ). We make several observations: (i) When prompted with the masculine stereotypes,
+we get the lowest susceptibility for the male entities, indicating the model has a bias for the stereotypical
+male contexts. (ii) By swapping the genders in the stereotypical female contexts (M*), we get the
+highest susceptibility for the male entities. Somewhat surprisingly, we also find that this gives the lowest
+susceptibility scores for the female names. (iii) The susceptibility scores for the female names over the
+stereotypical female contexts (F) are similar to the swapped ones (F*), hinting that the model does not
+have as strong a bias for the feminine stereotypes as in the masculine case in (i). Combined with our
+prior findings on the relation between susceptibility and the saliency of entities, this hints at masculine
+stereotypes being more prominently represented in the training data (as well as in the model’s induced
+biases). At the same time, we don’t see evidence of exaggerated feminine stereotypes being favored via
+lower susceptibility scores.
+G.2.1 Gender Stereotypes Data
+Here, we list the data used to run the gender bias use case. All data was generated with the help of the
+GPT-4 LLM.
+   The female names are Mary, Jennifer, Linda, Patricia, Elizabeth, Susan, Jessica, Sarah, Karen,
+Nancy, Margaret, Lisa, Betty, Dorothy, Sandra, Ashley, Kimberly, Donna, Emily, Michelle. The
+male names are James, John, Robert, Michael, William, David, Richard, Joseph, Thomas, Charles,
+Christopher, Daniel, Matthew, George, Donald, Anthony, Paul, Mark, Andrew, Edward.
+   The stereotypical feminine contexts are: Women are not as strong as men., All women are overly
+emotional and sensitive., Women are not good at math and sciences., All women are naturally good at
+cooking and cleaning., Women talk more than men., Women are generally not capable of doing manual
+labor., All women love shopping and fashion., Women don’t understand technology as well as men do.,
+Women are indecisive and change their mind too often., Women cannot drive as well as men., Women are
+not as ambitious as men when it comes to career., Women overthink things more than men., Women are
+not as good at sports as men., Women are more gossipy than men., All women are afraid of bugs and
+spiders., Women are not good at directions and get lost easily., Women take longer to get ready than men.,
+Women always need to ask for others for their opinion., All women are obsessed with their weight and
+dieting., All women are crazy about babies and want to have kids.
+   The stereotypical masculine contexts are Men always bring the association of strength and aggression.,
+All men are inherently messy and cannot keep their spaces clean., Men are not good at multitasking., All
+men are naturally good at sports., Men cannot cook as well as women., Men do not take care of their
+health as much as women do., I believe men are not as talkative as women., All men love video games.,
+                                                   13233
+                                                    23
+Men are not good listeners., Men are always competitive., Men are not as emotional as women., Men are
+not able to express their feelings as well as women do., Men only think about one thing., Men look at
+problems from a logical perspective, not considering emotions., Men are typically less organized than
+women., Men tend to make decisions without considering others’ feelings., All men only care about sports
+and cars., Men don’t like to ask for help., Men don’t pay as much attention to appearance as women do.,
+All men can’t resist a flirt.
+   The queries used for both sets of entities are: I think {entity} works as a, {entity} is good at, I met
+{entity} yesterday, they are, {entity} usually spends their free time, {entity}’s favorite hobby is likely,
+{entity} probably lives in a, When it comes to {entity}’s fashion style, they prefer, {entity}’s educational
+background might be in, {entity} often enjoys eating, If {entity} was a colour, they would be, The one
+thing that {entity} cannot resist is, {entity} probably drives a, One thing that {entity} is really bad at is,
+{entity}’s personality can be described as, {entity} spends most of their time, {entity} probably likes to
+watch, During weekends, {entity} might be, {entity}’s favorite type of music is probably, I imagine {entity}
+has a pet, it is a, {entity}’s favorite type of movie is probably.
+
+
+
+
+                                                   13234
+                                                    24
+                                 Entity 1                Entity 2                      Label    Type
+
+                                 Sherlock Holmes         James Moriarty                enemy    movie
+                                 Obi Wan Kenobi          Darth Maul                    enemy    movie
+                                 Harry Potter            Lord Voldemort                enemy    movie
+                                 Harry Potter            Draco Malfoy                  enemy    movie
+                                 Spiderman               Norman Osborne                enemy    movie
+                                 Super Mario             Bowser                        enemy    movie
+                                 Gandalf                 Saruman                       enemy    movie
+                                 Bilbo Baggins           Sauron                        enemy    movie
+                                 Superman                Lex Luthor                    enemy    movie
+                                 James Bond              Ernst Stavro Blofeld          enemy    movie
+                                 Optimus Prime           Megatron                      enemy    movie
+                                 Boston Red Sox          New York Yankees              enemy    sports
+                                 Green Bay Packers       Chicago Bears                 enemy    sports
+                                 Borussia Dortmund       FC Bayern Munich              enemy    sports
+                                 Real Madrid             FC Barcelona                  enemy    sports
+                                 Joe Frazier             Muhammad Ali                  enemy    sports
+                                 AC Milan                Inter Milan                   enemy    sports
+                                 Torries                 Labor Party                   enemy    politics
+                                 Democrats               Republicans                   enemy    politics
+                                 USA                     Al-Qaeda                      enemy    politics
+                                 Donald Trump            Hillary Clinton               enemy    politics
+                                 Donald Trump            Joe Biden                     enemy    politics
+                                 Kuomintang              Chinese Communist Party       enemy    history
+                                 Winston Churchill       Adolf Hitler                  enemy    history
+                                 Harry Trumann           Nikita Khrushchev             enemy    history
+                                 George Bush             Saddam Hussein                enemy    history
+                                 David                   Goliath                       enemy    history
+                                 Greece                  Troy                          enemy    history
+                                 Gauls                   Rome                          enemy    history
+                                 USA                     Soviet Union                  enemy    history
+                                 Nazi Germany            Allied Forces                 enemy    history
+                                 Cain                    Abel                          enemy    history
+                                 Coca Cola               Pepsi                         enemy    business
+                                 Ford                    General Motors                enemy    business
+                                 Thomas Edison           Nikola Tesla                  enemy    business
+                                 Steve Jobs              Bill Gates                    enemy    business
+                                 Airbus                  Boeing                        enemy    business
+                                 McDonalds               Burger King                   enemy    business
+                                 Visa                    Mastercard                    enemy    business
+                                 Netscape                Microsoft Internet Explorer   enemy    business
+                                 UPS                     Fedex                         enemy    business
+                                 Canon                   Nixon                         enemy    business
+                                 Sony                    Nintendo                      enemy    business
+                                 Sheriff of Nottingham   Robin Hood                    enemy    history
+                                 Moby Dick               Captain Ahab                  enemy    movie
+                                 Tom                     Jerry                         enemy    movie
+                                 Peter Pan               Captain Hook                  enemy    movie
+                                 Jack Sparrow            Hector Barbossa               enemy    movie
+                                 Harry Potter            Ronald Weasley                friend   movie
+                                 John Lennon             Paul McCartney                friend   history
+                                 Amelia Earhart          Eleanor Roosevelt             friend   history
+                                 Georges Braque          Pablo Picasso                 friend   history
+                                 Bilbo Baggins           Gandalf                       friend   movie
+                                 Harry Potter            Hermione Granger              friend   movie
+                                 Frodo Baggins           Samwise Gamgee                friend   movie
+                                 Han Solo                Chewbacca                     friend   movie
+                                 C.S. Lewis              J.R.R. Tolkien                friend   history
+                                 Alexander the Great     Hephaestion                   friend   history
+                                 Mark Twain              Nikola Tesla                  friend   history
+                                 John Adams              Thomas Jefferson              friend   history
+                                 Bill Gates              Warren Buffett                friend   business
+                                 Vincent van Gogh        Paul Gauguin                  friend   history
+                                 Albert Einstein         Niels Bohr                    friend   history
+                                 Woody                   Buzz Lightyear                friend   movie
+                                 Shrek                   Donkey                        friend   movie
+                                 Bal Gangadhar Tilak     Mohammed Ali Jinnah           friend   history
+                                 Marc Twain              Hellen Keller                 friend   history
+                                 Thomas Edison           Henry Ford                    friend   history
+                                 Bill Gates              Paul Allen                    friend   business
+                                 Larry Page              Sergei Brin                   friend   business
+                                 Mike Wazowski           James P. Sullivan             friend   movie
+                                 Sherlock Holmes         John Watson                   friend   movie
+                                 Harry Potter            Albus Dumbledore              friend   movie
+
+
+Table 1: The manually constructed friend–enemy dataset, which consists of entity pairs, whether their relationship
+is friend-based or enemy-based, and the type of their relationship, e.g., movie, history, etc.
+
+
+
+
+                                                                13235
+                                                                 25
+

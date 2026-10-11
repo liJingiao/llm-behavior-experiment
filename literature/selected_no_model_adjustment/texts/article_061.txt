@@ -1,0 +1,1517 @@
+           Focus on Your Question! Interpreting and Mitigating Toxic CoT
+                       Problems in Commonsense Reasoning
+           Jiachun Li1,2 , Pengfei Cao1,2 , Chenhao Wang1,2 , Zhuoran Jin1,2 , Yubo Chen1,2, *
+                                Daojian Zeng3 , Kang Liu1,2 , Jun Zhao1,2, *
+              1
+                School of Artificial Intelligence, University of Chinese Academy of Sciences
+             2
+               The Laboratory of Cognition and Decision Intelligence for Complex Systems,
+                          Institute of Automation, Chinese Academy of Sciences
+                                          3
+                                            Hunan Normal University
+         {jiachun.li, pengfei.cao, chenhao.wang, zhuoran.jin, yubo.chen, kliu, jzhao} @nlpr.ia.ac.cn
+                                                     zengdj916@163.com
+                           Abstract                                    Question              Rationale          Direct Answer
+                                                                    What kind of                                The answer is: (3)
+        Large language models exhibit high-level com-               status is the bald    The bald eagle is
+                                                                    eagle given? (1)      a symbol of
+        monsense reasoning abilities, especially with               outside (2) world     America. It is the
+        enhancement methods like Chain-of-Thought                   (3) protection (4)    national bird of       CoT Answer
+        (CoT). However, we find these CoT-like meth-                colorado (5)          the United States.
+                                                                                                                The answer is: (5)
+                                                                    america
+        ods lead to a considerable number of originally
+        correct answers turning wrong, which we de-                                       (a) Rationale Drift
+        fine as the Toxic CoT problem. To interpret
+        and mitigate this problem, we first utilize at-                Question              Rationale          Direct Answer
+        tribution tracing and causal tracing methods to                                   Metal can be used
+                                                                    Metal is used to                            The answer is: (3)
+        probe the internal working mechanism of the                 make what? (1)
+                                                                                          to make various
+        LLM during CoT reasoning. Through compar-                   junkyard (2) ore
+                                                                                          things, but the
+                                                                                          most common use
+        isons, we prove that the model exhibits infor-              (3) instruments (4)
+                                                                                          of metal is to         CoT Answer
+                                                                    metal fabrication
+        mation loss from the question in the shallow                shop (5) bowls
+                                                                                          make tools and
+                                                                                                                The answer is: (4)
+        attention layers when generating rationales or                                    machines.
+
+        answers. Based on the probing results, we de-
+                                                                                           (b) Answer Drift
+        sign a novel method called RIDERS (Residual
+        decodIng and sERial-position Swap), which
+        compensates for the information deficit in the              Figure 1: Two examples for the Toxic CoT problem.
+        model from both decoding and serial-position
+        perspectives. Through extensive experiments
+        on multiple commonsense reasoning bench-                 Through them, LLMs can generate reasonable ra-
+        marks, we validate that this method not only             tionales and improve their reasoning performance.
+        significantly eliminates Toxic CoT problems                 While these works have made great progress,
+        (decreased by 23.6%), but also effectively im-           we notice an overlooked problem in them, which
+        proves the model’s overall commonsense rea-              we define as Toxic CoT — Sometimes LLMs can
+        soning performance (increased by 5.5%).                  directly provide correct answers to questions, but
+                                                                 after applying CoT-like methods, it brings extra
+   1    Introduction                                             reasoning paths to models, causing their answers
+   With the increase in scale, large language mod-               to be wrong.1 Figure 1 illustrates two main error
+   els (LLMs) have demonstrated outstanding perfor-              types of this problem — Rationale Drift and An-
+   mance in different tasks (Li et al., 2023; Wen et al.,        swer Drift. Specifically, for the Rationale Drift
+   2023; Sun et al., 2024; Jin et al., 2024a), among             case, given the question “What kind of status is the
+   them, commonsense reasoning has received sig-                 bald eagle given?”, the model can directly give the
+   nificant attention due to its importance for gen-             correct answer “protection”. However, in the ratio-
+   eral intelligence (Wang et al., 2022, 2024; Liu               nale, the model explains “what is the bald eagle” as
+   et al., 2024). In this task, researchers have pro-            “a symbol of America”, which has a semantic drift
+   posed a series of chain-of-thought (CoT) like tech-           from the question. Thus, the model chooses the
+   niques to elicit models’ potential abilities (e.g. Self-      wrong option “america” based on the drifting ratio-
+   Consistency (Wang et al., 2023c), Least-to-Most               nale. For the Answer Drift case, given the question
+   (Zhou et al., 2023), Reflexion (Shinn et al., 2023)).              1
+                                                                        Notably, our definition here differs from the toxicity in
+                                                                  generated content (Shaikh et al., 2023), emphasizing the harm
+       * Corresponding authors.                                   that CoT can bring to the model.
+
+                                                             9206
+Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pages 9206–9230
+                              August 11-16, 2024 ©2024 Association for Computational Linguistics
+“Metal is used to make what?”, the model can di-                     (1) We identify a crucial bottleneck affecting
+rectly answer “instruments”. It can also generate                 LLM’s reasoning performance called the Toxic
+a correct rationale “metal is to make tools and ma-               CoT problem, probe this issue through attribution
+chines”, but when answering based on the rationale,               tracing and causal tracing methods, and interpret
+the model drifts from it and selects the incorrect                the mechanism behind it as the model missing infor-
+option “(4)”. We further conduct a statistical analy-             mation from questions in shallow attention layers.
+sis over extensive commonsense reasoning datasets                 The results contribute to a more in-depth under-
+and find that, among all CoT errors, this problem                 standing of the LLM’s reasoning mechanisms.
+accounts for 37% for the white-box model and                         (2) To mitigate the Toxic CoT problem, we intro-
+33% for the black-box model on average, indicat-                  duce RIDERS, which effectively compensates for
+ing this problem has become a crucial bottleneck                  the internal information loss during CoT reasoning
+in CoT reasoning.2                                                from decoding and serial-position perspectives.
+   So what is the mechanism behind this issue?                       (3) We conduct extensive experiments on vari-
+In this paper, we attempt to answer this question                 ous benchmarks. The results not only verify the
+by probing the inner workings of the LLM’s CoT                    rationality of our interpretation, but also demon-
+reasoning. Specifically, we first make initial obser-             strate the effectiveness of our method in address-
+vations on examples of Rationale Drift and Answer                 ing the Toxic CoT problem (the proportion of the
+Drift issues, which suggest that the model likely                 problem decreased by 23.6%) and enhancing com-
+misses some important information from the ques-                  monsense reasoning performance (overall accu-
+tion when generating corresponding rationales or                  racy increased by 5.5%). Our code is available
+answers. To further verify these findings, we use                 at: https://github.com/BugMakerzzz/toxic_cot.
+attribution tracing and causal tracing methods to
+probe the LLM in two stages (rationale generation                 2     Problem Statement
+stage and answer generation stage). By employing                  2.1    Toxic Chain of Thought Reasoning
+these methods under various experimental settings,
+we find that there is a significant loss of infor-                We start our work by formally defining the Toxic
+mation flow from the question in the shallow                      CoT problem as follows: 3
+attention layers when generating drifting ratio-                  Definition 2.1 (Toxic CoT). Given a question q
+nales and answers. Therefore, we interpret the                    and the correct answer o∗ , if the model’s output M
+Toxic CoT problem as the model lacking informa-                   meets the following conditions, it is considered a
+tion from the question in the two stages.                         case of Toxic CoT:
+   To validate our interpretation and mitigate this
+                                                                              o∗ = M(q, Pd ) ∧ o∗ ̸= M(q, Pc )
+problem, we design an approach called RIDERS
+(Residual decodIng and sERial-position Swap)                      where o∗ = M(q, Pd ) indicates the model’s direct
+based on the interpretation. Concretely, for the Ra-              answering for q is correct, o∗ ̸= M(q, Pc ) indi-
+tionale Drift issue, we devise a decoding algorithm,              cates the model’s cot-like answering for q is wrong,
+promoting the model to generate tokens that pay                   Pd , Pc are the corresponding prompts.
+more attention to question contexts. For the An-
+swer Drift issue, we swap the positions of the out-               2.2    Two-stage Drift Issues
+put sequence, reducing the information loss from
+                                                                  To investigate the reasons for the problem, we clas-
+the question to the final prediction. We evaluate
+                                                                  sify these Toxic CoT cases and identify a main error
+our method on five commonsense reasoning bench-
+                                                                  causing this problem (On average, it accounts for
+marks and conduct extensive experiments. The
+                                                                  67% on two datasets, see more details in Appendix
+results not only prove our interpretation, but also
+                                                                  B). Furthermore, if we divide the CoT process into
+indicate that our method is effective in addressing
+                                                                  two stages: rationale generation and answer gen-
+the Toxic CoT problem and improving the model’s
+                                                                  eration, there exist two types of issues in this error:
+overall commonsense reasoning abilities.
+   We summarize the contribution of this paper as                 Definition 2.2 (Rationale Drift). If the reasoning
+follows:                                                          chain is factually correct but logically inconsistent
+                                                                      3
+                                                                        In practice, CoT-type methods all have Toxic CoT prob-
+   2
+     Appendix A presents the details of settings and results in   lems, but to simplify the work, this paper mainly focuses on
+this statistical experiment.                                      the basic CoT prompting.
+
+                                                              9207
+                                                                                                                                                   
+with the question, this case is called “Rationale                                                               ' U L I W
+                                                                                                                    & R U U H F W                  
+                                                                                                                                                                                             ' U L I W
+                                                                                                                                                                                             & R U U H F W
+                                                                        
+Drift” (see Figure 1a).                                                 
+                                                                                                                                                   
+                                                                                                                                                   
+                                                          $ W W U                                                                $ W W U
+ Definition 2.3 (Answer Drift). If the reasoning                        
+                                                                                                                                                   
+                                                                                                                                                   
+ chain is both factually correct and logically con-                                                                                            
+ sistent with the question, but the final answer is                     
+                                                                                                            
+                                                                                                                                                   
+                                                                                                                                                                                      
+                                                                                                   / D \ H U V                                                               / D \ H U V
+ inconsistent with the rationale, this case is called
+                                                                                    (a) Llama2-13B                                                        (b) Baichuan2-13B
+“Answer Drift” (see Figure 1b).
+                                                              Figure 2: Attribution tracing results on Winogrande.
+ 2.3 Hypothesis Formulation
+To provide a direction for subsequent probing ex-        3.1                        Tracing Method
+periments, here we attempt to propose hypotheses
+                                                         To investigate the roles of different model com-
+for the mechanism of issues by analyzing some
+                                                         ponents in the rationale generation stage, we use
+examples. For the Rationale Drift issue, the model
+                                                         attribution scores (Hao et al., 2021; Dai et al., 2022;
+tends to focus on part of the essential reasoning con-
+                                                         Wang et al., 2023b) to compute the contribution of
+ditions in the question context. As an example, in
+                                                         a neuron ω:
+Figure 1a, the CoT only focuses on the “bald eagle”
+                                                                                                         Z 1                                                                 m
+in the question but misses another key information                                                               ∂F (αω)      ω   X ∂F ( k ω)
+                                                                                                                                        m
+                                                           Attr(ω) = ω ⊙                                                 dα ≈   ⊙
+“status”. As for the Answer Drift issue, the model                                                           α=0   ∂ω         m
+                                                                                                                                  k=1
+                                                                                                                                      ∂ω
+seems to be disrupted by CoT, losing attention to                                                                                           (1)
+the question and resulting in an off-topic prediction.   where F (·) represents the model’s output. We com-
+For instance, in Figure 1b, though the CoT gives         pute the attribution score via Riemman approxi-
+correct information “to make tools and machines”,        mation of the integration and m is the number of
+the model can only predict the wrong answer “(4)         approximation steps. For neurons A(l) in the i-th at-
+metal fabrication shop”. This is likely because the      tention layer, we sum the absolute values of scores
+model loses the question’s target “to make what”         on all attention heads to get the final attribution
+and directly copies the entity “metal”, which fre-       score. Since the attention module involves inter-
+quently appears in CoT, as the answer. Therefore,        actions between different tokens, we can compute
+we summarize our hypotheses as follows:                  the information flow between the question context
+                                                         q and the CoT c on it:
+ Hypothesis 1. The Rationale Drift issue arises
+                                                                                                         1         X
+ from the model lacking information from the ques-                                       Q(l)
+                                                                                          qc =                                        Attr(Ai,j )
+                                                                                                                                                                (l)
+                                                                                                        |N |                                                                                          (2)
+ tion context in the rationale generation stage.                                                                 (i,j)∈Cqc
+
+                                                                                         Cqc = {(i, j)|qs ≤ i ≤ qe , cs ≤ j ≤ ce }
+ Hypothesis 2. The Answer Drift issue arises from
+ the model lacking information from the question in                                                   (l)
+                                                         Here, Attr(Ai,j ) represents the intensity of infor-
+ the answer generation stage.                            mation flow from the i-th token to the j-th token in
+   To validate the above hypotheses, in the follow-      the l-th attention layer and |N | denotes the number
+ ing two sections, we conduct probing experiments,       of CoT steps. More implementation details of this
+ exploring the LLM’s internal working mechanisms         method are reported in Appendix C.
+ during the two stages of CoT reasoning.
+                                                         3.2                        Attribution Tracing Experiment
+ 3   Tracing Information Flow in Rationale               Experimental Settings To validate the defi-
+                                                         ciency in Hypothesis 1, we need to figure out the
+In this section, we aim to verify the Hypothesis         context information flow difference between gener-
+1 by tracing the information flow in the rationale       ating a drifting rationale and a correct one. Thus,
+generation stage. To this end, we start by describing    we first use golden labels as hints to generate cor-
+our attribution tracing method (§3.1). Through           rect CoTs in the drifting cases. Then, we compute
+this method, we conduct comparative experiments          the average information flow under these two cases
+between the correct reasoning and the drifting one,      and compare their results. We choose Llama2-13B
+figuring out the mechanism behind the issue (§3.2).      (Touvron et al., 2023) and Baichuan2-13B (Yang
+At last, we use the attention score to validate our      et al., 2023) as our probing models, since they
+findings from another perspective (§3.3).                are moderated-sized white-box models with decent
+                                                     9208
+                                                                                                                                                                                                                                                                                                         
+                                                                  ' U L I W                                                                  ' U L I W                                                                                                   
+                       
+                                                                  1 R U P D O                                                                    1 R U P D O                       
+                                                                                                                                                                                                                                      
+                                                                                                                                                                                                                                                             
+                                                                                                                                                                                                                                                                                                          
+                                                                                                                                                                                                                                                        
+                       
+ $ W W U  ' L Y                                                                 $ W W U  ' L Y
+                                                                                                       
+                                                                                                                                                                   / D \ H U V                                                               / D \ H U V
+                                                                                                                                                                                                                                                                                                           
+                       
+                                                                                                                                                                                                                                                       
+                                                                                                                                                                                                                                  
+                                                                                                                                                                                                                                                                                                          
+                                                                                                                                                                                                                                  
+                                                                                                                                                                                                                                                           
+                                                                                                                                                                                                                              
+                                                                                                                                                                                                                                                                              
+                                                  / D \ H U V                                                                    / D \ H U V                                                                                                                              
+                                                                                                                                                                                                         + H D G V                                                                 + H D G V
+                                   (a) Llama2-13B                                                             (b) Baichuan2-13B                                                               (a) Winogrande                                                                 (b) CSQA
+Figure 3: Information flow divergence comparison on                                                                                                                 Figure 4: Attention tracing results across different atten-
+Winogrande.                                                                                                                                                         tion heads on Llama2-13B.
+
+
+CoT performance. For datasets, we select Wino-                                                                                                                      than the control group (the orange line) and the
+grande (Sakaguchi et al., 2020) and CSQA (Talmor                                                                                                                    max divergence occurs in shallow layers (around
+et al., 2019).4 The detailed implementation of this                                                                                                                 the 15th layer). This indicates that a correct CoT
+experiment is shown in Appendix C.                                                                                                                                  indeed gets more information flow from the con-
+Result and Analysis Figure 2 illustrates our ex-                                                                                                                    text in shallow attention layers, validating the
+perimental results on Winogrande (The results on                                                                                                                    effectiveness of Claim 1 and 2.
+CSQA are shown in Appendix C). We can find
+                                                                                                                                                                    3.3                      Attention Tracing Experiment
+that: (Claim 1) When the Rationale Drift issue
+occurs, CoT receives less information from the                                                                                                                      Experimental Settings We also design an exper-
+question context compared to the correct case.                                                                                                                      iment based on attention scores to validate Hypoth-
+On both datasets and different models, there is a                                                                                                                   esis 1 from another perspective. For a pair of ratio-
+significantly lower information flow between the                                                                                                                    nales <c, c∗ > targeting the same question context
+question context and CoT when the LLM gener-                                                                                                                        q (c denotes the correct CoT and c∗ is the drifting
+ates a drifting rationale (the blue line) compared to                                                                                                               one), we compute their attention divergence:
+the correct one (the orange line). This aligns with                                                                                                                                                                                         (l,h)                                                (l,h)
+                                                                                                                                                                                                                        X           Ai,j                                     X                 Ai,j
+Hypothesis 1. (Claim 2) The shallow attention                                                                                                                                           Attn(c|c∗ ) =                                                              −                                           (4)
+                                                                                                                                                                                                                                     |c|                                                        |c∗ |
+layers are crucial for LLMs to extract contex-                                                                                                                                                                       (i,j)∈Cqc                                          (i,j)∈Cqc∗
+
+tual information. In all cases, both the information
+                                                                                                                                                                                                                                                                  (l)
+flow and the gap peak at around the 15th attention                                                                                                                  Here, we replace the Attr(Ai,j ) in Equation 2 with
+layer, indicating these layers are significant sites                                                                                                                the weights on the h-th attention matrix head Ai,j
+                                                                                                                                                                                                                                                                                                             (l,h)
+for the rationale generation.                                                                                                                                       and repeat the calculation in Equation 3.
+Supplementary Experiment In the main experi-                                                                                                                       Result and Analysis The results on two datasets
+ment, we use golden labels to generate the correct                                                                                                                 are shown in Figure 4 and Figure 11. We can get
+CoT. To eliminate the influence of this additional                                                                                                                 the following observations: (1) The attention di-
+factor on our results, we design a supplementary                                                                                                                   vergence is greater than 0 in most heads, which
+experiment. Concretely, we first use the label to                                                                                                                  indicates a lack of information from the question
+generate CoTs from correct reasoning cases, which                                                                                                                  context in Rationale Drift cases (consistent with
+serves as a control group. Then, we compute the                                                                                                                    Claim 1). (2) The largest attention divergence
+context information divergence between the newly                                                                                                                   appears around layer 15, which is consistent
+generated CoT cn and the original one co , i.e.:                                                                                                                   with the sites we find in Claim 2. This once again
+                                                                                                                                                         (3)
+                                                                                                                                                                   illustrates that attention heads of these layers are
+                                                 Attr(cn |co ) = Q(l)    (l)
+                                                                  qcn − Qqco
+                                                                                                                                                                   crucial for the LLM to obtain contextual informa-
+where q is the question context. We compare this                                                                                                                   tion when generating CoT.
+divergence between the control and drifting group,
+whose results are reported in Figure 3 and Figure                                                                                                                   4                     Tracing Information Flow in Answer
+10. As we can see, the gap between the correct                                                                                                                     In this section, our goal is to verify the informa-
+CoT and the drifting one (the blue line) is larger                                                                                                                 tion loss based on Hypothesis 2. To achieve this,
+                      4
+    Unless otherwise specified, we use the same models and                                                                                                         we first introduce the main tracing method in this
+datasets in the following probing experiments.                                                                                                                     section, which is called the causal tracing method
+                                                                                                                                                               9209
+                                                                                                                                                                                                                                                                                                                                                                                       
+
+
+ R S W L R Q  F R Q W H [ W                                                            R S W L R Q  F R Q W H [ W                                                            R S W L R Q  F R Q W H [ W                                                                                    R S W L R Q  F R Q W H [ W
+                                                                                                                                                                                                                                                                              
+                                                                                                                                                                                                                                                                                                                                                                                             
+                                                                                                                                                                                                                                                                              
+                                                                                                                                                                                                                                                                                                                                                                                             
+ F R W                                                                              F R W                                                                                 F R W                                                                                                      F R W
+                                                                                                                                                                                                                                                                                                                                                                                             
+                                                                                                                                                                                                                                                                              
+ O D V W                                                                               O D V W                                                                               O D V W                                                                                                       O D V W
+                                                                                                                                                                                                                                                                                                                                                                                       
+                                                                                                                                                                                                                                                                                                               
+                                               / D \ H U V                                                                            / D \ H U V                                                                                           / D \ H U V                                                                                                / D \ H U V
+
+                                 (a) Correct Case’s Attn                                                              (b) Correct Case’s MLP                                                                    (c) Drifting Case’s Attn                                                                                      (d) Drifting Case’s MLP
+
+                                               Figure 5: Intervention tracing results on Winogrande in correct and drifting answering cases.
+
+                                                                                                                                                                                                                         
+     (§4.1). Next, by employing it, we trace the infor-                                                                                                                                                                                                                   ' U L I W
+                                                                                                                                                                                                                                                                          & R U U H F W
+                                                                                                                                                                                                                                                                                                                                                                                  ' U L I W
+                                                                                                                                                                                                                                                                                                                                                                                     & R U U H F W
+                                                                                                                                                                                                                         
+     mation flow in the answer generation stage and                                                                                                                                                                      
+                                                                                                                                                                                                                                                                                                                                      
+
+     identify the mechanism behind the Answer Drift                                                                                                                                                        $ W W U
+                                                                                                                                                                                                                         
+                                                                                                                                                                                                                                                                                                                         $ W W U      
+
+     issue through comparative experiments (§4.2). At                                                                                                                                                                                                                                                                             
+
+     last, we apply the attribution tracing method to ver-                                                                                                                                                                                                                                                                        
+                                                                                                                                                                                                                                                                                                                                                        
+     ify our hypothesis from another perspective (§4.3).                                                                                                                                                                                                   / D \ H U V                                                                                                / D \ H U V
+
+                                                                                                                                                                                                                                      (a) Winogrande                                                                                                  (b) CSQA
+      4.1 Tracing Method
+     Since the task we study is in the form of multiple-                                                                                                                                                  Figure 6: Attribution tracing results on Llama2-13B
+                                                                                                                                                                                                          during the answer generation stage.
+     choice questions, we set our focus on the feedfor-
+     ward pass that predicts the label. Inspired by the
+     previous works (Meng et al., 2022; Stolfo et al.,                                                                                                                                                    4.2                         Intervention Tracing Experiment
+     2023; Geva et al., 2023), we take the causal tracing
+     method to quantify the contribution of different in-                                                                                                                                                 Experimental Settings We sample correct and
+     termediate variables during this pass. Specifically,                                                                                                                                                 drifting answering cases from datasets, average
+                         (l)                                                                                                                                                                              over them and compute the average direct effect
+     for hidden states hi in a clean run that predicts
+                                                                                                                                                                                                          (ADE). Here we compute the impact of four com-
+     the answer, we have:
+                                                                                                                                                                                                          ponents on the final prediction: context (question
+                                                        (l)       (l−1)                       (l)                              (l)
+                                                    hi = hi                 + ai + mi                                                                                                                     contexts), option (question options), CoT, and last
+                                                        (l)
+                                                    ai = attn(l) (h1
+                                                                                      (l−1)
+                                                                                                                      , ..., hi
+                                                                                                                                  (l−1)
+                                                                                                                                              )                   (5)                                     (the last token before the label prediction).
+                                                     (l)          (l)  (l−1)
+                                                    mi = mlp(l) (ai + hi     )
+                                                                                                                                                                                                          Results and Analysis We report the result of
+                                                      (l)  (l)
+     where i, l is the i-th token in the l-th layer, ai , mi                                                                                                                                              Llama2-13B on Winogrande in Figure 5 and others
+      represents the activations of attention and MLP                                                                                                                                                     in Appendix D, from which we can get two conclu-
+      modules in Transformer (Vaswani et al., 2017).                                                                                                                                                      sions: (Claim 3) For attention modules, drifting
+      Supposing that a certain input part is represented                                                                                                                                                  cases loss information from the question. When
+               (l)       (l)
+      as z = [vi , ..., vj ] after passing through a model                                                                                                                                                the answer is correct, we can observe a high effect
+                                                                           (l)                                         (l)                                                                                on the context and option in the first layer (see Fig-
+     component, we set vk = vk + ϵ for k ∈ [i, j]                                                                                                                                                         ure 5a). But for the drifting case, the LLM extracts
+     to intervene this hidden vector, where ϵ is Gaus-                                                                                                                                                    limited information at these positions (see Figure
+     sian noise.5 Thus, we can compute the direct effect                                                                                                                                                  5c). This aligns with Hypothesis 2. (Claim 4) For
+     (DE) of this component:                                                                                                                                                                              MLP modules, the information is not lost. We
+                                                              DE(z) =
+                                                                              P (o) − Pz∗ (o)
+                                                                                                                                                                  (6)
+                                                                                                                                                                                                          observe the same high-effect sites in the last layer
+                                                                                   P (o)                                                                                                                  and shallow layers of the last token, they do not
+     where P (o) is the probability of the model’s final                                                                                                                                                  show regular differences (see Figure 5b and 5d).
+     prediction, Pz∗ (o) is the probability after the inter-
+     vention. Therefore, through this metric, we can                                                                                                                                                      4.3                         Attribution Tracing Experiment
+     quantify the contributions of different components                                                                                                                                                   Experimental Settings For further validation of
+     in changing the final prediction, thereby tracing the                                                                                                                                                our hypothesis, we also use the attribution score
+     information flow in this stage.                                                                                                                                                                      in §3 to trace the information flow in this stage.
+                                5
+          We select ϵ to be 3 times larger than the empirical standard                                                                                                                                    Referring to Equation 2, we compute the score
+      deviation of hidden embeddings in each dataset.                                                                                                                                                     between the question context and the last token
+                                                                                                                                                                     9210
+                                                                                                                                        𝜆𝐿𝑐
+                                                                                            𝜇𝐿𝑞 + 𝐿𝑐
+
+       Needing a boost Emily asked Rachel to … _ is tall in height        A person who is ... Since Emily needed a boost to …, Emily is not tall in height.   Emily
+
+
+    Swap                                                                                                                                      𝜇𝐿𝑞
+                                                                                                 𝜆𝐿𝑐 + 𝐿𝑞
+
+       A person who is ... Since Emily needed a boost to …, Emily is not tall in height.      Needing a boost Emily asked Rachel to … _ is tall in height     Rachel
+
+
+
+                                                                   Question            CoT             Last Token            Answer
+
+
+
+                                            Figure 7: An example of our serial-position swap method.
+
+
+(since it’s used for generating the answer). We set                                            Algorithm 1 Residual Decoding Algorithm
+the F (·) in Equation 1 as the loss for predicting the                                         Require: model M, input x, question context q, candi-
+final answer, comparing the scores for correct and                                                 date_num n, weight ω.
+                                                                                                1: for iteration i ∈ 0, 1, ... do
+drifting cases after averaging across samples.                                                  2:    logits = M(x)
+                                                                                                3:    tokens, scores = top(logits, n)
+Results and Analysis The results of this exper-                                                 4:    for j ∈ 1, ...n do
+iment are reported in Figure 6 and 15. We can                                                   5:        t = tokens[i]
+                                                                                                6:        attn_score = Attn(q, t) / Attn(x, t)
+observe that, when the Answer Drift issue occurs,                                               7:        scores[j] = scores[j] + ω ∗ attn_score
+the information flow from the question signif-                                                  8:    end for
+icantly decreases. This verifies the information                                                9:    idx = argmax(scores)
+                                                                                               10:    t = tokens[idx]
+loss we mention in Hypothesis 2 and Claim 3.                                                   11:    x=x+t
+                                                                                               12:    if stop(t) then
+5     Mitigating Toxic CoT Problem                                                             13:        break
+                                                                                               14:    end if
+                                                                                               15: end for
+In this section, we propose a novel method called                                              16: return x
+RIDERS (Residual decodIng and sERial-position
+Swap) to address the Toxic CoT problem. We first
+introduce the two components in it, which are de-                                              compute the attention score, since it is crucial for
+signed based on Hypothesis 1 and 2, respectively                                               the exchange of contextual information according
+(§5.1). Then, we conduct experiments on com-                                                   to Claim 2. More implementation details of this
+monsense reasoning benchmarks, demonstrating                                                   method are provided in Appendix E.
+the effectiveness of our method (§5.2 and §5.3).
+At last, we conduct extra experiments to further                                               Serial-Position Swap In this method, we attempt
+emphasize the contribution of our approach (§5.4).                                             to compensate for the information lack in the An-
+                                                                                               swer Drift issue. According to previous research
+5.1 Mitigation Method                                                                          on the serial-position effect in context, models tend
+Residual Decoding We design a new decoding                                                     to utilize information better at the beginning and
+methodology to address the Rationale Drift issue,                                              end of the input (Qin et al., 2023; Liu et al., 2023b).
+in which we construct a virtual residual structure                                             In our work, the beginning of the input are prompts,
+during the CoT generation, “connecting” the ques-                                              while the current question and the generated CoT
+tion context with each CoT token. Our decoding                                                 are both located at the end. Therefore, when they
+algorithm is demonstrated in Algorithm 1. In each                                              are closer to the last token, their information is
+iteration of generating a new token, we first select                                           more easily utilized in the final prediction. As in
+the top n tokens with the highest probabilities and                                            Figure 7, we denote the lengths of the question
+record their logits scores (line 3). Then we calcu-                                            and CoT as Lq and Lc , and assume that the key
+late the attention score between the context and                                               information is located at positions µLq and λLc
+current token like Equation 4, normalize it, and                                               (similar to the center of mass in physics). We can
+add it as an additional reward to promote more in-                                             infer that, after the swapping operation in Figure 7,
+formation flow (lines 6,7). Finally, we select the                                             the distance from the question to the end is reduced
+token with the highest score to update the input and                                           (µLq + Lc → µLq ). Besides, if we consider the
+repeat the process until the termination condition                                             total distance from the question and CoT to the end,
+is met. We use the attention matrix in layer 15 to                                             we can perform the following calculation:
+                                                                                           9211
+                         Winogrande       CSQA          HellaSwag          SIQA              PIQA               Avg
+      Method
+                         ACC↑ TR↓       ACC↑ TR↓       ACC↑ TR↓          ACC↑ TR↓          ACC↑ TR↓          ACC↑ TR↓
+      Few-shot Answer     57.1    -     66.8    -       45.3      -       68.2       -        61.6    -       59.8     -
+      Chain-of-Thought    56.7   43.1   69.9   28.8     45.4     34.8     67.3      37.3      62.7   41.3     60.4    37.1
+      Self-Consistency    56.4   40.9   72.4   24.9     46.2     33.7     64.7      41.0      54.6   45.8     58.9    37.3
+      Self-Refine         48.7   50.3   55.5   47.0     42.0     37.2     65.1      38.8      50.8   48.3     52.4    44.3
+      Least-to-Most       58.9   38.8   69.0   27.5     31.3     39.4     66.3      36.6      65.7   32.2     58.2    34.9
+      Contrasive CoT      59.4   38.0   71.1   23.2     45.9     35.6     67.0      36.0      68.1   44.9     62.3    35.5
+             RD Only      58.6   29.5   72.2   13.5     49.4     24.0     69.4      20.8      66.3   26.2     63.0    22.8
+      Ours   SPS Only     59.1   22.8   72.6   18.9     49.3     18.7     69.7      28.8      68.5   27.6     63.7    23.4
+             RIDERS       60.7   16.6   73.2   6.7      50.6     12.8     71.9      15.3      69.9   15.9     65.3    13.5
+
+         Table 1: Performance comparison across five commonsense reasoning datasets on Llama2-13B.
+
+
+               d1 = µLq + Lc + λLc                                                     Winogrande          CSQA
+               d2 = λLc + Lq + µLq                    (7)                Method
+                                                                                      Type1 Type2       Type1 Type2
+               ∆d = d2 − d1 = Lq − Lc                                    CoT            0.0       0.0        0.0      0.0
+                                                                         RD Only       41.9      47.8       56.7     46.2
+where d1 is the total distance in normal serial posi-                    SPS Only      58.1      78.3       46.7     92.3
+tions and d2 is the distance after swapping the two                      RIDERS        74.2      82.6       73.3     84.6
+components. In most scenarios, we have Lq < Lc ,
+thus, we can infer that ∆d < 0. That means, if we              Table 2: Accuracy on the two types of drifting issues.
+replace the original order of “[Question] + [CoT]”
+with the order of “[CoT] + [Question]”, we can
+                                                               select some of the latest CoT-like methods appli-
+not only increase the intensify of information flow
+                                                               cable to this task for comparison: Few-shot An-
+from the question to the final prediction, but also re-
+                                                               swer, Chain-of-Thought (Wei et al., 2022), Self-
+duce the total information loss due to the reduction
+                                                               Consistency (Wang et al., 2023c), Self-Refine
+in total distance. Although this method is straight-
+                                                               (Madaan et al., 2023), Least-to-Most (Zhou et al.,
+forward in implementation, it proves to be effective
+                                                               2023) and Contrasive CoT (Chia et al., 2023). For
+in both theory and experiments.
+                                                               all methods, we employ a 5-shot prompt and use 4
+5.2 Mitigation Experimental Settings                           NVIDIA GeForce RTX 3090 GPUs for inference.
+                                                               More implementation details can be found in the
+Datasets Following previous works, we use                      Appendix F.
+five representative commonsense reasoning bench-
+marks: WinoGrande (Sakaguchi et al., 2020),                    5.3      Mitigation Results
+CSQA (Talmor et al., 2019), HellaSwag (Zellers
+et al., 2019), SIQA (Sap et al., 2019) and PIQA                The main result of our experiments on Llama2-13B
+(Bisk et al., 2020). The specific information of each          is shown in Table 1. (The results on more models
+dataset is reported in Appendix F.                             are presented in Appendix F.) We can get the fol-
+                                                               lowing conclusions: (1) Our method effectively
+Metrics In addition to the commonly used Ac-                   mitigates Toxic CoT problems. Compared to CoT
+curacy (ACC) metric, we also introduce a new                   prompting, our method reduces the Toxic Rate by
+metric — Toxic Rate (TR), to quantify the severity             an average of 23.6% across five datasets. Besides,
+of Toxic CoT problems:                                         compared to other advanced CoT-like methods, our
+                                                               method causes the fewest Toxic CoT problems
+               T R(f ) = |Cd ∩ Wf |/|Wf |             (8)
+                                                               (decreased by an average of 22.0% over SOTA
+where Cd denotes questions that models give cor-               methods). (2) Our method can also improve the
+rect answers directly and Wf denotes questions that            model’s overall performance on commonsense
+models give wrong answers after applying method                reasoning. Our work improves the accuracy on
+f . Thus, we can infer that the lower the TR, the              all benchmarks (improved by 5.5% compared to
+fewer Toxic CoT problems the method introduces.                CoT and 3.0% compared to SOTA methods on av-
+                                                               erage). This proves that the Toxic CoT problem
+Baselines As our research focuses on enhanc-                   poses a bottleneck in LLM’s commonsense reason-
+ing CoT methods in commonsense reasoning, we                   ing, highlighting the value of our work.
+                                                        9212
+                                                                                
+                                                            & R 7                                                                & R 7             Method   Wino   CSQA   Hella   SIQA   PIQA   Avg
+                                                        5 '                                                                  6 3 6
+                                                                                    
+                                                                                                                                               CoT      3.2k   2.6k   4.2k    2.9k   2.7k   3.1k
+                                                                                                                                           SC       4.5k   3.2k   5.5k    3.8k   4.3k   4.3k
+ $ W W U                                                          $ W W U
+                                                                                                                                           SR       9.2k   6.9k   10.2k   7.6k   6.5k   8.1k
+                                                                                
+                                                                                                                                                   L2M      8.7k   7.9k   11.4k   8.3k   6.7k   8.6k
+                                                                                                                                               CON      4.6k   3.5k   5.4k    3.8k   3.5k   4.2k
+                                                                                
+                                                                                                                   Ours     3.6k   2.9k   4.9k    3.4k   3.3k   3.6k
+                                         / D \ H U V                                                          / D \ H U V
+
+                           (a) RD method                                                        (b) SPS method                               Table 4: Token consumption per example comparison.
+Figure 8: Information flow comparison on Winogrande
+after applying our two methods.
+                                                                                                                                             can find that the Toxic CoT problem also exists in
+                                                                                                                                             other tasks, and our method can still mitigate it.
+                                                       ProofWriter                                FOLIO
+                                Method
+                                                       ACC↑ TR↓                                 ACC↑ TR↓                                     Cost Analysis For the applicability, we mea-
+                                CoT                    56.8          19.9                       45.1          11.6                           sure the computation and time cost of our ap-
+                                RIDERS                 78.2          6.4                        48.0           7.5                           proach. Here we compare the token cost between
+                                                                                                                                             our method and the baseline. According to Table
+Table 3: Performance comparison across two logical
+                                                                                                                                             4, our method requires fewer tokens compared to
+reasoning tasks on Llama2-13B.
+                                                                                                                                             other SOTA methods (only 1.2× cost of the basic
+                                                                                                                                             CoT method). We also compare the time cost of
+5.4 Discussion and Analysis                                                                                                                  our decoding method in Appendix G and find that
+Performance on Two Drifting Issues To demon-                                                                                                 the speed of RD is comparable to existing decod-
+strate the effectiveness of our method in addressing                                                                                         ing strategies. Therefore, we illustrate the cost-
+the Rationale Drift issue (Type1) and Answer Drift                                                                                           efficiency of our approach across different tasks.
+issue (Type2), we conduct experiments on these
+                                                                                                                                             6     Related Work
+samples and report the results in Table 2. Both of
+our methods can mitigate the corresponding issues                                                                                            6.1    CoT Problems Analysis and Mitigation
+(RD solves 49.3% Rationale Drift issue on average,                                                                                           Recently, many works have focused on analyz-
+while SPS resolves 85.3% Answer Drift issue on                                                                                               ing and mitigating problems in CoT reasoning.
+average). This verifies the validity of our hypothe-                                                                                         For analytical work, most studies focus on black-
+sis 1, 2, as all of these methods are built upon them.                                                                                       box LLMs. Through intervening or paraphrasing
+Besides, combining the two methods leads to even                                                                                             prompts and comparing outputs, researchers can in-
+greater improvements, demonstrating the necessity                                                                                            terpret the reasons leading to errors in the model’s
+of optimizing from both of these perspectives.                                                                                               reasoning (Lanham et al., 2023; Liu et al., 2023c;
+Performance in the Model In §3 and §4, we                                                                                                    Wang et al., 2023a). For optimization works, they
+probe information loss in two issues by tracing the                                                                                          design additional supervision signals or training
+information flow in models. Here, we repeat the                                                                                              processes for the model (Ramnath et al., 2023; Liu
+attribution tracing experiments, comparing the dif-                                                                                          et al., 2023a) or leverage external resources for the
+ferences before and after applying our method to                                                                                             model (Shinn et al., 2023; He et al., 2023; Lyu
+further validate the effectiveness of our work. As                                                                                           et al., 2023). However, these works lack the prob-
+we can see from Figure 8 and 16, our two methods                                                                                             ing of inner mechanisms behind these problems,
+(orange lines) increase the information flow from                                                                                            leading to insufficient analysis or less universally
+questions in two stages compared to CoT prompt-                                                                                              applicable optimization methods.
+ing (blue lines). This indicates our method indeed                                                                                           6.2    Mechanistic Interpretability
+compensates for the information loss in the LLM.
+                                                                                                                                             The work on mechanistic interpretability aims to
+Performance on Other Tasks Our work mainly                                                                                                   understand the internal mechanisms of models
+focuses on commonsense reasoning tasks. To fur-                                                                                              when performing various tasks. Early work fo-
+ther evaluate the effectiveness of our approach on                                                                                           cused on how the model stores factual knowledge
+other types and forms of tasks, we conduct the                                                                                               internally (Meng et al., 2022; Dai et al., 2022). In
+main experiments on two logical reasoning tasks:                                                                                             recent times, some research efforts have shifted
+ProofWriter (Tafjord et al., 2021) and FOLIO                                                                                                 towards examining how models retrieve and uti-
+(Han et al., 2022)). As presented in Table 3, we                                                                                             lize knowledge. This includes internal knowledge
+                                                                                                                                          9213
+retrieval (Geva et al., 2023), knowledge retrieval      Acknowledgement
+from prompts (Wang et al., 2023b; Jin et al., 2024b),
+                                                        This work is supported by the Strategic Priority Re-
+and the utilization of knowledge for reasoning pur-
+                                                        search Program of Chinese Academy of Sciences
+poses, such as math reasoning (Stolfo et al., 2023)
+                                                        (No. XDA27020203), the National Natural Science
+and multi-step reasoning (Hou et al., 2023). How-
+                                                        Foundation of China (No. 62176257,62276095).
+ever, there is limited existing work that explains
+commonsense reasoning and CoT reasoning, which
+are significant contributions of this work.             References
+                                                        Yonatan Bisk, Rowan Zellers, Ronan Le Bras, Jianfeng
+7   Conclusion                                            Gao, and Yejin Choi. 2020. PIQA: reasoning about
+                                                          physical commonsense in natural language. In The
+                                                          Thirty-Fourth AAAI Conference on Artificial Intelli-
+In this paper, we find a problem named Toxic              gence, AAAI 2020, The Thirty-Second Innovative Ap-
+CoT, which results in the model’s reasoning de-           plications of Artificial Intelligence Conference, IAAI
+                                                          2020, The Tenth AAAI Symposium on Educational
+viating from the original correct answer when uti-        Advances in Artificial Intelligence, EAAI 2020, New
+lizing CoT-like prompting. Through tracing the            York, NY, USA, February 7-12, 2020, pages 7432–
+internal information flow of the LLM with attri-          7439. AAAI Press.
+bution tracing and causal tracing methods, we
+                                                        Yew Ken Chia, Guizhen Chen, Luu Anh Tuan, Soujanya
+prove that this problem is mainly caused by the           Poria, and Lidong Bing. 2023. Contrastive chain-of-
+model’s lack of information from the question in          thought prompting. CoRR, abs/2311.09277.
+shallow attention layers when generating rationales
+                                                        Karl Cobbe, Vineet Kosaraju, Mohammad Bavarian,
+or answers. Based on this result, we propose the
+                                                          Mark Chen, Heewoo Jun, Lukasz Kaiser, Matthias
+RIDERS method to mitigate the Toxic CoT prob-             Plappert, Jerry Tworek, Jacob Hilton, Reiichiro
+lem from both decoding and serial position perspec-       Nakano, Christopher Hesse, and John Schulman.
+tives. Through extensive experiments on multiple          2021. Training verifiers to solve math word prob-
+commonsense reasoning datasets, we verify the             lems. CoRR, abs/2110.14168.
+effectiveness of our approach in mitigating Toxic       Damai Dai, Li Dong, Yaru Hao, Zhifang Sui, Baobao
+CoT problems and enhancing the model’s overall            Chang, and Furu Wei. 2022. Knowledge neurons
+commonsense reasoning capabilities.                       in pretrained transformers. In Proceedings of the
+                                                          60th Annual Meeting of the Association for Compu-
+                                                          tational Linguistics (Volume 1: Long Papers), ACL
+                                                          2022, Dublin, Ireland, May 22-27, 2022, pages 8493–
+Limitations                                               8502. Association for Computational Linguistics.
+
+                                                        Mor Geva, Jasmijn Bastings, Katja Filippova, and Amir
+Although our work conducts an in-depth interpre-         Globerson. 2023. Dissecting recall of factual associa-
+tation and mitigation of the Toxic CoT problem, it       tions in auto-regressive language models. In Proceed-
+has several limitations. Firstly, like former com-       ings of the 2023 Conference on Empirical Methods
+monsense reasoning works (Liu et al., 2022, 2023a;       in Natural Language Processing, EMNLP 2023, Sin-
+                                                         gapore, December 6-10, 2023, pages 12216–12235.
+Xie et al., 2023), our research focuses on the form
+                                                         Association for Computational Linguistics.
+of multi-choice questions. This stems from the
+absence of effective evaluation methods for open-       Simeng Han, Hailey Schoelkopf, Yilun Zhao, Zhenting
+ended commonsense reasoning, leading to the pre-          Qi, Martin Riddell, Luke Benson, Lucy Sun, Eka-
+                                                          terina Zubova, Yujie Qiao, Matthew Burtell, David
+dominance of benchmarks in this format. This calls        Peng, Jonathan Fan, Yixin Liu, Brian Wong, Mal-
+for advancements in benchmark-related research.           colm Sailor, Ansong Ni, Linyong Nan, Jungo Kasai,
+Secondly, we refrain from analyzing Toxic CoT             Tao Yu, Rui Zhang, Shafiq R. Joty, Alexander R. Fab-
+problems in more reasoning tasks such as math,            bri, Wojciech Kryscinski, Xi Victoria Lin, Caiming
+                                                          Xiong, and Dragomir Radev. 2022. FOLIO: natu-
+primarily due to the poor performance of current
+                                                          ral language reasoning with first-order logic. CoRR,
+moderately-sized white-box models on these tasks.         abs/2209.00840.
+For instance, Llama2-13B achieves a mere 7.2%
+accuracy on GSM8K (Cobbe et al., 2021) without          Yaru Hao, Li Dong, Furu Wei, and Ke Xu. 2021. Self-
+                                                          attention attribution: Interpreting information inter-
+utilizing the CoT technique. This calls for devel-        actions inside transformer. In Thirty-Fifth AAAI Con-
+opments in model-related research. We leave these         ference on Artificial Intelligence, AAAI 2021, Thirty-
+limitations as our future work to explore.                Third Conference on Innovative Applications of Arti-
+                                                    9214
+  ficial Intelligence, IAAI 2021, The Eleventh Sympo-       Crystal: Introspective reasoners reinforced with self-
+  sium on Educational Advances in Artificial Intelli-       feedback. In Proceedings of the 2023 Conference
+  gence, EAAI 2021, Virtual Event, February 2-9, 2021,      on Empirical Methods in Natural Language Process-
+  pages 12963–12971. AAAI Press.                            ing, EMNLP 2023, Singapore, December 6-10, 2023,
+                                                            pages 11557–11572. Association for Computational
+Hangfeng He, Hongming Zhang, and Dan Roth. 2023.            Linguistics.
+  Rethinking with retrieval: Faithful large language
+  model inference. CoRR, abs/2301.00303.                 Kang Liu, Yangqiu Song, and Jeff Z. Pan. 2024. Edi-
+                                                           torial for special issue on commonsense knowledge
+Yifan Hou, Jiaoda Li, Yu Fei, Alessandro Stolfo,           and reasoning: Representation, acquisition and appli-
+  Wangchunshu Zhou, Guangtao Zeng, Antoine Bosse-          cations. Mach. Intell. Res., 21(2):215–216.
+  lut, and Mrinmaya Sachan. 2023. Towards a mech-
+  anistic interpretation of multi-step reasoning capa-   Nelson F. Liu, Kevin Lin, John Hewitt, Ashwin Paran-
+  bilities of language models. In Proceedings of the       jape, Michele Bevilacqua, Fabio Petroni, and Percy
+  2023 Conference on Empirical Methods in Natural          Liang. 2023b. Lost in the middle: How language
+  Language Processing, EMNLP 2023, Singapore, De-          models use long contexts. CoRR, abs/2307.03172.
+  cember 6-10, 2023, pages 4902–4919. Association
+                                                         Ziyi Liu, Isabelle Lee, Yongkang Du, Soumya Sanyal,
+  for Computational Linguistics.
+                                                           and Jieyu Zhao. 2023c. SCORE: A framework
+Zhuoran Jin, Pengfei Cao, Yubo Chen, Kang Liu, Xi-         for self-contradictory reasoning evaluation. CoRR,
+  aojian Jiang, Jiexin Xu, Qiuxia Li, and Jun Zhao.        abs/2311.09603.
+  2024a. Tug-of-war between knowledge: Explor-           Qing Lyu, Shreya Havaldar, Adam Stein, Li Zhang,
+  ing and resolving knowledge conflicts in retrieval-      Delip Rao, Eric Wong, Marianna Apidianaki, and
+  augmented language models. In Proceedings of the         Chris Callison-Burch. 2023. Faithful chain-of-
+  2024 Joint International Conference on Computa-          thought reasoning. CoRR, abs/2301.13379.
+  tional Linguistics, Language Resources and Evalua-
+  tion, LREC/COLING 2024, 20-25 May, 2024, Torino,       Aman Madaan, Niket Tandon, Prakhar Gupta, Skyler
+  Italy, pages 16867–16878. ELRA and ICCL.                Hallinan, Luyu Gao, Sarah Wiegreffe, Uri Alon,
+                                                          Nouha Dziri, Shrimai Prabhumoye, Yiming Yang,
+Zhuoran Jin, Pengfei Cao, Hongbang Yuan, Yubo Chen,       Sean Welleck, Bodhisattwa Prasad Majumder,
+  Jiexin Xu, Huaijun Li, Xiaojian Jiang, Kang Liu,        Shashank Gupta, Amir Yazdanbakhsh, and Peter
+  and Jun Zhao. 2024b. Cutting off the head ends the      Clark. 2023. Self-refine: Iterative refinement with
+  conflict: A mechanism for interpreting and mitigat-     self-feedback. CoRR, abs/2303.17651.
+  ing knowledge conflicts in language models. CoRR,
+  abs/2402.18154.                                        Kevin Meng, David Bau, Alex Andonian, and Yonatan
+                                                           Belinkov. 2022. Locating and editing factual associ-
+Tamera Lanham, Anna Chen, Ansh Radhakrishnan,              ations in GPT. In Advances in Neural Information
+  Benoit Steiner, Carson Denison, Danny Hernan-            Processing Systems 35: Annual Conference on Neu-
+  dez, Dustin Li, Esin Durmus, Evan Hubinger, Jack-        ral Information Processing Systems 2022, NeurIPS
+  son Kernion, Kamile Lukosiute, Karina Nguyen,            2022, New Orleans, LA, USA, November 28 - Decem-
+  Newton Cheng, Nicholas Joseph, Nicholas Schiefer,        ber 9, 2022.
+  Oliver Rausch, Robin Larson, Sam McCandlish,
+  Sandipan Kundu, Saurav Kadavath, Shannon Yang,         Guanghui Qin, Yukun Feng, and Benjamin Van Durme.
+  Thomas Henighan, Timothy Maxwell, Timothy                2023. The NLP task effectiveness of long-range
+  Telleen-Lawton, Tristan Hume, Zac Hatfield-Dodds,        transformers. In Proceedings of the 17th Confer-
+  Jared Kaplan, Jan Brauner, Samuel R. Bowman, and         ence of the European Chapter of the Association for
+  Ethan Perez. 2023. Measuring faithfulness in chain-      Computational Linguistics, EACL 2023, Dubrovnik,
+  of-thought reasoning. CoRR, abs/2307.13702.              Croatia, May 2-6, 2023, pages 3756–3772. Associa-
+                                                           tion for Computational Linguistics.
+Linhan Li, Huaping Zhang, Chunjin Li, Haowen You,
+  and Wenyao Cui. 2023. Evaluation on chatgpt for chi-   Sahana Ramnath, Brihi Joshi, Skyler Hallinan, Ximing
+  nese language understanding. Data Intell., 5(4):885–     Lu, Liunian Harold Li, Aaron Chan, Jack Hessel,
+  903.                                                     Yejin Choi, and Xiang Ren. 2023. Tailoring self-
+                                                           rationalizers with multi-reward distillation. arXiv
+Jiacheng Liu, Skyler Hallinan, Ximing Lu, Pengfei He,      preprint arXiv:2311.02805.
+   Sean Welleck, Hannaneh Hajishirzi, and Yejin Choi.
+   2022. Rainier: Reinforced knowledge introspector      Keisuke Sakaguchi, Ronan Le Bras, Chandra Bhagavat-
+   for commonsense question answering. In Proceed-         ula, and Yejin Choi. 2020. Winogrande: An adver-
+   ings of the 2022 Conference on Empirical Methods        sarial winograd schema challenge at scale. In The
+   in Natural Language Processing, EMNLP 2022, Abu         Thirty-Fourth AAAI Conference on Artificial Intelli-
+   Dhabi, United Arab Emirates, December 7-11, 2022,       gence, AAAI 2020, The Thirty-Second Innovative Ap-
+   pages 8938–8958. Association for Computational          plications of Artificial Intelligence Conference, IAAI
+   Linguistics.                                            2020, The Tenth AAAI Symposium on Educational
+                                                           Advances in Artificial Intelligence, EAAI 2020, New
+Jiacheng Liu, Ramakanth Pasunuru, Hannaneh Ha-             York, NY, USA, February 7-12, 2020, pages 8732–
+   jishirzi, Yejin Choi, and Asli Celikyilmaz. 2023a.      8740. AAAI Press.
+                                                     9215
+Maarten Sap, Hannah Rashkin, Derek Chen, Ronan Le               Jude Fernandes, Jeremy Fu, Wenyin Fu, Brian Fuller,
+ Bras, and Yejin Choi. 2019. Social iqa: Common-                Cynthia Gao, Vedanuj Goswami, Naman Goyal, An-
+ sense reasoning about social interactions. In Proceed-         thony Hartshorn, Saghar Hosseini, Rui Hou, Hakan
+ ings of the 2019 Conference on Empirical Methods               Inan, Marcin Kardas, Viktor Kerkez, Madian Khabsa,
+ in Natural Language Processing and the 9th Inter-              Isabel Kloumann, Artem Korenev, Punit Singh Koura,
+ national Joint Conference on Natural Language Pro-             Marie-Anne Lachaux, Thibaut Lavril, Jenya Lee, Di-
+ cessing, EMNLP-IJCNLP 2019, Hong Kong, China,                  ana Liskovich, Yinghai Lu, Yuning Mao, Xavier Mar-
+ November 3-7, 2019, pages 4462–4472. Association               tinet, Todor Mihaylov, Pushkar Mishra, Igor Moly-
+ for Computational Linguistics.                                 bog, Yixin Nie, Andrew Poulton, Jeremy Reizen-
+                                                                stein, Rashi Rungta, Kalyan Saladi, Alan Schelten,
+Omar Shaikh, Hongxin Zhang, William Held, Michael S.            Ruan Silva, Eric Michael Smith, Ranjan Subrama-
+  Bernstein, and Diyi Yang. 2023. On second thought,            nian, Xiaoqing Ellen Tan, Binh Tang, Ross Tay-
+  let’s not think step by step! bias and toxicity in zero-      lor, Adina Williams, Jian Xiang Kuan, Puxin Xu,
+  shot reasoning. In Proceedings of the 61st Annual             Zheng Yan, Iliyan Zarov, Yuchen Zhang, Angela Fan,
+ Meeting of the Association for Computational Lin-              Melanie Kambadur, Sharan Narang, Aurélien Ro-
+  guistics (Volume 1: Long Papers), ACL 2023, Toronto,          driguez, Robert Stojnic, Sergey Edunov, and Thomas
+ Canada, July 9-14, 2023, pages 4454–4470. Associa-             Scialom. 2023. Llama 2: Open foundation and fine-
+  tion for Computational Linguistics.                           tuned chat models. CoRR, abs/2307.09288.
+Noah Shinn, Federico Cassano, Ashwin Gopinath,               Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob
+  Karthik R Narasimhan, and Shunyu Yao. 2023. Re-              Uszkoreit, Llion Jones, Aidan N. Gomez, Lukasz
+  flexion: Language agents with verbal reinforcement           Kaiser, and Illia Polosukhin. 2017. Attention is all
+  learning. In Thirty-seventh Conference on Neural             you need. In Advances in Neural Information Pro-
+  Information Processing Systems.                              cessing Systems 30: Annual Conference on Neural
+                                                               Information Processing Systems 2017, December 4-9,
+Alessandro Stolfo, Yonatan Belinkov, and Mrinmaya              2017, Long Beach, CA, USA, pages 5998–6008.
+  Sachan. 2023. A mechanistic interpretation of arith-
+  metic reasoning in language models using causal            Boshi Wang, Sewon Min, Xiang Deng, Jiaming Shen,
+  mediation analysis. In Proceedings of the 2023 Con-          You Wu, Luke Zettlemoyer, and Huan Sun. 2023a.
+  ference on Empirical Methods in Natural Language             Towards understanding chain-of-thought prompting:
+  Processing, EMNLP 2023, Singapore, December 6-               An empirical study of what matters. In Proceedings
+  10, 2023, pages 7035–7052. Association for Compu-            of the 61st Annual Meeting of the Association for
+  tational Linguistics.                                        Computational Linguistics (Volume 1: Long Papers),
+Tianxiang Sun, Xiaotian Zhang, Zhengfu He, Peng Li,            ACL 2023, Toronto, Canada, July 9-14, 2023, pages
+   Qinyuan Cheng, Xiangyang Liu, Hang Yan, Yunfan              2717–2739. Association for Computational Linguis-
+   Shao, Qiong Tang, Shiduo Zhang, et al. 2024. Moss:          tics.
+  An open conversational large language model. Ma-
+   chine Intelligence Research, pages 1–18.                  Chenhao Wang, Pengfei Cao, Jiachun Li, Yubo Chen,
+                                                               Kang Liu, Xiaojian Jiang, Jiexin Xu, Qiuxia Li,
+Oyvind Tafjord, Bhavana Dalvi, and Peter Clark. 2021.          and Jun Zhao. 2024. Leros: Learning explicit
+  Proofwriter: Generating implications, proofs, and            reasoning on synthesized data for commonsense
+  abductive statements over natural language. In Find-         question answering. In Proceedings of the 2024
+  ings of the Association for Computational Linguis-           Joint International Conference on Computational
+  tics: ACL/IJCNLP 2021, Online Event, August 1-6,             Linguistics, Language Resources and Evaluation,
+  2021, volume ACL/IJCNLP 2021 of Findings of ACL,             LREC/COLING 2024, 20-25 May, 2024, Torino, Italy,
+  pages 3621–3634. Association for Computational               pages 10303–10315. ELRA and ICCL.
+  Linguistics.
+                                                             Chenhao Wang, Jiachun Li, Yubo Chen, Kang Liu, and
+Alon Talmor, Jonathan Herzig, Nicholas Lourie, and             Jun Zhao. 2022. Cn-automic: Distilling chinese
+  Jonathan Berant. 2019. Commonsenseqa: A question             commonsense knowledge from pretrained language
+  answering challenge targeting commonsense knowl-             models. In Proceedings of the 2022 Conference on
+  edge. In Proceedings of the 2019 Conference of               Empirical Methods in Natural Language Processing,
+  the North American Chapter of the Association for            EMNLP 2022, Abu Dhabi, United Arab Emirates, De-
+  Computational Linguistics: Human Language Tech-              cember 7-11, 2022, pages 9253–9265. Association
+  nologies, NAACL-HLT 2019, Minneapolis, MN, USA,              for Computational Linguistics.
+  June 2-7, 2019, Volume 1 (Long and Short Papers),
+  pages 4149–4158. Association for Computational             Lean Wang, Lei Li, Damai Dai, Deli Chen, Hao Zhou,
+  Linguistics.                                                 Fandong Meng, Jie Zhou, and Xu Sun. 2023b. Label
+                                                               words are anchors: An information flow perspective
+Hugo Touvron, Louis Martin, Kevin Stone, Peter Al-             for understanding in-context learning. In Proceed-
+  bert, Amjad Almahairi, Yasmine Babaei, Nikolay               ings of the 2023 Conference on Empirical Methods
+  Bashlykov, Soumya Batra, Prajjwal Bhargava, Shruti           in Natural Language Processing, EMNLP 2023, Sin-
+  Bhosale, Dan Bikel, Lukas Blecher, Cristian Canton-          gapore, December 6-10, 2023, pages 9840–9855. As-
+  Ferrer, Moya Chen, Guillem Cucurull, David Esiobu,           sociation for Computational Linguistics.
+                                                         9216
+Xuezhi Wang, Jason Wei, Dale Schuurmans, Quoc V.
+  Le, Ed H. Chi, Sharan Narang, Aakanksha Chowd-
+  hery, and Denny Zhou. 2023c. Self-consistency
+  improves chain of thought reasoning in language
+  models. In The Eleventh International Conference
+  on Learning Representations, ICLR 2023, Kigali,
+  Rwanda, May 1-5, 2023. OpenReview.net.
+Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten
+   Bosma, Brian Ichter, Fei Xia, Ed H. Chi, Quoc V. Le,
+   and Denny Zhou. 2022. Chain-of-thought prompting
+   elicits reasoning in large language models. In Ad-
+   vances in Neural Information Processing Systems 35:
+  Annual Conference on Neural Information Process-
+   ing Systems 2022, NeurIPS 2022, New Orleans, LA,
+   USA, November 28 - December 9, 2022.
+
+Chaojie Wen, Xudong Jia, and Tao Chen. 2023. Im-
+  proving extraction of chinese open relations using
+  pre-trained language model and knowledge enhance-
+  ment. Data Intell., 5(4):962–989.
+
+Yuxi Xie, Kenji Kawaguchi, Yiran Zhao, Xu Zhao,
+  Min-Yen Kan, Junxian He, and Qizhe Xie. 2023.
+  Self-evaluation guided beam search for reasoning.
+  In Thirty-seventh Conference on Neural Information
+  Processing Systems.
+Aiyuan Yang, Bin Xiao, Bingning Wang, Borong Zhang,
+  Ce Bian, Chao Yin, Chenxu Lv, Da Pan, Dian Wang,
+  Dong Yan, Fan Yang, Fei Deng, Feng Wang, Feng
+  Liu, Guangwei Ai, Guosheng Dong, Haizhou Zhao,
+  Hang Xu, Haoze Sun, Hongda Zhang, Hui Liu,
+  Jiaming Ji, Jian Xie, Juntao Dai, Kun Fang, Lei
+  Su, Liang Song, Lifeng Liu, Liyun Ru, Luyao Ma,
+  Mang Wang, Mickel Liu, MingAn Lin, Nuolan Nie,
+  Peidong Guo, Ruiyang Sun, Tao Zhang, Tianpeng
+  Li, Tianyu Li, Wei Cheng, Weipeng Chen, Xian-
+  grong Zeng, Xiaochuan Wang, Xiaoxi Chen, Xin
+  Men, Xin Yu, Xuehai Pan, Yanjun Shen, Yiding
+  Wang, Yiyu Li, Youxin Jiang, Yuchen Gao, Yu-
+  peng Zhang, Zenan Zhou, and Zhiying Wu. 2023.
+  Baichuan 2: Open large-scale language models.
+  CoRR, abs/2309.10305.
+Rowan Zellers, Ari Holtzman, Yonatan Bisk, Ali
+  Farhadi, and Yejin Choi. 2019. Hellaswag: Can a
+  machine really finish your sentence? In Proceedings
+  of the 57th Conference of the Association for Compu-
+  tational Linguistics, ACL 2019, Florence, Italy, July
+  28- August 2, 2019, Volume 1: Long Papers, pages
+  4791–4800. Association for Computational Linguis-
+  tics.
+Denny Zhou, Nathanael Schärli, Le Hou, Jason Wei,
+  Nathan Scales, Xuezhi Wang, Dale Schuurmans,
+  Claire Cui, Olivier Bousquet, Quoc V. Le, and Ed H.
+  Chi. 2023. Least-to-most prompting enables com-
+  plex reasoning in large language models. In The
+  Eleventh International Conference on Learning Rep-
+  resentations, ICLR 2023, Kigali, Rwanda, May 1-5,
+  2023. OpenReview.net.
+
+
+
+
+                                                      9217
+A   Early Statistical Experiments                       the preceding context when generating CoT or the
+                                                        final answers. In the factual error, the CoT con-
+In this section, we conduct early experiments on
+                                                        tains incorrect factual knowledge, which leads to
+existing representative commonsense reasoning
+                                                        erroneous answers. The presence of question er-
+datasets to analyze the prevalence of Toxic CoT
+                                                        rors reflects the subpar quality of the dataset. In
+problems through statistical methods.
+                                                        such cases, questions may exhibit multiple viable
+Datasets We utilize five representative common-         answers or all options are incorrect. As for the
+sense reasoning datasets to analyze the distribution    other error, the questions trigger certain refusal-to-
+of Toxic CoT problems. The basic information of         answer mechanisms in the model (e.g., inquiries
+the dataset is outlined in Table 5. It is noteworthy    about how to commit murder), leading to the iden-
+that, owing to the extensive size of Hellaswag’s dev    tification of incorrect answers.
+set (over 10,000), we extract 2,000 instances for           As the inconsistency error constitutes the pre-
+the experiment.                                         dominant portion of all reasons, our work focuses
+                                                        on addressing this issue. We further categorize
+Metric We design a new metric called Toxic              this error into Rationale Drift and Answer Drift
+Rate, which measures the proportion of Toxic CoT        based on the error occurrence (see §2.2 for their
+problems among all errors. Its calculation method       definitions).
+is shown in Equation 8.
+Results The result of our early statistical experi-         Reason                  Winogrande      CSQA
+ments is reported in Table 6. Here we use Llama2-           Inconsistent Error      71(78.9%)      48(53.9%)
+13B-Chat-hf to present the white-box LLM and                Factual Error           16(17.8%)      17(19.1%)
+use GPT-3.5-turbo-1106 to present the black-box-            Question Error           2(2.2%)       21(23.6%)
+model. The average Toxic Rates are as high as               Other Error              1(1.1%)        3(3.4%)
+37.0% and 32.8% across the five datasets, indicat-          Sum                         90             89
+ing that this issue cannot be ignored and warrants
+further investigation.                                     Table 7: The classification of CoT reasoning errors
+
+B   Toxic Reason Statistical Experiments
+                                                        C     More Details for Reasoning Tracing
+In this section, we manually categorize the error
+types of Toxic CoT problems through statistical         Method Implementation We introduce the attri-
+classification. Specifically, we sample 1,000 exam-     bution score method in § 3.1. In Equation 1, we set
+ples from CSQA and 1,000 examples from Wino-            m = 20 following the previous works. For F (·), we
+grande, classifying the Toxic CoT problems (In all      set it as the language modeling loss (for next-token
+of the probing experiments in the main text, we         prediction) during the CoT generation. Here, we
+use these samples as our probing data). The re-         obtain this value directly from the output of the Lla-
+sults are presented in Table 7. In the inconsistent     maForCausalLM module using the Transformers
+error, the model exhibits logical inconsistency with    library. In Equation 2, we partition the step num-
+
+
+                                  Winogrande       CSQA       HellaSwag       SIQA      PIQA
+                Split                  dev           dev          dev          dev       dev
+                #Sample Num           1267          1221         2000         1954      1838
+                #Option Num             2             5            4            3         2
+
+                                 Table 5: Dataset information in this work.
+
+                             Winogrande       CSQA       HellaSwag       SIQA       PIQA    Avg
+             Llama2-13B           43.1         28.8          34.8         37.3       41.2   37.0
+             GPT-3.5              34.8         37.8          27.5         37.5       26.4   32.8
+
+                            Table 6: Toxic rate on different datasets and models.
+
+                                                    9218
+bers |N | in CoT based on the occurrence of periods    of CoT reasoning and then follow it with one
+in the text. For models, we use Llama2-13B-Chat        round of feedback to generate the final an-
+and Baichuan2-13B-Chat.                                swer. For all the baselines, we release the
+                                                       prompts in our source code. We implement
+Attribution Tracing Experiment Figure 17 il-
+                                                       all of the methods on Llama2-13B-Chat-hf and
+lustrates the prompt we use for generating correct
+                                                       Baichuan2-13B-Chat.
+CoTs from drifting cases. After the generation, we
+will manually filter out the wrong CoT and conduct     Our methods In our RD method, we set two
+the comparative experiment. We use a 5-shot to         hyperparameters — candidate_num n and weight
+generate CoT and concatenate it to the question        ω, and here are their specific values in the experi-
+for our probing experiments. Figure 9 shows the        ments: for Winogrande, we set n to 4 and ω to 80,
+remaining results of this experiment, from which       for CSQA, we set n to 10 and ω to 135, for Hel-
+we can get the same conclusions as Section 3.2.        laSwag, we set n to 3 and ω to 80, for SIQA, we set
+Additionally, we also conduct the supplementary        n to 10 and ω to 160, for PIQA, we set n to 4 and ω
+experiments on CSQA and report the results in          to 120. Additionally, in Figure 18,19,20,21,22, we
+Figure 10.                                             list our method’s few-shot prompts on five datasets.
+                                                       Note that both CoT prompting and our two methods
+Attention Tracing Experiment Figure 11 re-
+                                                       utilize the same prompt.
+ports more results in this experiment.
+                                                       Results In our paper, we choose Llama2-13B
+D   More Details for Answering Tracing                 for experiments because it is an open-source LLM
+Intervention Tracing Experiment Figure 12,             of suitable size and has great influence. Here,
+13, 14 and 15 report the remaining intervention        we also repeat all experiments on Baichuan2-
+tracing experiment results, which are consistent       13B to verify the generality of our work (see
+with our conclusion in the main text.                  Table 8). Additionally, in Table 9, we show
+                                                       our experimental results on two other represen-
+E   Mitigation Method Implementation                   tative models: Mistral-7B-Instruct-v0.2 and
+                                                       gpt-3.5-turbo-1106 (since it is a closed source
+Residual Decoding Here, we provide a detailed
+                                                       model, here we only apply the SPS method).
+explanation of Algorithm 1. At the beginning, we
+set the input to the entire question (contexts + op-   G    More Details for Cost Analysis
+tions). In line 2, we get the logits from the output
+of the LlamaForCausalLM. In line 6, we calculate       Table 10 illustrates the time cost comparison of our
+the attention score by summing the values on the       residual decoding methods with other strategies.
+attention matrix corresponding to the tokens. We       Here we set num_beams in the beam search strat-
+use the output character “</s>” as the termination     egy as 5, and candidate_num in the RD strategy
+condition for Llama2-13B generation in line 12.        as 3. We compute the average seconds cost per
+                                                       example over 50 samples for each dataset. On av-
+Serial-Position Swap In this method, we swap           erage, our decoding strategy takes 2.6 times longer
+the positions of the question and the generated CoT,   than greedy search and 1.4 times longer than beam
+outputting the option with the highest logits score.   search. This reflects that our decoding method has
+This method can be implemented under both few-         significantly stronger performance while having a
+shot and zero-shot settings, demonstrating its cost-   comparable overall time to these main decoding
+efficiency.                                            strategies.
+F   More Details for the Mitigation
+    Experiment
+Dataset In this experiment, the specific informa-
+tion of all datasets can be found in Table 5.
+Baselines For the Self-Consistency method, we
+sample 5 CoTs and use a majority voting method
+to select the final predicted answer. For the
+Self-Refine method, we first conduct one round
+                                                   9219
+                                           Winogrande                     CSQA                HellaSwag                          SIQA                PIQA                          Avg
+                 Method
+                                           ACC↑ TR↓                     ACC↑ TR↓             ACC↑ TR↓                          ACC↑ TR↓            ACC↑ TR↓                     ACC↑ TR↓
+                 Few-shot Answer            59.7             -          69.9     -               47.1            -             68.8         -       60.7             -          61.2      -
+                 Chain-of-Thought           58.7            34.8        66.8    37.8             41.1           27.5           66.5        37.5     66.1            26.4        59.8     32.8
+                 Self-Consistency           56.1            38.8        64.3    41.5             39.4           30.6           67.8        33.5     70.0            21.0        59.5     33.1
+                 Self-Refine                59.6            35.7        66.7    38.8             39.2           29.9           62.2        43.1     62.6            31.0        58.1     35.7
+                 Least-to-Most              59.7            35.6        62.8    45.6             37.8           32.1           66.5        36.8     62.8            20.6        57.9     34.1
+                 Contrasive CoT             55.2            40.6        67.0    37.4             38.7           29.7           65.0        37.3     65.9            26.2        58.4     34.2
+                            RD Only         59.2            21.1        69.5    25.3             44.4           19.3           68.9        25.0     67.0            12.9        61.8     20.7
+                 Ours       SPS Only        59.9            22.8        69.7    23.5             46.3           15.2           69.2        27.8     67.7            14.2        62.6     20.7
+                            RIDERS          60.1            18.6        71.3    14.6             46.3           13.0           69.0        20.5     67.2            8.3         62.8     15.0
+
+                      Table 8: Performance comparison across five commonsense reasoning datasets on Baichuan2-13B.
+
+
+
+
+                                                                                                 Winogrande                                 SIQA
+                                              Model                      Method
+                                                                                                 ACC↑ TR↓                                 ACC↑ TR↓
+                                                                         CoT                       59.2                   27.9            70.2      28.2
+                                              Mistral-7B
+                                                                         RIDERS                    62.0                   15.3            70.6      24.5
+                                                                         CoT                       64.6                   48.8            70.6      30.3
+                                              GPT-3.5
+                                                                         RIDERS                    70.1                   41.7            72.1      29.0
+
+                                            Table 9: Performance comparison on Mistral-7B and GPT-3.5.
+
+
+
+
+                                          Strategy                Wino          CSQA               Hella                   SIQA            PIQA           Avg
+                                          Greedy                    5.2           2.8                4.9                       3.6           5.8           4.5
+                                          Beam                      8.1           4.9               10.1                       5.8           9.4           7.7
+                                          Ours                     13.4           6.6               16.2                       7.4          15.9          11.9
+
+                                                       Table 10: Decoding time per example comparison.
+
+
+
+
+                                                                                                               
+                                                                                 ' U L I W                                                                                               ' U L I W
+                                                                                 & R U U H F W                                                                                       & R U U H F W
+               
+                                                                                                                   
+                                                                                                               
+ $ W W U                                                                                             $ W W U
+                                                                                                               
+                                                                                                                   
+               
+                                                                                                                   
+                                                                                                               
+                                                                                                                                                                        
+                                                   / D \ H U V                                                                                             / D \ H U V
+                                        (a) Llama2-13B                                                                                      (b) Baichuan2-13B
+
+                                                            Figure 9: Attribution tracing results on CSQA.
+
+
+                                                                                                 9220
+                                                                                                                                                    
+                                                                                                                 ' U L I W                                                                                                                      ' U L I W
+                                                                                                            1 R U P D O                             
+                                                                                                                                                                                                                                                1 R U P D O
+                        
+                                                                                                                                                    
+ $ W W U  ' L Y                                                                                                              $ W W U  ' L Y
+                                                                                                                                                         
+                        
+                                                                                                                                                    
+                        
+                                                                                                                                                         
+                                                                                                                                                                                                                              
+                                                                      / D \ H U V                                                                                                                    / D \ H U V
+                                                       (a) Llama2-13B                                                                                                              (b) Baichuan2-13B
+
+                                                               Figure 10: Information flow divergence comparison on CSQA.
+
+
+
+
+                                                                                                                                                       
+                                                                                                                                                                                                                                                     
+
+                                                                                                                                                  
+                                                                                                                                                                                                                                                          
+                                                                                                                                                  
+
+
+     / D \ H U V                                                                                                                   / D \ H U V
+                                                                                                                                                     
+                                                                                                                                                                                                                                                       
+                                                                                                                                                     
+                                                                                                                           
+                                                                                                                                                                                                                                                      
+                                                                                                                           
+                                                                                                                                                     
+
+                                                                                                                                                  
+                                                                                                                                                                                                                                                           
+                                                                                                                                                                                                            
+                                                             + H D G V                                                                                                                      + H D G V
+                                                        (a) Winogrande                                                                                                                     (b) CSQA
+
+                                           Figure 11: Attention tracing results across different attention heads on Baichuan2-13B.
+
+
+
+
+                                                                                                                                 9221
+                                                                                                                                                                
+
+
+ R S W L R Q  F R Q W H [ W                                                           R S W L R Q  F R Q W H [ W
+                                                                              
+                                                                                                                                                                   
+                                                                              
+                                                                                                                                                                   
+ F R W                                                                             F R W
+                                                                                                                                                                   
+                                                                              
+ O D V W                                                                              O D V W
+                                                                                                                                                                
+                                                                                                                             
+                                               / D \ H U V                                                                          / D \ H U V
+                                           (a) Correct Case’s Attn                                                              (b) Correct Case’s MLP
+                                                                                                                                                                
+
+
+ R S W L R Q  F R Q W H [ W                                                           R S W L R Q  F R Q W H [ W
+                                                                              
+                                                                                                                                                                   
+                                                                              
+                                                                                                                                                                   
+ F R W                                                                             F R W
+                                                                                                                                                                   
+                                                                              
+ O D V W                                                                              O D V W
+                                                                                                                                                                
+                                                                                                                             
+                                               / D \ H U V                                                                          / D \ H U V
+                                           (c) Drifting Case’s Attn                                                            (d) Drifting Case’s MLP
+
+                               Figure 12: Intervention tracing results on CSQA in correct and drifting answering cases (Llama2-13B).
+
+
+
+
+                                                                                    9222
+                                                                                                                                                                                           
+
+      F R Q W H [ W                                                                               F R Q W H [ W                                                                            
+                                                                                                                                                                                           
+
+      R S W L R Q                                                                                 R S W L R Q                                                                              
+
+ $ ' (                                                                                          $ ' (
+                                                                                                                                                                                           
+      F R W                                                                                       F R W                                                                                    
+                                                                                                                                                                                           
+      O D V W                                                                                     O D V W                                                                                  
+                                                                                                                                                                                           
+                                                                                                                                                        
+                                               / D \ H U V                                                                                       / D \ H U V
+                                       (a) Correct Case’s Attn                                                                          (b) Correct Case’s MLP
+                                                                                                                                                                                           
+
+      F R Q W H [ W                                                                               F R Q W H [ W                                                                            
+                                                                                                                                                                                           
+
+      R S W L R Q                                                                                 R S W L R Q                                                                              
+
+ $ ' (                                                                                          $ ' (
+                                                                                                                                                                                           
+      F R W                                                                                       F R W                                                                                    
+                                                                                                                                                                                           
+      O D V W                                                                                     O D V W                                                                                  
+                                                                                                                                                                                           
+                                                                                                                                                        
+                                               / D \ H U V                                                                                       / D \ H U V
+                                       (c) Drifting Case’s Attn                                                                         (d) Drifting Case’s MLP
+
+      Figure 13: Intervention tracing results on Winogrande in correct and drifting answering cases (Baichuan2-13B).
+
+
+
+
+                                                                                               9223
+                                                                                                                                                                                            
+
+      F R Q W H [ W                                                                                F R Q W H [ W                                                                            
+                                                                                                                                                                                            
+
+      R S W L R Q                                                                                  R S W L R Q                                                                              
+
+ $ ' (                                                                                           $ ' (
+                                                                                                                                                                                            
+      F R W                                                                                        F R W                                                                                    
+                                                                                                                                                                                            
+      O D V W                                                                                      O D V W                                                                                  
+                                                                                                                                                                                            
+                                                                                                                                                         
+                                                / D \ H U V                                                                                       / D \ H U V
+                                        (a) Correct Case’s Attn                                                                          (b) Correct Case’s MLP
+                                                                                                                                                                                            
+
+      F R Q W H [ W                                                                                F R Q W H [ W                                                                            
+                                                                                                                                                                                            
+
+      R S W L R Q                                                                                  R S W L R Q                                                                              
+
+ $ ' (                                                                                           $ ' (
+                                                                                                                                                                                            
+      F R W                                                                                        F R W                                                                                    
+                                                                                                                                                                                            
+      O D V W                                                                                      O D V W                                                                                  
+                                                                                                                                                                                            
+                                                                                                                                                         
+                                                / D \ H U V                                                                                       / D \ H U V
+                                        (c) Drifting Case’s Attn                                                                         (d) Drifting Case’s MLP
+
+                      Figure 14: Intervention tracing results on CSQA in correct and drifting answering cases (Baichuan2-13B).
+
+
+
+
+                                                                                                9224
+                                                                                    ' U L I W                                                                                   ' U L I W
+               
+                                                                                    & R U U H F W                                                                               & R U U H F W
+                                                                                                                 
+                                                                                                                 
+ $ W W U                                                                                               $ W W U
+                                                                                                                     
+               
+                                                                                                                     
+               
+                                                                                                                     
+                                                                                                                 
+                                                                                                                                                                   
+                                                       / D \ H U V                                                                                     / D \ H U V
+                                           (a) Winogrande                                                                                     (b) CSQA
+
+                           Figure 15: Attribution tracing results on Baichuan2-13B during the answer generation stage.
+
+
+
+
+                                                                                                                
+                                                                                        & R 7                                                                                               & R 7
+                                                                                    6 3 6                                                                                            6 3 6
+
+                                                                                                                
+ $ W W U                                                                                               $ W W U
+                                                                                                                
+
+                                                                                                                
+
+                                                                                                                
+                                                                                                                                                                   
+                                                       / D \ H U V                                                                                     / D \ H U V
+                                           (a) Winogrande                                                                                     (b) CSQA
+
+                                 Figure 16: Information flow comparison on CSQA after applying our two methods.
+
+
+
+
+                                      System Instruction: You are a helpful, respectful and honest
+                                      assistant. You should use your reasoning abilities to given the reason
+                                      for the answer to the given questions. Your response should be in
+                                      this form: 'Reason: {reason}’.
+
+                                      Example Input: Question: {QUESTION}\nAnswer: {ANSWER}
+                                      Example Output: Reason: {COT}
+
+                                      Input: Question: {QUESTION}\nAnswer: {ANSWER}
+                                      Output:
+
+                                                                Figure 17: Prompts for correct CoT generation.
+
+
+
+                                                                                                    9225
+System Instruction: You are a helpful, respectful and honest assistant. You
+should use your reasoning abilities to answer the given questions in reasoning
+tasks. You should reply the correct rationales and the answer. Your response
+should be in this form: '{reason} So the answer is: ({option}) {answer}'. If
+you don't know the answer to a question, please reply 'Answer: None’.
+
+Question: The test was hard for Samuel but a breeze for Randy , since _ had
+failed to study for it.\n(1) Samuel (2) Randy
+Answer: To pass a test, a person need to study for it. If a person feel the test
+like a breeze, it means the test is easy for him. A person feels the test easy,
+because he studies hard for it. Since we know that Samuel feel the test very
+hard, she may fail to study for it. So the answer is: (1) Samuel.
+
+Question: Kyle slowly wormed their way into the life of Derrick, because _
+was good and manipulating people.\n(1) Kyle (2) Derrick
+Answer: A person wormes his way into other's life, because he is friendly
+and approachable. A friendly person is considered good. A person is seen as
+manipulating people, that means he like to interact with others and others like
+him. Since Kyle slowly wormed their way into the life of Derric, Kyle will be
+seen as good and manipulating people. So the answer is: (1) Kyle.
+
+Question: Donald was very grounded but Michael often got lost in their
+daydreams. _ was very capricious all the time.\n(1) Donald (2) Michael
+Answer: A person is grounded means he works hard and does not like to
+fantasize. A person often gets lost in his daydreams, he is seen as unrealistic
+and egocentric. A person is capricious all the time means he does everything
+only according to his own ideas. Since Michael often gets lost in their
+daydreams but Donald does not, Michael is seen as very capricious all the
+time. So the answer is: (2) Michael.
+
+Question: After stopping when running, Betty was able to help Rachel treat
+their asthma because _ has it too.\n(1) Betty (2) Rachel
+Answer: A person who has a mild disease may knows how to treat it. Since
+Since Betty was able to help Rachel treat their asthma, Betty may has it, too.
+So the answer is: (1) Betty.
+
+Question: Jeffrey was sick with the stomach flu and not hungry, but
+Christopher was starving. _ ordered food.\n(1) Jeffrey (2) Christopher
+Answer: Stomach flu is a viral infection in the digestive system. A person is
+starve so that he need to eat something next. A person is not hungry means he
+does not want to eat something. Ordering food means to buy food online. A
+person may eat food after ordering it. Since Christopher was starving and
+Jeffery was sick and not hungry, Christopher tended to order food. So the
+answer is: (2) Christopher.
+
+                    Figure 18: 5-shot prompts for Winogrande.
+
+
+
+
+                                      9226
+System Instruction: You are a helpful, respectful and honest assistant.
+You should use your reasoning abilities to answer the given questions
+in reasoning tasks. You should reply the correct rationales and the
+answer. Your response should be in this form: '{reason} So the answer
+is: ({option}) {answer}'. If you don't know the answer to a question,
+please reply 'Answer: None’.
+
+Question: Google Maps and other highway and street GPS services
+have replaced what? \n (1) atlas (2) mexico (3) countryside (4) united
+states (5) oceans Answer: Electronic maps and GPS services are the
+modern version of paper atlas. In that case, the atlas have been
+replaced by Google Maps and other highway and street GPS services.
+So the answer is: (1) atlas.
+
+Question: The fox walked from the city into the forest, what was it
+looking for? \n (1) pretty flowers. (2) hen house (3) natural habitat (4)
+storybook (5) dense forest
+Answer: Since the fox walk from the city into the forest, he may looks
+for something in the forest but not in the city. From all of the options,
+the natural habitat are usually away from cities. So the answer is: (3)
+natural habitat.
+
+Question: You can share files with someone if you have a connection
+to a what? \n (1) freeway (2) radio (3) wires (4) computer network (5)
+electrical circuit
+Answer: Files usually can be stored in the computers. In that case, we
+can share them over the Internet. Thus, if we connect to a computer
+network, we can share the file with others. So the answer is: (4)
+computer network.
+
+Question: Too many people want exotic snakes. The demand is
+driving what to carry them? \n (1) ditch (2) shop (3) north america (4)
+outdoors (5) pet shops
+Answer: If people want exotic snakes, they may like to raise snakes as
+pets. If there is a demand for snakes as pets, pet shops will be pushed
+to carry them, in order to make more money. So the answer is: (5) pet
+shops.
+
+Question: The body guard was good at his duties, he made the person
+who hired him what? \n (1) better job (2) feel safe (3) irritated (4) save
+money (5) headache
+Answer: The job of body guards is to ensure the safety and security of
+the employer. People ususally hire the body guard to make themselves
+safe. So the answer is: (2) feel safe.
+
+                   Figure 19: 5-shot prompts for CSQA.
+
+
+
+
+                                  9227
+System Instruction: You are a helpful, respectful and honest assistant. You should use
+your reasoning abilities to answer the given questions in reasoning tasks. You should
+reply the correct rationales and the answer. Your response should be in this form: '{reason}
+So the answer is: ({option}) {answer}'. If you don't know the answer to a question, please
+reply 'Answer: None’.
+
+Question: Then, the man writes over the snow covering the window of a car, and a
+woman wearing winter clothes smiles. then \n (1) the man adds wax to the windshield
+and cuts it. (2) a person board a ski lift, while two men supporting the head of the person
+wearing winter clothes snow as the we girls sled. (3) the man puts on a christmas coat,
+knitted with netting. (4) the man continues removing the snow on his car.
+Answer: Snow must be removed from a car before one can drive it. Since there is some
+snow covering the car, so the man tends to remove it next. So the answer is: (4) the man
+continues removing the snow on his car.
+
+Question: The man in the center is demonstrating a hairstyle on the person wearing the
+blue shirt. the man in the blue shirt \n (1) is standing on the sponge cutting the hair of the
+person wearing the blue shirt. (2) is doing the hairstyle with his hand and the hairspray. (3)
+sits on the chair next to the sink. (4) is being shown eye to eye.
+Answer: One should sit still when getting a haircut. People often sits down when they are
+get a haircut. From the context, we can get that the man in the blue shirt is getting a
+haircut, so he should sit down and wait. So the answer is: (3) sits on the chair next to the
+sink.
+
+Question: The roof is done and a view of the entire house is shown to show off the
+finished roof. the woman \n (1) is standing in front of the home, smiling while talking. (2)
+interviews the man again and leaves the room. (3) shows the soil with two lay-ups of
+shingle and applies a layer onto the top shingle. (4) stacks the bags on the side and begins
+putting stencils on the top.
+Answer: One usually feels pleased after finishing a home improvement project. If a
+person feels pleased, he tends to smile. Since the woman has finished all the work, she
+may be proud of it and feel pleased. Then she may smile. So the answer is: (1) is standing
+in front of the home, smiling while talking.
+
+Question: People practice ballet in a studio alone and in couples. then \n (1) a man
+begins dancing and top dancing standing on the ground. (2) a boy and a girl dance ballet,
+then a man enter and dance with the girl. (3) the band performs ballet in the studio and in
+the open gathered. (4) people dances and dances together, dancing.
+Answer: Ballet is a kind of dance. If people pratice ballet, they often dance with their
+partener or dance alone, which matches the description of option (2). So the answer is: (2)
+a boy and a girl dance ballet, then a man enter and dance with the girl.
+
+Question: A person is seen standing on a tennis court bouncing a ball. another man \n (1)
+takes his turn speaking to the camera. (2) walks up hitting a birdie. (3) is seen standing
+ready on the other side in front of a large audience. (4) is holding the racket next to him.
+Answer: The player who bounces the ball is the one who serves. In the tennis race, two
+players are located on opposite sides of the court, one is serving and the other is preparing
+to receive the ball. Since there is a person who serves, another one should stands ready.
+So the answer is: (3) is seen standing ready on the other side in front of a large audience.
+
+
+
+
+                          Figure 20: 5-shot prompts for HellaSwag.
+
+                                            9228
+System Instruction: You are a helpful, respectful and honest assistant. You
+should use your reasoning abilities to answer the given questions in reasoning
+tasks. You should reply the correct rationales and the answer. Your response
+should be in this form: '{reason} So the answer is: ({option}) {answer}'. If
+you don't know the answer to a question, please reply 'Answer: None’.
+
+Question: Quinn wanted to help me clean my room up because it was so
+messy. What will Quinn want to do next? \n (1) Eat messy snacks (2) help out
+a friend (3) Pick up the dirty clothes
+Answer: Quinn want to clean the room up. Picking up the dirty clothes is one
+way to clean the room. Thus, quinn will want to pick up the dirty clothes next.
+So the answer is: (3) Pick up the dirty clothes
+
+Question: Sasha's mom passed out in the middle of the party. Aubrey took
+Sasha's mom to the hospital. What will Aubrey want to do next? \n (1) help
+Aubrey go back home (2) keep on partying without the mom (3) going on
+with the mom
+Answer: Sasha's mom is sent to the hospital beacuse she passes out. After
+that, she becomes a patient. A patient needs to be cared for. Aubrey may need
+to take care of her. Thus, Aubrey will go on with the mom. So the answer is:
+(3) going on with the mom
+
+Question: Their cat kept trying to escape out of the window, so Jan placed an
+obstacle in the way. How would Jan feel afterwards? \n (1) scared of losing
+the cat (2) normal (3) relieved for fixing the problem
+Answer: The cat try to escape so Jan need to stop it to avoid losing the cat.
+Jan place an obstacle in the way so the cat can not escape. The problem is
+been solved. Thus, Jan will fell relieved for fixing the problem. So the answer
+is: (3) relieved for fixing the problem
+
+Question: Sydney had so much pent up emotion, they burst into tears at work.
+How would Sydney feel afterwards? \n (1) affected (2) like they released their
+tension (3) worse
+Answer: Crying is often a way to release tension. Sydney burst into tears at
+work. Thus, she would release the tension. So the answer is: (2) like they
+released their tension
+
+Question: Sydney got a raise and a new promotion. What does Sydney need
+to do before this? \n (1) be bad at her job (2) do a good job (3) be lazy
+Answer: To get a raise and a new promotion, Sydney needs to work hard and
+do a good job. Sydney got a raise and a new promotion. Thus, she need to do
+a good job before this. So the answer is: (2) do a good job
+
+
+
+                       Figure 21: 5-shot prompts for SIQA.
+
+
+
+
+                                      9229
+System Instruction: You are a helpful, respectful and honest assistant.
+You should use your reasoning abilities to answer the given questions in
+reasoning tasks. You should reply the correct rationales and the answer.
+Your response should be in this form: '{reason} So the answer is:
+({option}) {answer}'. If you don't know the answer to a question, please
+reply 'Answer: None’.
+
+Question: How do you flood a room?\n(1) fill it with objects. (2) fill it
+with water
+Answer: Too much water can cause flooding. Thus, if we want to flood a
+room, we should use water. So the answer is: (2) fill it with water
+
+Question: How can I get oil stains out of my driveway?\n(1) Douse each
+stain with a couple cans of beer. (2) Douse each stain with a couple cans
+of soda.
+Answer: Sodium carbonate solution can wash away oil stains. The soda is
+a kind of sodium carbonate solution. Thus, you can use cans of soda to get
+oil stains out of your driveway. So the answer is: (2) Douse each stain
+with a couple cans of soda.
+
+Question: Soothe a painful sunburn.\n(1) Wait until brewed tea bag is
+cool, then apply on burn. (2) Wait until brewed tea bag is hot, then apply
+on burn.
+Answer: Sunburn can be alleviated by applying cold material. Thus, you
+should apply cool tea rather than hot tea bag to soothe your sunburn. So
+the answer is: (1) Wait until brewed tea bag is cool, then apply on burn.
+
+Question: What can I use for fuel in an alcohol stove?\n(1) Use acetone.
+(2) Use vinegar.
+Answer: Acetone is flammable, while vinegar is not. If you want to use
+something for fuel, the thing you use should be flammable. Thus, you
+should use acetone for fuel in an alcohol stove. So the answer is: (1) Use
+acetone.
+
+Question: How can I cut the handles of metal cutlery?\n(1) Use a hand
+saw to cut the handles. (2) Use a hand drill to cut the handles.
+Answer: A hand saw is used for making cuts and a hand drill is used for
+making holes. If you want to cut something, you should use a hand saw
+rather than hand drill. So the answer is: (1) Use a hand saw to cut the
+handles.
+
+
+
+                     Figure 22: 5-shot prompts for PIQA.
+
+
+
+
+                                    9230
+

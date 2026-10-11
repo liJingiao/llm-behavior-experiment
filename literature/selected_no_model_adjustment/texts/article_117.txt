@@ -1,0 +1,1358 @@
+        GRACE: A Granular Benchmark for Evaluating Model Calibration
+                       Against Human Calibration
+               Yoo Yeon Sung ∗                     Eve Fleisig ∗                       Yu Hou
+            University of Maryland            University of California          University of Marlyand
+              College Park, MD                    Berkeley, CA                    College Park, MD
+            yysung53@umd.edu               efleisig@berkeley.edu                 houyu@umd.edu
+
+                    Ishan Upadhayay                                Jordan Boyd-Graber
+                       IIT Bombay                                  University of Marlyand
+                      Mumbai, MH                                     College Park, MD
+            ishan.upadhyay.iitb@gmail.com                         jbg@umiacs.umd.edu
+
+                          Abstract                          models are worse, users are often not prepared
+                                                            to address these errors (Li et al., 2024a). Thus,
+        Language models are often miscalibrated, lead-
+                                                            models should be at least as calibrated as humans,
+        ing to confidently incorrect answers. We in-
+        troduce GRACE, a benchmark for language             making it especially crucial to identify when mod-
+        model calibration that incorporates comparison      els commit calibration errors that humans do not.
+        with human calibration. GRACE consists of           However, existing work on model calibration lacks
+        question-answer pairs where each question is a      comparison with human calibration.
+        series of gradually easier clues that all lead to
+        the same answer: models must answer correctly          We thus introduce GRACE, a Granular, Human-
+        as early as possible as clues are revealed. This    grounded Benchmark for Model Calibration
+        setting permits granular measurement of model       Evaluation. Each instance allows fine-grained
+        calibration based on how early, accurately, and     calibration measurement using an incremental
+        confidently a model answers. After crafting         question-answering (QA) framework. Expert writ-
+        these questions, we host live human vs. model       ers design GRACE questions, each consisting of
+        competitions to gather 1,749 data points on hu-
+                                                            at least five sentences of clues that gradually be-
+        man and model teams’ timing, accuracy, and
+        confidence. We propose a metric, C AL S CORE,       come easier. To prevent models from being con-
+        that uses GRACE to analyze model calibration        fused by ambiguities or false presuppositions (Min
+        errors and identify types of model miscalibra-      et al., 2020, 2022), we require that clues challenge
+        tion that differ from human behavior. Although      models but remain clear for humans. This format
+        humans are less accurate than models, humans        measures model calibration with human perfor-
+        are generally better calibrated. Since state-of-    mance as a reference point: models should give
+        the-art models struggle on GRACE, it effec-         correct answers earlier and more confidently than
+        tively evaluates progress on improving model
+                                                            humans, while minimizing confidently incorrect
+        calibration. 1
+                                                            guesses (§ 3).
+1       Introduction                                           GRACE incorporates human responses from our
+Because language models are often miscalibrated,            live QA competitions. Unlike prior calibration eval-
+they are often confidently wrong (Kaur et al.,              uation methods that only allow model–model cali-
+2020). This mismatch between accuracy and confi-            bration comparisons, our dataset thus allows direct
+dence causes users to trust models more than they           human–model calibration comparison. GRACE is
+should (Caruana, 2019; Deng et al., 2025), even             the first benchmark dataset designed to evaluate
+over their own correct judgment (Krause et al.,             model calibration grounded in human perfor-
+2023; Stengel-Eskin and Van Durme, 2023; Liu                mance. This unique dataset is the foundation for
+et al., 2024; Si et al., 2023). These issues are par-       a new metric (C AL S CORE, § 4). In contrast to
+ticularly severe when models are miscalibrated in           other calibration evaluation methods that only cal-
+ways that humans are not: users expect models               culate aggregate calibration over the entire dataset,
+to be at least as calibrated as humans, and when            GRACE also facilitates per-instance evaluation,
+        ∗                                                   which helps in identifying specific contexts where
+    Equal contribution.
+    1
+   Code and data are available at: https://github.          models are much worse than humans at avoiding
+com/Pinafore/advcalibration                                 confidently incorrect answers.
+          Incremental
+       Adversarial Writing                                                Human vs. Model Competition
+         [Question]    [LM]                     [Human vs. GPT4o]               [Human vs. Mistral]            [Human vs. GPT4]
+                                                            ( H1, + )                         ( H4, + )                    ( H1, + )
+     Clue 1                                  Clue 1                           Clue 1                         Clue 1
+
+     Clue 2                                  Clue 2                           Clue 2        ( Mistral, - )   Clue 2
+                                   V.S
+                                                          ( H8, H5, + )                     ( H2, H6, + )                ( H3, H7, + )
+     Clue 3                       GPT4
+                                             Clue 3                           Clue 3                         Clue 3
+                                                          ( GPT4o, + )
+     Clue 4                      GPT4o       Clue 4                           Clue 4                         Clue 4
+                                                                                                                          ( GPT4, - )
+     Clue 5                      Mistral     Clue 5                           Clue 5                         Clue 5
+
+
+
+
+Figure 1: To create the GRACE dataset, expert question writers develop questions with multiple clues of decreasing
+difficulty via an interface that shows where weaker models struggle to answer the questions. These questions are
+used in human vs. model competitions where teams compete to be the first to interrupt the sequence of clues with a
+correct answer. We record when the human and model teams buzz in each question with their correctness (+) or
+incorrectness (-) (buzzpoints I). The dataset contains all buzzpoints throughout the competition. Then, C AL S CORE
+measures each model’s human-grounded calibration performance (§ 4).
+
+
+   Language models are more overconfident                       He et al. (2016b) argue that this setting is a natural
+than humans in incorrect answers and relatively                 test of calibration: participants should buzz only
+underconfident in correct answers. In contrast,                 when confident in their answers.
+humans tend to be highly confident—over 50%—                       Unlike selective QA for non-incremental exam-
+when correct (§ 5.1). Models struggle with ab-                  ples (Ferrucci, 2012), incremental decision pro-
+stract descriptions—they are both overconfident                 cesses offer more detail, since each clue is a de-
+and inaccurate—but excel in retrieving facts given              cision point for whether to answer or abstain,
+unambiguous clues (§ 5.3). We conclude with a                   with more information available as clues are re-
+discussion of how GRACE and C AL S CORE can                     vealed (Rajpurkar et al., 2018).
+aid in the creation of models that are more accurate               In addition, unlike prior incremental QA re-
+and better calibrated.                                          search, we use a human-in-the-loop adversarial
+   In sum, we (1) introduce GRACE, a bench-                     authoring process to specifically target calibration.
+mark that compares LLM and human calibration                    Rodriguez et al. (2019b) uses publicly available
+to identify LLM calibration failures, and a novel               questions, which are too easy for modern models.
+calibration metric using our benchmark; (2) con-                While Wallace et al. (2019) used model–human
+duct extensive human response collection, which                 collaboration to craft incremental adversarial ques-
+grounds GRACE in accurate human confidence                      tions, the target model in TrickMe differed signifi-
+calibration assessment; (3) ensure that GRACE                   cantly and prioritized overall accuracy over calibra-
+contains expert-authored and repeatedly validated               tion. 2
+questions that are harder and longer than previous                 To develop questions that challenge models, ex-
+work; and (4) analyze human vs. LLM calibration,                pert writers use our interface (§ 3.1), followed
+finding that, relative to humans, LLMs are under-               by expert editing to ensure well-posed questions.
+confident in correct answers and overconfident in               Our dataset creation process is motivated by Kiela
+wrong answers.                                                  et al. (2021); Ilyas et al. (2019); Engstrom et al.
+                                                                (2020), who argue that adversarial benchmarks
+2   Preliminaries                                               must be clear for humans and challenge models,
+                                                                ensuring that model errors are due to model limi-
+Drawing on prior work, GRACE consists of in-                    tations rather than ambiguous or low-quality ques-
+cremental questions with adversarial clues to ef-               tions (Min et al., 2020; Yu et al., 2023).
+fectively ground model calibration evaluation in
+                                                                   Grounding to human calibration. Humans in-
+human performance.
+                                                                creasingly use AI to help make decisions, but such
+Incremental and adversarial QA. Incremental
+                                                                    2
+questions contain multiple clues in decreasing or-                    GPT-4 has 80% accuracy on Wallace et al. (2019)’s
+                                                                TrickMe dataset after only 60% of the clues (Appendix C).
+der of difficulty; models must answer correctly as              Model accuracy remains 2-4x higher on TrickMe than on
+early as possible. Boyd-Graber et al. (2012) and                GRACE as clues are revealed.
+assistance can be detrimental when the model is                   a range of subjects. 4 All questions are reviewed by
+miscalibrated (Stengel-Eskin et al., 2024) or fails to            the writer, category editor, and head editor to check
+abstain (Khurana et al., 2024). This is particularly              that clues are unambiguous and factually correct.
+concerning when models are confidently wrong but                  Interface setup. To create incremental and adver-
+humans do not know the correct answer, which our                  sarial questions, writers and editors use a human-AI
+metric—C AL S CORE—especially penalizes. Fur-                     collaborative writing interface (Figure 2). Because
+thermore, modern models are poorly calibrated to                  these examples are meant to be incremental, we
+human linguistic variation, causing Ilia and Aziz                 break the input into sentences {s1 , s2 , . . . sk }. GPT-
+(2024) to question the reliability of expected cali-              3.5 provides a guess {a1 , a2 , . . . ak } for each sen-
+bration error (ECE). Thus, C AL S CORE focuses on                 tence in addition to its confidence {c1 , c2 . . . ck }.
+where models can help users by considering how                    The interface also highlights when the model
+early humans can answer the questions.                            confidence would be high enough to buzz (Ap-
+   Calibration evaluation. Language models tend                   pendix D.2).
+to be overconfident in their predictions, which can                  To ensure that questions remain incremental for
+lead to undue trust or erode user confidence in                   models, we instruct writers to write questions so
+language models (Zhou et al., 2024). Proposed                     that model’s guess is correct no earlier than the
+methods to measure model calibration include us-                  penultimate sentence. 5 As experienced question
+ing raw probabilities (Xiong et al., 2024), separate              writers, they use their domain knowledge to ensure
+confidence predictors (Ulmer et al., 2024), verbal-               difficulty also decreases for humans, so that most
+ized confidence scores (Tian et al., 2023; Band                   humans can answer correctly by the end. Writers
+et al., 2024), or natural language expressions of                 dynamically interact with the models to refine their
+uncertainty (Stengel-Eskin et al., 2024; Zhou et al.,             questions (You and Lowd, 2022; Eisenschlos et al.,
+2023). Our dataset aids finer-grained versions                    2021). For example, the second line in Figure 2
+of these approaches by permitting per-instance,                   was originally “This number of characters appear
+human-grounded calibration measurement. While                     in the name of a Chinese classic,” which the model
+We also extend on existing calibration metrics, such              answered correctly. Instead, the writer revises the
+as ECE (Naeini et al., 2015) and Brier scores (Brier,             first line of the text, which fools the models while
+1950) by introducing a metric for calibration on in-              allowing humans to answer correctly. The final
+cremental questions (Appendix G). Si et al. (2022)                dataset consists of 243 QA pairs, with a total of
+improve calibration in question answering by lever-               1,236 sentences of clues. Each sentence uniquely
+aging consistency across multiple training check-                 points to the answer, making it usable as a stan-
+points, assigning higher confidence to predictions                dalone QA pair. 6
+that remain stable throughout training.
+                                                                  3.2    Collecting human–model buzzpoints
+3     GRACE: Dataset Development
+                                                                  The questions described above are designed to be
+To create our dataset, expert writers and editors first           read aloud and interrupted. In the competition,
+construct incremental, adversarial, and rigorously                teams compete by buzzing to interrupt and answer,
+quality-checked examples (§ 3.1). Then, we collect                with this timing referred to as buzzpoints I (Fig-
+model guesses and confidences on these questions                  ure 3). However, modern LLMs do not operate
+(§ 3.2), and compare them against human perfor-                   this way: they generate an output given an input.
+mance in a live competition (§ 3.2.2).                            Thus, we first extract guesses from models and hu-
+                                                                  mans offline to assess teams on the same questions
+3.1    Question writing process
+                                                                  uniquely identifying an answer (examples in Figures 2 and
+                                                                      4
+                                                                        20% literature, 20% history, 20% science, 15% arts, 15%
+Collecting QA pairs from expert writers. We                       social sciences, 5% geography and current events, and 5%
+recruit experienced question writers and editors                  myth, pop culture, and other (Appendix B).
+                                                                      5
+to ensure that questions are high-quality. We hire                      The model’s confidence for correct answers should re-
+                                                                  main low for all but the last two sentences; clues that trigger
+six writers and ten editors to author the questions               high-confidence, incorrect model guesses are encouraged.
+(qualifications in Appendix D.3). The questions                       6
+                                                                        For purposes of our analysis, a clue is a substring of
+contain 575–650 words 3 and cover content across                  the full question, averaging 13 words or 35 characters, in-
+                                                                  crementally extending from the beginning. Clues are split at
+   3
+     We refer to these as questions although they are not gram-   whitespace boundaries and may contain multiple pieces of
+matical questions, but rather sequences of sentences with clues   information about the answer.
+Figure 2: Example question on Chinese literature (with the answer of three) being written in the interface. Writers
+compose questions in the left box. On the right, they see the model’s guess and confidence after every sentence and
+the point at which the model would buzz in and attempt to answer. Writers learn which sentences make it harder
+for models to answer correctly and refine their questions to be sufficiently hard for models but still answerable by
+humans. This incremental, adversarial format permits granular calibration measurement.
+
+
+   Q: In a reference to an object notably missing from one        swer equivalence (PEDANTS, Li et al., 2024b),
+of these works, Diemut Strebe used genetic samples from           followed by manual verification by dataset editors.
+a man’s great-great-grandnephew to clone a certain feature.
+In one of these works, Utagawa Togokuni’s Geishas in a            We store the resulting guesses and two forms of
+Landscape I GPT-4o: “Rodin statues” hangs on a yel-               confidence from LLMs, token logits 7 and verbal-
+low wall behind a man in a fur-brimmed hat. The back-             ized confidence. Logit-based confidence are the
+side of The Potato Peeler includes one of these works fea-
+turing a man in a straw hat. One work shows a man in a
+                                                                  average of the exponentials of the token logit prob-
+light-blue green suit against a light-green-blue swirling back-   abilities, while verbalized confidence prompts mod-
+ground, and another dedicated to Gauguin shows subject with       els to directly express confidence in the output to-
+cropped hair and a red beard. For 10 points, a Dutch artist
+                                                                  kens (Appendix D.4).
+ I H1: “Van Gogh self-portraits” painted what portraits
+of himself with a bandaged ear?                                      Precomputed model buzzpoints. While our
+ANSWER: self-portraits of Vincent Van Gogh                        metric, C AL S CORE (§ 4.1), uses the raw confi-
+                                                                  dence values from continuous probabilities. On the
+Figure 3: While GPT-4o buzzes too early with an                   other hand, in our competitions (§ 3.2.2),models
+ I incorrect answer , losing 5 points, the human team             can only buzz at a single position. Thus, we turn
+(H1) buzzes later with a I correct answer , earning               the continuous confidence into a binary buzz by
+10 points. Both teams must balance accuracy and speed;            thresholding to indicate when the model buzzes.
+here, GPT-4o shows poorer calibration than H1.                    For each model, we set a threshold based on hu-
+                                                                  man gameplay data on preexisting non-adversarial
+                                                                  questions (He et al., 2016a) (Appendix E.3). This
+(§3.2.1). We then compute the model buzzpoints
+                                                                  threshold is chosen to maximize the probability
+for each clue. Finally, using these precomputed
+                                                                  of the model buzzing correctly before the average
+model buzzpoints, we host live human–computer
+                                                                  trivia player as estimated by the expected wins met-
+competitions to collect real-time human buzzpoints
+                                                                  ric from Rodriguez et al. (2019a). When the logit
+(§3.2.2).
+                                                                  score exceeds the threshold, the model buzzes in,
+3.2.1    Offline human and model buzzpoints                       marking its buzzpoint (Appendix E.2).
+                                                                     Offline human guesses. To compute hu-
+Model guesses and confidence. We first break
+                                                                  mans’ raw accuracy, independent of confidence
+each question into clues. We then retrieve a model’s
+                                                                  (§ 5.1), we survey fifteen players on 35–40 held-
+guess given the first n clues with a prompt us-
+                                                                  out GRACE questions. Like the models, play-
+ing a TF - IDF retriever to select similar question-
+                                                                  ers view clues, submit their guess after each clue,
+answer pairs from QA datasets (Appendix D.1).
+To determine if model guesses were correct, our                     7
+                                                                      GRACE answers are short, typically 3-4 words long,
+post-processing uses both transformer-based an-                   making token logits a reliable measure of confidence.
+and indicate whether they would buzz at that                 4     Human-Grounded Calibration
+point. However, this data collection format is time-               Evaluation
+consuming and tedious (one player called it “re-
+markably hard”), potentially reducing player en-             To compare model and human calibration, we ana-
+gagement and response quality. Instead, we collect           lyze response correctness and buzz decisions. Then,
+human calibration data through a fast-paced trivia           we introduce a baseline metric, C AL S CORE. Un-
+tournament.                                                  like traditional calibration metrics, C AL S CORE fa-
+                                                             cilitates per-instance calibration analysis, which
+                                                             lets us identify specific questions on which models
+3.2.2   Human buzzpoints, live competition                   are especially miscalibrated. In addition, it fac-
+                                                             tors in human performance on the same question,
+GRACE records human and computer guess cor-
+                                                             to penalize cases in which models are confidently
+rectness on interruptible questions designed to chal-
+                                                             incorrect when humans are uncertain (§ 4.1).
+lenge model calibration. A human moderator reads
+each question to both teams (a model and a team of
+                                                             4.1    Human-grounded metric: C AL S CORE
+humans). Teams compete by buzzing to interrupt
+and answer. Model buzzpoints are computed in                 C AL S CORE evaluates model calibration error while
+advance (§ 3.2.1). When the model’s confidence               incorporating human buzzpoints. This adjustment
+exceeds the threshold, the reading stops with a buzz         reflects the structure of the competition—models
+sound, and the model’s guess is announced.                   must be confidently correct before humans know
+    Human buzzpoints. In contrast, human buzz-               the answer. The adjustment also places higher
+points are recorded in real time when the moderator          weight on instances where model errors are more
+is interrupted. Players press a physical buzzer when         likely to mislead users—if a model is confidently
+confident in an answer, and the moderator verifies if        incorrect when humans are still uncertain, humans
+the answer is correct. We log the timing of human            are less likely to recognize and override the error
+teams’ buzzes and answer correctness.                        (§ 5.2).
+                                                                Using the live competition data, we track the
+   If a team answers incorrectly, the moderator con-
+                                                             proportion of humans answering correctly up to
+tinues reading until the other team buzzes in. Be-
+                                                             a specific clue so that the metric applies higher
+cause earlier clues are harder, more skilled teams
+                                                             penalties and rewards for earlier (harder) clues. To
+tend to buzz earlier, while less skilled teams wait
+                                                             measure the expected probability of a team buzzing
+until near the end. Thus, teams must be knowledge-
+                                                             correctly on a given question, we consider teams’
+able and well-calibrated to buzz optimally.
+                                                             buzzes at each clue t of question q. We define
+   Human players in live competitions. Our three             ht as the cumulative probability of a human team
+competitions consist of a total of 93 matches involv-        correctly buzzing up to clue t, calculated as the
+ing 17 human trivia teams and three LLMs (GPT-               number of correct buzzes by human teams up to
+4o, GPT-4, and Mistral-7b-Instruct). Of these, 55            t divided by total buzzes by human teams up to t.
+are human vs. model matches, while 38 are human              For model responses, gt indicates the correctness
+vs. human matches. For the matches, the 243 QA               of a model’s guess at clue t (1 if correct, -1 if not),
+pairs are divided into 12 sets of 20, stratified by          and ct indicates the model’s confidence in its guess.
+category, with three questions for tiebreakers.
+   Hosting real-time competitions with human play-           4.2 MCE: Unadjusted model calibration error
+ers provides several benefits: (1) direct compari-           The normalized expectation r(Et [gt ct ]), calculated
+son of confidence calibration between humans and             over clues in a single question, measures calibra-
+models on the same questions, (2) recruiting ex-             tion as the expectation that the model answers cor-
+perienced players skilled in calibrating their an-           rectly, weighted by confidence (where r(x) renor-
+swers, 8 and (3) validating that questions are human-        malizes to a [0, 1] range; see Appendix J). Con-
+answerable and unambiguous, as an additional                 versely, 1 − r(Et [gt ct ]) evaluates the model’s cal-
+quality check for the dataset.                               ibration error (MCE) on that question. High-
+                                                             confidence incorrect answers and low-confidence
+   8
+     After the competitions, we survey players about their   correct answers result in higher error, indicating
+experience levels and individual strengths (Appendix F.2).   poor calibration on question q.
+                                                                                                               Correct Buzzes             Incorrect Buzzes
+4.3   C AL S CORE using GRACE                                                                    2.5                                               Human Q1
+
+
+
+
+                                                                Cumulative Buzzes (Normalized)
+                                                                                                                                                   Human Q2
+C AL S CORE incorporates human performance into                                                  2.0                                               Human Q3
+                                                                                                                                                   Human Q4
+MCE. This facilitates identification of specific                                                 1.5                                               GPT-4o
+                                                                                                                                                   Mistral-7b-Instruct
+cases where models are less calibrated than hu-                                                  1.0                                               GPT-4
+mans; rewards models more for being confidently
+                                                                                                 0.5
+correct before humans know the answer (simulat-
+ing the competition setting); and penalizes them                                                 0.0
+                                                                                                       0 1 2 3 4 5 6 7 8 9 10 11   0 1 2 3 4 5 6 7 8 9 10 11
+                                                                                                                Seen Clues                  Seen Clues
+more for being confidently incorrect at that stage,
+placing greater weight on a higher-stakes error.                  Figure 4: Each team’s cumulative buzzes (normalized by
+   We thus weight the calibration at clue t by                    the number of matches each team participated in). The
+(1 − ht ), the proportion of humans who have not                  top quartile of human teams (Q4) achieves the highest
+yet answered correctly by clue t. A high score                    cumulative correct buzz rate, peaking over twice as high
+of r(Et [(1 − ht )gt ct ]) indicates that the model               as the best model. Top human teams are thus more
+is well-calibrated relative to human buzz perfor-                 accurate and better-calibrated than models, even as the
+                                                                  difficulty changes when more clues are revealed.
+mance. 9 Conversely, we estimate the expected
+probability for cases where the model does not im-
+                                                                  as a benchmark. Let Kt = ht te=0 be ge , where
+                                                                                                  ∑︁
+prove over humans, either due to incorrect answers
+or low confidence:                                                the system buzzes correctly before or at step t. The
+                                                                  full metric is:
+   C AL S COREq = 1 − r(Et [(1 − ht )gt ct ]).           (1)
+                                                                                                  C AL S CORE2 =
+   This adjustment evaluates the model’s calibra-                                                     (︄ T       (︃   T        T
+                                                                                                                           )︃ ∑︂      )︄
+                                                                                                         ∑︂          ∑︂
+tion error relative to human calibration perfor-                                                  1−        Kt + 1 −    ht       bt gt ,                           (2)
+mance on the same question. We then define                                                                    t=0                  t=0     t=0
+C AL S CORED , the human-adjusted model calibra-
+tion error for a benchmark D, as the average of                 which rewards early correct buzzes relative to hu-
+C AL S COREq across all questions L.                            mans and penalizes overconfidence when humans
+                                                                abstain. Further details are in Appendix M.
+4.4   C AL S CORE2 using GRACE
+                                                                  5                                    Model Calibration Evaluation
+We introduce C AL S CORE2 as a secondary metric
+to evaluate model calibration, following the no-                  GRACE helps to evaluate differences between hu-
+tation in §4.3. We define the buzz confidence bt ,                man and model calibration (§5.1). We also validate
+the probability that the model will buzz (i.e., be                the dataset’s difficulty granularity and discuss cali-
+confident) at time t. This depends on the model’s                 bration errors using our proposed metric (§5.2) and
+confidence ct and the probability of not buzzing in               qualitative analysis (§5.3).
+earlier steps:
+                                                                  5.1 Comparing human and model calibration
+                            t−1
+                            ∏︂                                    Buzz performance. To compare human and model
+                  bt = ct       (1 − ci ).                        calibration, we first examine when and whether
+                            i=0
+                                                                  each team buzzes on the question, as well as
+The model’s score at each step is St = bt gt , where              the correctness of their answers. Figure 4 gives
+gt = 1 if the model is correct and 0 otherwise. The               each team’s cumulative buzzes over the number of
+                                     ∑︁T
+total score for a question is Sq = t=0 St , with                  matches each team participated in. The 17 human
+the constraint Tt=0 bt = 1, ensuring the model
+                ∑︁                                                teams are divided into quartiles, from Q1 (bottom)
+eventually buzzes.                                                to Q4 (top), according to their total correct buzzes.
+   To compare model and human calibration, we                     Human teams, especially the top quartile, achieve
+define C AL S CORE2 , using human buzz probabili-                 the highest cumulative correct buzz rate (peaking
+ties ht (proportion answering correctly by step t)                in the middle of the questions), demonstrating their
+                                                                  ability to confidently infer correct answers with
+   9
+     A model is perfectly calibrated when it buzzes with full     fewer clues and indicating better accuracy and cal-
+confidence (ct = 1), is always correct (gt = 1), and an-
+swers before humans buzz correctly (ht = 0), resulting in         ibration than models. In contrast, GPT-4 exhibits
+r(Et [(1 − ht )gt ct ]) = 1.                                      a moderate cumulative correct buzz rate, which is
+                          Human Q1
+                          Human Q2
+                0.8       Human Q3
+                          Human Q4
+                          GPT-4
+                0.6       GPT-4o
+
+
+
+Accuracy Rate
+                          Mistral-7b-Instruct
+                          LLama-2-70b-Chat
+                          Llama-3.1-8B-Instruct
+                0.4       Llama-3.1-70B-Instruct
+
+
+                0.2
+
+                                                                          Figure 6: Humans are far more likely than models to
+                0.0
+                      0          20        40        60        80   100   buzz in when they are correct (left), and typically less
+                                 Percentage of Clues Revealed (%)         likely to buzz in when they are incorrect (right), indicat-
+                                                                          ing that models remain miscalibrated relative to humans
+Figure 5: Comparison of human and model average                           even when explicitly controlling for accuracy. (Due to
+accuracy rates as more clues are revealed (whether the                    the smaller sample size of human buzzpoints in the sur-
+team’s guess is correct after seeing the first n clues).                  vey data, we use halves instead of quartiles here.)
+As more clues are revealed, accuracy improves for both
+models and humans. Models often answer incorrectly
+until most clues are provided, and human accuracy in-                     under 50% accuracy until at least 90% of clues
+creases more rapidly, validating that each instance be-                   are provided, highlighting significant room for im-
+comes easier for both humans and models and that most                     provement on this benchmark. To measure human
+humans can answer correctly by the end.                                   accuracy per corresponding clue, we used offline
+                                                                          human responses (§3.2.1; quartiles calculated per
+only briefly higher than the top human teams and                          Appendix F.3).
+lower than 50% of human teams for most of the                                 Notably, the bottom three quartiles of humans
+question. Meanwhile, Mistral-7b-Instruct lags sig-                        are less accurate than top models for most of the
+nificantly behind all other teams, indicating poor                        question (Figure 5), yet still typically outperform
+calibration. In addition, GPT-4 and GPT-4o ex-                            models on maximizing correct buzzes relative to in-
+hibit substantially higher incorrect buzz rates than                      correct buzzes (Figure 4). This trend suggests that
+human teams (right plot). All models, especially                          models’ relatively high rate of incorrect buzzes
+GPT-4, are overconfident early in the questions                           and low rate of correct buzzes is due to mis-
+when little information is available: they are espe-                      calibration, not inaccuracy. We investigate this
+cially miscalibrated relative to humans when the                          distinction further in the next section.
+question is still hard. Overall, the models tend                              Conditional likelihood of correct answers.
+to buzz incorrectly more often than humans and                            While the tournament allows us to observe P (g =
+correctly less often, indicating overconfidence in                        1 | b), the likelihood that a team’s guess is correct
+wrong answers and underconfidence in correct                              (g = 1) when they buzz (b), we also aimed to
+ones.                                                                     compare how often teams are confident enough
+                                                                          to buzz when correct, P (b | g = 1), and when in-
+   Difficulty granularity of each question. To
+                                                                          correct, P (b | g = 0). Using the offline human
+evaluate model calibration over a range of diffi-
+                                                                          responses (§3.2.1), we estimate P (b | g = 1) for
+culty levels for models, we asked the writers to
+                                                                          each human team. For each player, we calculate
+write questions that are easier to answer as more
+                                                                          Pplayer (b | g = 1): the number of instances when
+clues are revealed (§ 3). To validate this design,
+                                                                          a player buzzed in correctly with n clues revealed,
+we examine model and human correctness as the
+                                                                          divided by the number of instances when a player’s
+percent of clues revealed increases. For models, we
+                                                                          guess was correct with n clues revealed. We then
+consider the correctness of a model’s guess for the
+                                                                          estimate P (b | g = 1) for the top and bottom half
+first n clues. The questions in GRACE are appro-
+                                                                          of respondents (Appendix F.3) as the average of
+priately challenging and become easier for models
+                                                                          Pplayer (b | g = 1) across all surveyed players in
+and humans as more clues are revealed (Figure 5).
+                                                                          that half. Finally, we compare this estimation with
+Human team accuracy (blue) increases steadily, in-
+                                                                          P (g = 1 | b) for the tested models. We follow the
+dicating that question difficulty indeed decreases
+                                                                          same process to estimate P (b | g = 0). 10 The re-
+as clues are revealed for human players. More-
+                                                                            10
+over, even top models like GPT-4 and GPT-4o have                                 For all estimates, we consider only the guess correctness
+                                         Verbalized-based Confidence
+                                                                                                           Q: One thinker’s argument that this claim is a "hyperbolic
+ Model                     Brier Score         ECE              MCE         C AL S CORE   C AL S CORE2
+
+ GPT-4                    0.274     2     0.259      2     0.584       1   0.588     1    0.878    1
+                                                                                                         point which ought to be silent" was subject to a response
+ GPT-4o                   0.266     1     0.224      1     0.601       2   0.604     2    0.900    2     titled "My Body, This Paper, This Fire." Jacques Derrida
+ Llama-3.1-70B-Instruct
+ LLama-2-70b-Chat
+                          0.373
+                          0.490
+                                    3
+                                    4
+                                          0.392
+                                          0.570
+                                                     3
+                                                     4
+                                                           0.685
+                                                           0.739
+                                                                       3
+                                                                       4
+                                                                           0.719
+                                                                           0.803
+                                                                                     3
+                                                                                     4
+                                                                                          0.955
+                                                                                          0.961
+                                                                                                   3
+                                                                                                   4
+                                                                                                         first coined the word "différance" in a book responding to
+ Llama-3.1-8B-Instruct    0.623     5     0.693      5     0.774       5   0.843     5    0.978    5     Michel Foucault’s Madness and Civilization and partially
+ Mistral-7b-Instruct      0.716     6     0.784      6     0.790       6   0.881     6    0.973    6
+                                                                                                         titled for this statement. In The Search for Natural Light,
+                                           Logit-based Confidence
+                                                                                                         a premise involving doubt was added to this statement. This
+ Model                     Brier Score         ECE              MCE         C AL S CORE   C AL S CORE2
+                                                                                                         claim, which Pierre Gassendi criticized for being circular, was
+ GPT-4o                   0.341     3     0.353      2     0.654       2   0.661     1    0.679    2
+ Llama-3.1-70B-Instruct   0.323     2     0.339      1     0.651       1   0.679     2    0.661    1
+                                                                                                         presented as an example of a "clear and distinct" idea. For
+ GPT-4                    0.380     4     0.388      3     0.672       3   0.684     3    0.684    3     10 points, name this first principle coined in René Descartes’
+ Llama-3.1-8B-Instruct    0.302     1     0.397      4     0.675       4   0.718     4    0.718    4
+ Mistral-7b-Instruct      0.553     5     0.677      5     0.766       5   0.846     5    0.846    5
+                                                                                                         Discourse on the Method.
+ Llama-2-70b-Chat         0.774     6     0.829      6     0.825       6   0.921     6    0.921    6
+                                                                                                         ANSWER: "I think, therefore I am" [or "cogito, ergo sum"]
+Table 1: Across both confidence elicitation methods,
+all models display greater error under human-adjusted                                                    Figure 7: Sample question on which models are poorly
+C AL S CORE and C AL S CORE2 compared to MCE                                                             calibrated.
+(C AL S CORE without human adjustment). C AL S CORE
+thus captures errors that existing methods overlook:
+cases where models underperform relative to humans                                                       rect. Thus, C AL S CORE and C AL S CORE2 cap-
+by being confidently wrong or underconfident when cor-                                                   ture that models are especially ill-calibrated
+rect.                                                                                                    compared to humans, and factoring in human per-
+                                                                                                         formance reveals more room for improvement on
+sults indicate that even the strongest models are                                                        LLM calibration. The gap between MCE and the
+less confident than humans on correct answers                                                            C AL S COREs widens for worse-performing mod-
+and more confident on incorrect ones (Figure 6).                                                         els, suggesting that weaker models are even more
+For most questions, all humans are more than 50%                                                         miscalibrated relative to stronger models when
+likely to buzz when correct, while models remain                                                         factoring in human performance. Additionally,
+below 45%, indicating lower confidence in correct                                                        C AL S COREs report higher errors than ECE and
+answers. Among the models, GPT-4 was most                                                                Brier scores across both confidence elicitation
+likely to buzz incorrectly, reflecting its confidence                                                    methods for most models, underscoring calibration
+in wrong answers.                                                                                        deficiencies that previous metrics underestimate. 12
+   As clues are revealed, humans become more
+                                                                                                         5.3      Qualitative analysis and model errors
+likely to buzz when they know the correct answer,
+while models become less likely to buzz. This                                                            Miscalibrated instances from C AL S CORE. All
+suggests that seeing more clues strengthens human                                                        six models exhibit similar patterns for the ques-
+confidence, but not model confidence. 11                                                                 tions on which they were most- and least-calibrated
+                                                                                                         under C AL S CORE (Figure 7). Models did best
+5.2        C AL S CORE analysis                                                                          on questions that mention concrete proper nouns
+We evaluate the calibration error of six LLMs on                                                         closely associated with the answer, even on obscure
+GRACE using existing metrics (ECE and Brier                                                              topics: for example, a question on Ireland that gives
+scores; Appendix G) and C AL S CORE (§ 4). For                                                           the titles of Irish songs, a question on telomeres
+each clue in a question, we collect logit-based and                                                      that mentions the protein TRF2, and a question on
+verbalized confidences to compute metric scores.                                                         Brooklyn that mentions the neighborhood of Mid-
+   C AL S CORE and C AL S CORE2 correlate with                                                           wood. Models tend to be least-calibrated on ques-
+ECE and Brier score results (Table 1); however,                                                          tions with multiple plausible answers (e.g., one on
+across both confidence elicitation methods, all mod-                                                     fish as a Buddhist symbol, since other animals also
+els display greater error under two human-adjusted                                                       have symbolic meanings in Buddhism). Models
+metrics compared to MCE (C AL S CORE without                                                             also struggle on questions that use descriptions in-
+human adjustment). The two metrics capture er-                                                           stead of titles (e.g. a question that describes music
+rors that existing methods overlook: cases where                                                         by Maurice Ravel, and one that describes Jewish
+models underperform relative to humans by be-                                                            birth ceremonies).
+ing confidently wrong or underconfident when cor-                                                           Qualitative feedback. We survey the human
+and buzz statistics up to the point when a player first buzzes,
+                                                                                                         players for feedback on model abilities. Differ-
+as later guesses do not count in real competitions.                                                      ences in model calibration are visible to the play-
+   11
+      A small fraction of human participants (n=1) has a sharp
+                                                                                                           12
+spike in incorrect buzzes near the end of a question.                                                           All four metrics use a [0,1] scale; lower is better.
+ers: several find GPT-4 “too aggressive,” while         benefits: we found that participants were atten-
+Mistral seems much weaker, often buzzing late in        tive and enthusiastic; moreover, in-person data col-
+the question. One player notes that the models “ob-     lection (especially “gamified” approaches) raises
+viously knew a lot, but were quite bad at gauging       awareness of and interest in AI.
+how well they knew something to [buzz].” Others
+note that models tend to buzz on “more concrete         6   Conclusion
+clues” and struggle with multi-step reasoning. For      For users to trust LLMs, they need assurance
+example, a question on Alice Walker mentions her        that these models will not confidently produce
+trip to Eatonville to write about local author Zora     wrong answers. To address this, GRACE offers
+Neale Hurston. Players note that GPT-4 incorrectly      a benchmark for fine-grained calibration evalua-
+guesses “Zora Neale Hurston,” while human play-         tion, grounded in human calibration. Our analyses
+ers correctly say “Alice Walker.”                       on GRACE reveal that models are often miscali-
+   Players also note that when models were              brated relative to well-informed humans. Specif-
+incorrect, they give more “unreasonable” an-            ically, model calibration errors came from diffi-
+swers than humans do. For example, mod-                 culty with abstract descriptions, far-fetched incor-
+els incorrectly answer a question on the treatise       rect guesses, and confidently incorrect answers
+Philosophical Investigations with “Fermat’s Lit-        given few clues. Our new metric, C AL S CORE, com-
+tle Theorem” and “The Lion, the Witch and the           bined with GRACE, evaluates the performance of
+Wardrobe.” Guessing an equation and a children’s        six LLMs, revealing significant room for improve-
+book with high confidence for a work of philosophy      ment. GRACE provides a blueprint for develop-
+suggests serious miscalibration, since either option    ing human-focused improvements to calibration:
+should be completely outside the realm of possibil-     improving verbalized confidences that measurably
+ity; no human players gave answers so distant from      help human decision-making, personalizing absten-
+the correct one. Other model errors not observed        tion based on individual human skill, and measur-
+among human players include buzzing before any          ing these interactions via human-model teaming.
+substantive clues are revealed, answering with a
+song title for a question asking for a surname, and     Limitations
+hallucinating inexistent schools of philosophy.         Since GRACE focuses on a question-answering
+   Model and human strengths between question           task, its applicability to broader NLP domains re-
+topics differ greatly. We examine models’ and hu-       mains unexplored. Future work should explore
+mans’ ratios of correct to incorrect buzzes per cate-   calibration in other open-ended generation settings
+gory. Human players are best at literature, but this    to assess generalizability. Furthermore, while our
+is the weakest or second-weakest category for all       proposed metric, C AL S CORE, serves as a baseline,
+models. All models did relatively well on science.      it is not exhaustive of all forms of uncertainty and
+GPT-4o is much stronger at social science, arts,        miscalibration. For instance, enhancing this metric
+and science than other categories, and slightly out-    for human-AI collaboration could help users deter-
+performs humans for every category; GPT-4 was           mine when to rely on models and when to defer to
+worse than the humans for all categories.               human judgment.
+   All human participants in our competitions were
+experienced players, but we find that calibration       Acknowledgments
+performance varies greatly even among these ex-         Many thanks to the question editors who helped to
+perts: stronger humans substantially outperform         create the dataset: Ankit Aggarwal, Jaimie Carl-
+top models, but not all humans do. A general take-      son, Bradley Kirksey, Linus Luu, Shahar Schwartz,
+away for future model-human comparisons on tasks        Noah Sheidlower, and Jonathan Tran. Special
+involving calibration is that variance in human skill   thanks to the writers. This research was only possi-
+can greatly affect the outcome of a comparison.         ble due to the generous participation of the players
+   A side benefit of conducting live human-model        who competed in the tournaments (special thanks to
+competitions was a significant degree of commu-         Joy An, Andrew Gao, Kevin Yu, Alex Stonemanxa,
+nity involvement from trivia enthusiasts who were       Priyanka Raghavan, and Magdalena Lederbauer)
+not researchers. In-person data collection, though      and the moderators who read the questions. We
+more involved than crowdsourced data, offers other      thank Lakshya Agrawal, Nishant Balepur, Nicholas
+Tomlin, Swabha Swayamdipta, and Irene Ying for              Chuan Guo, Geoff Pleiss, Yu Sun, and Kilian Q. Wein-
+providing feedback on earlier drafts.                         berger. 2017. On calibration of modern neural net-
+                                                              works. In Proceedings of the 34th International Con-
+   This research was partly supported by an NSF
+                                                              ference on Machine Learning - Volume 70, ICML’17,
+GRFP grant. Sung and Boyd-Graber are supported                page 1321–1330. JMLR.org.
+by NSF Grant IIS2403436. Opinions, findings, con-
+clusions, or recommendations expressed here are             He He, Jordan Boyd-Graber, Kevin Kwok, and Hal
+                                                              Daumé, III. 2016a. Opponent modeling in deep re-
+those of the authors and do not necessarily reflect           inforcement learning. In Proceedings of The 33rd
+the views of the sponsors.                                    International Conference on Machine Learning, vol-
+                                                              ume 48 of Proceedings of Machine Learning Re-
+                                                              search, pages 1804–1813, New York, New York,
+References                                                    USA. PMLR.
+Neil Band, Xuechen Li, Tengyu Ma, and Tatsunori             He He, Jordan Boyd-Graber, Kevin Kwok, and Hal
+  Hashimoto. 2024. Linguistic calibration of long-            Daumé III. 2016b. Opponent modeling in deep rein-
+  form generations. In Proceedings of the 41st Interna-       forcement learning.
+  tional Conference on Machine Learning, ICML’24.
+  JMLR.org.                                                 Yuheng Huang, Jiayang Song, Zhijie Wang, Shengming
+                                                              Zhao, Huaming Chen, Felix Juefei-Xu, and Lei Ma.
+Jordan Boyd-Graber, Brianna Satinoff, He He, and Hal          2023. Look before you leap: An exploratory study of
+   Daumé III. 2012. Besting the quiz master: Crowd-           uncertainty measurement for large language models.
+   sourcing incremental classification games. In Pro-         arXiv preprint arXiv:2307.10236.
+   ceedings of the 2012 Joint Conference on Empiri-
+   cal Methods in Natural Language Processing and           Evgenia Ilia and Wilker Aziz. 2024. Predict the next
+   Computational Natural Language Learning, pages             word:< humans exhibit uncertainty in this task and
+  1290–1301, Jeju Island, Korea. Association for Com-         language models _>. In Proceedings of the 18th
+   putational Linguistics.                                    Conference of the European Chapter of the Associa-
+                                                              tion for Computational Linguistics, volume 2, pages
+Glenn W Brier. 1950. Verification of forecasts ex-            234–255.
+  pressed in terms of probability. Monthly weather
+  review, 78(1):1–3.                                        Andrew Ilyas, Shibani Santurkar, Dimitris Tsipras, Lo-
+Richard Caruana. 2019. Friends don’t let friends deploy       gan Engstrom, Brandon Tran, and Aleksander Madry.
+  black-box models: The importance of intelligibility         2019. Adversarial examples are not bugs, they are
+  in machine learning. In Proceedings of the 25th ACM         features. Advances in neural information processing
+  SIGKDD International Conference on Knowledge                systems, 32.
+  Discovery & Data Mining, KDD ’19, page 3174,              Harmanpreet Kaur, Harsha Nori, Samuel Jenkins,
+  New York, NY, USA. Association for Computing                Rich Caruana, Hanna Wallach, and Jennifer Wort-
+  Machinery.                                                  man Vaughan. 2020. Interpreting interpretability:
+Jiawen Deng, Kiyan Heybati, and Hemang Yadav. 2025.           understanding data scientists’ use of interpretability
+   Development and validation of machine-learning             tools for machine learning. In Proceedings of the
+   models for predicting the risk of hypertriglyceridemia     2020 CHI conference on human factors in computing
+   in critically ill patients receiving propofol sedation     systems, pages 1–14.
+   using retrospective data: a protocol. BMJ open,
+                                                            Urja Khurana, Eric Nalisnick, Antske Fokkens, and
+   15(1):e092594.
+                                                              Swabha Swayamdipta. 2024. Crowd-calibrator: Can
+Julian Eisenschlos, Bhuwan Dhingra, Jannis Bulian,            annotator disagreement inform calibration in subjec-
+   Benjamin Börschinger, and Jordan Boyd-Graber.              tive tasks?
+   2021. Fool me twice: Entailment from Wikipedia
+   gamification. In Proceedings of the 2021 Conference      Douwe Kiela, Max Bartolo, Yixin Nie, Divyansh
+   of the North American Chapter of the Association           Kaushik, Atticus Geiger, Zhengxuan Wu, Bertie Vid-
+   for Computational Linguistics: Human Language              gen, Grusha Prasad, Amanpreet Singh, Pratik Ring-
+  Technologies, pages 352–365, Online. Association            shia, Zhiyi Ma, Tristan Thrush, Sebastian Riedel,
+   for Computational Linguistics.                             Zeerak Waseem, Pontus Stenetorp, Robin Jia, Mohit
+                                                              Bansal, Christopher Potts, and Adina Williams. 2021.
+Logan Engstrom, Andrew Ilyas, Shibani Santurkar,              Dynabench: Rethinking benchmarking in NLP. In
+  Dimitris Tsipras, Brandon Tran, and Aleksander              Proceedings of the 2021 Conference of the North
+  Madry. 2020.        Adversarial robustness as a             American Chapter of the Association for Computa-
+  prior for learned representations. arXiv preprint           tional Linguistics: Human Language Technologies,
+  arXiv:1906.00945.                                           pages 4110–4124, Online. Association for Computa-
+                                                              tional Linguistics.
+David A Ferrucci. 2012. Introduction to “this is wat-
+  son”. IBM Journal of Research and Development,            Lea Krause, Wondimagegnhue Tufa, Selene Báez San-
+  56(3.4):1–1.                                                tamaría, Angel Daza, Urja Khurana, and Piek Vossen.
+  2023. Confidently wrong: exploring the calibration      Pedro Rodriguez, Shi Feng, Mohit Iyyer, He He, and
+  and expression of (un) certainty of large language        Jordan Boyd-Graber. 2019a. Quizbowl: The case
+  models in a multilingual setting. In Proceedings          for incremental question answering. arXiv preprint
+  of the workshop on multimodal, multilingual natu-         arXiv:1904.04792.
+  ral language generation and multilingual WebNLG
+  Challenge (MM-NLG 2023), pages 1–9.                     Pedro Rodriguez, Shi Feng, Mohit Iyyer, He He, and
+                                                            Jordan L. Boyd-Graber. 2019b. Quizbowl: The
+Woosuk Kwon, Zhuohan Li, Siyuan Zhuang, Ying                case for incremental question answering. CoRR,
+ Sheng, Lianmin Zheng, Cody Hao Yu, Joseph E.               abs/1904.04792.
+ Gonzalez, Hao Zhang, and Ion Stoica. 2023. Effi-
+ cient memory management for large language model         Chenglei Si, Navita Goyal, Sherry Tongshuang Wu,
+ serving with pagedattention.                               Chen Zhao, Shi Feng, Hal Daumé III, and Jordan
+                                                            Boyd-Graber. 2023. Large language models help hu-
+Jingshu Li, Yitian Yang, Renwen Zhang, and Yi-              mans verify truthfulness–except when they are con-
+   chieh Lee. 2024a. Overconfident and unconfident          vincingly wrong. arXiv preprint arXiv:2310.12558.
+   ai hinder human-ai collaboration. arXiv preprint
+   arXiv:2402.07632.                                      Chenglei Si, Chen Zhao, Sewon Min, and Jordan Boyd-
+                                                            Graber. 2022. Re-examining calibration: The case of
+Zongxia Li, Ishani Mondal, Huy Nghiem, Yijun Liang,         question answering. In Findings of the Association
+  and Jordan Lee Boyd-Graber. 2024b. PEDANTS:               for Computational Linguistics: EMNLP 2022, pages
+  Cheap but effective and interpretable answer equiva-      2814–2829.
+  lence. In Findings of the Association for Computa-
+  tional Linguistics: EMNLP 2024, pages 9373–9398,        Elias Stengel-Eskin, Peter Hase, and Mohit Bansal.
+  Miami, Florida, USA. Association for Computational         2024. Lacie: Listener-aware finetuning for confi-
+  Linguistics.                                               dence calibration in large language models. ArXiv,
+                                                             abs/2405.21028.
+Ollie Liu, Deqing Fu, Dani Yogatama, and Willie
+  Neiswanger. 2024. Dellma: A framework for de-           Elias Stengel-Eskin and Benjamin Van Durme. 2023.
+  cision making under uncertainty with large language        Calibrated interpretation: Confidence estimation in
+  models. arXiv preprint arXiv:2402.02392.                   semantic parsing. Transactions of the Association for
+                                                             Computational Linguistics, 11:1213–1231.
+Sewon Min, Daniel Khashabi, Hannaneh Hajishirzi, and
+  Wen-tau Yih. 2022. Crepe: A contrastive approach        Katherine Tian, Eric Mitchell, Allan Zhou, Archit
+  for post-hoc calibration of pretrained language mod-      Sharma, Rafael Rafailov, Huaxiu Yao, Chelsea Finn,
+  els. In Proceedings of the 2022 Conference on Em-         and Christopher Manning. 2023. Just ask for cali-
+  pirical Methods in Natural Language Processing            bration: Strategies for eliciting calibrated confidence
+  (EMNLP).                                                  scores from language models fine-tuned with human
+                                                            feedback. In Proceedings of the 2023 Conference
+Sewon Min, Julian Michael, Hannaneh Hajishirzi, and         on Empirical Methods in Natural Language Process-
+  Luke Zettlemoyer. 2020. AmbigQA: Answering am-            ing, pages 5433–5442, Singapore. Association for
+  biguous open-domain questions. In Proceedings of          Computational Linguistics.
+  the 2020 Conference on Empirical Methods in Nat-
+  ural Language Processing (EMNLP), pages 5783–           Hugo Touvron, Louis Martin, Kevin Stone, Peter Al-
+  5797, Online. Association for Computational Lin-          bert, Amjad Almahairi, Yasmine Babaei, Nikolay
+  guistics.                                                 Bashlykov, Soumya Batra, Prajjwal Bhargava, Shruti
+                                                            Bhosale, et al. 2023. Llama 2: Open founda-
+Mahdi Pakdaman Naeini, Gregory Cooper, and Milos            tion and fine-tuned chat models. arXiv preprint
+ Hauskrecht. 2015. Obtaining well calibrated proba-         arXiv:2307.09288.
+ bilities using bayesian binning. In Proceedings of the
+ AAAI conference on artificial intelligence, volume 29.   Dennis Ulmer, Martin Gubri, Hwaran Lee, Sangdoo
+                                                            Yun, and Seong Oh. 2024. Calibrating large language
+Khanh Nguyen and Brendan O’Connor. 2015. Poste-             models using their generations only. In Proceedings
+  rior calibration and exploratory analysis for natural     of the 62nd Annual Meeting of the Association for
+  language processing models. In Proceedings of the         Computational Linguistics (Volume 1: Long Papers),
+  2015 Conference on Empirical Methods in Natural           pages 15440–15459, Bangkok, Thailand. Association
+  Language Processing, pages 1587–1598, Lisbon, Por-        for Computational Linguistics.
+  tugal. Association for Computational Linguistics.
+                                                          Eric Wallace, Pedro Rodriguez, Shi Feng, Ikuya Ya-
+Pranav Rajpurkar, Robin Jia, and Percy Liang. 2018.         mada, and Jordan Boyd-Graber. 2019. Trick me if
+  Know what you don’t know: Unanswerable ques-              you can: Human-in-the-loop generation of adversar-
+  tions for squad. In Proceedings of the 56th Annual        ial examples for question answering. Transactions of
+  Meeting of the Association for Computational Lin-         the Association for Computational Linguistics, 7:387–
+  guistics (Volume 2: Short Papers), pages 784–789.         401.
+Miao Xiong, Zhiyuan Hu, Xinyang Lu, YIFEI LI, Jie
+  Fu, Junxian He, and Bryan Hooi. Can llms express
+  their uncertainty? an empirical evaluation of confi-
+  dence elicitation in llms. In The Twelfth International
+  Conference on Learning Representations.
+Miao Xiong, Zhiyuan Hu, Xinyang Lu, Yifei Li, Jie
+  Fu, Junxian He, and Bryan Hooi. 2024. Can llms
+  express their uncertainty? an empirical evaluation of
+  confidence elicitation in llms.
+Wencong You and Daniel Lowd. 2022. Towards
+ stronger adversarial baselines through human-AI col-
+ laboration. In Proceedings of NLP Power! The First
+ Workshop on Efficient Benchmarking in NLP, pages
+ 11–21, Dublin, Ireland. Association for Computa-
+ tional Linguistics.
+Xinyan Yu, Sewon Min, Luke Zettlemoyer, and Han-
+  naneh Hajishirzi. 2023. CREPE: Open-domain ques-
+  tion answering with false presuppositions. In Pro-
+  ceedings of the 61st Annual Meeting of the Associa-
+  tion for Computational Linguistics (Volume 1: Long
+  Papers), pages 10457–10480, Toronto, Canada. As-
+  sociation for Computational Linguistics.
+
+Kaitlyn Zhou, Jena Hwang, Xiang Ren, and Maarten
+  Sap. 2024. Relying on the unreliable: The impact of
+  language models’ reluctance to express uncertainty.
+  In Proceedings of the 62nd Annual Meeting of the
+  Association for Computational Linguistics (Volume 1:
+  Long Papers), pages 3623–3643, Bangkok, Thailand.
+  Association for Computational Linguistics.
+Kaitlyn Zhou, Dan Jurafsky, and Tatsunori Hashimoto.
+  2023. Navigating the grey area: How expressions
+  of uncertainty and overconfidence affect language
+  models. In Proceedings of the 2023 Conference on
+  Empirical Methods in Natural Language Processing,
+  pages 5506–5524, Singapore. Association for Com-
+  putational Linguistics.
+A        Ethical Considerations                                  partly titles a work that opens by noting that people are born
+                                                                 naturally good, used to teach children. One hundred times this
+We address ethical considerations for dataset pa-                number titles a poetry anthology whose length was inspired
+pers, given that our work contains a new dataset,                by the Classic of Poetry. A man visits a hut this number of
+                                                                 times to recruit the Sleeping Dragon, and this many characters
+GRACE, and collects human responses in our user                  pledge to die on the same day while swearing the Peach Gar-
+study. We reply to the relevant questions posed in               den Oath. For 10 points, a Luo Guanzhong novel is titled for
+                                                                 how many kingdoms?
+the A C L 2022 Ethics F A Q .13
+                                                                 ANSWER: three [or san; accept Three Character Classic or
+   When collecting human responses and questions,                Three Hundred Tang Poems or Romance of the Three King-
+our study was pre-monitored by an official IRB                   doms; accept Sānzì Jı̄ng or Tángshı̄ sānbǎi shǒu or Sānguó
+review board to protect the participants’ privacy                Yǎnyì]
+rights. Buzzpoints in GRACE are anonymous;
+                                                                   Q: During this decade, some members of the Circle of Seven
+the feedback survey asked for respondents’ names                 participated in a group called the Golden Square and led a coup
+for purposes of compensation, but only aggregate                 to remove the Iraqi government from power. The Pahlavi ruler
+data and anonymous quotes are used in our study.                 and father of Mohammed Reza Shah was forced out of power
+                                                                 in this decade, during which a supply route was developed
+Before distributing the survey, we collected consent             to clue through port cities to Tehran. The Syria-Lebanon
+forms for the workers to agree that their answers                campaign of this decade was led by Archibald Wavell, who
+would be used for academic purposes. The trivia                  later lost in the Western Desert, where the Battle of El Alamein
+                                                                 took place. For 10 points, General Erwin Rommel fought in
+players were awarded a total $900 USD worth of                   what decade when most of World War Two occurred?
+online gift cards after the competitions. The prizes             ANSWER: 1940s [prompt on 40’s]
+were $150, $100, $50 for the first three places at
+each site where the tournament was held. The trivia                Q: One form of this adjective describes a distributed object
+                                                                 whose state is equivalent to a strictly serializable database.
+writers were paid $5 per question and editors paid               Weight decay tends to pull a sigmoid activation function to-
+$2.50 per question edited based on the estimated                 wards this adjective’s namesake "regime". If all activation
+completion time, and which was calculated to reach               functions of a deep neural network have this form, the output
+                                                                 is provably this type of mapping of the inputs. ReLU is a
+over $10 USD an hour (a rate higher than the US                  modified piecewise form of this type of function, which is
+national minimum wage of 7.50 USD ).                             the simplest separator in two-dimensional binary classifica-
+                                                                 tion. The most common shape of least-squares regression
+B        Dataset Details                                         is described by, for 10 points, what adjective that describes
+                                                                 functions of the form “y=mx+b”?
+B.1       Question distribution                                  ANSWER: linear [accept linearizable or word forms; prompt
+                                                                 on planar or hyperplanar or word forms]
+Questions in GRACE are distributed
+by subject as follows, based on the                                Q: The NSF’s IDP sets standards for tools used to extract
+standard        quizbowl       distribution       at             this substance, which include Foro 3000 and DISC. Coral,
+                                                                 certain protists, and this substance are the primary sources
+acf-quizbowl.com/distribution:                                   of delta-O-18 information. Very thin layers of this substance
+   • 20% literature: 5% American literature; 5%                  that look like oil spills are nicknamed for grease. Due to
+     British literature; 5% European literature; 5%              diffusion, clathrates and trapped air in this substance help to
+                                                                 track atmospheric gas concentrations, and may be retrieved
+     world and other literature                                  from masses that undergo calving, resulting in growlers or
+   • 20% history: American history; 5% world his-                bergy bits. For 10 points, name this material, which may
+     tory; 5% European history; 5% other history                 be extracted in core samples from namesake sheets or from
+                                                                 glaciers.
+   • 20% science: 5% Biology; 5% Chemistry;
+                                                                 ANSWER: ice [or frozen water; or solid water; accept ice
+     5% Physics; 5% computer science, math, and                  sheets; accept icebergs; prompt on snow or firn; prompt on
+     other science                                               glaciers; prompt on water
+   • 15% arts: 5% painting/sculpture; 5% classical
+                                                                   Q: Sephardic Jews have recently moved into this region near
+     music; 5% other arts                                        the original Vitagraph studios in Midwood. The world head-
+   • 15% social sciences: 5% religion; 5% philos-                quarters of the Chabad (“huh-BAHD”) movement is located in
+     ophy; 5%                                                    this region within a neighborhood where the Rebbe struck and
+                                                                 killed Gavin Cato in 1991. Many Jews of the Bobov sect live
+   • 5% geography and current events                             in this region’s neighborhood of Borough Park. This region,
+   • 5% myth, pop culture, and other                             where Jews clashed with Black residents in the Crown Heights
+                                                                 Riots, is where many Hasidic Jews live in the increasingly
+B.2       Sample dataset questions                               trendy neighborhood of Williamsburg. For 10 points, name
+                                                                 this New York City borough whose Jewish residents often live
+  Q: The protagonist of the story “Storm in a Teacup” obses-
+                                                                 near Coney Island.
+sively reads a book with this number in its title. This number
+                                                                 ANSWER: Brooklyn [or Kings County; prompt on New York
+    13
+         https://www.acm.org/code-of-ethics                      City]
+                     20%      40%      60%      80%     100%     D        Interface
+          GPT-4     31.07%   65.97%   82.20%   89.96%   93.68%
+TrickMe
+          GPT-4 O   28.77%   61.56%   77.90%   86.64%   91.11%   D.1       Guesser details
+          GPT-4     7.49%    23.62%   30.60%   40.40%   52.19%
+GRACE
+          GPT-4 O   8.59%    22.65%   32.05%   42.86%   53.78%
+                                                                 Before deciding when to buzz, models need to gen-
+                                                                 erate answers as clues are revealed. We call this pro-
+Table 2: GRACE and TrickMe dataset accuracy rate                 cess “guessing” and the model is used as a guesser.
+comparison. Similar as Figure 5, we compare the accu-            The full prompt of the guesser is in Appendix E.1,
+racy when the percentage of clues revealed (%) are 20%,          including the general instructions and retrieved ex-
+40%, 60%, 80%, 100%. GRACE results show much
+                                                                 amples. We train a TF-IDF model as the retriever
+lower accuracy compared with TrickMe, indicating that
+our dataset is more adversarial incrementally.
+                                                                 with past quizbowl questions following Rodriguez
+                                                                 et al. (2019a). 14 The main goal is to reduce hallu-
+                                                                 cinations and guide the model to learn the granular
+                                                                 clue and guess format.
+   Q: At the 2023 Women’s World Cup, the Spanish and
+Dutch teams sparked controversy by seemingly performing          D.2       Training buzzer for authoring interface
+this dance during training. Lyrics commonly sung to this
+dance describe putting one foot in front of the other “until     For the writing interface, the logistic regression
+the Sun shines on me.” The currently youngest lawmaker in
+one country led this dance while tearing papers in half. Par-
+                                                                 model was trained with two kinds of features: GPT-
+ticipants in a November 2024 march performed this dance in       3.5’s logit based confidence, and pre-designed fea-
+protest over a bill introduced by David Seymour that would       tures derived from the question, answer, and meta-
+affect the Treaty of Waitangi. For 10 points, recent protests
+in New Zealand have made use of what Māori ceremonial           data. Features include text-based metrics (e.g., TF-
+dance?                                                           IDF scores, overlaps between Llama predictions
+ANSWER: haka                                                     and TF-IDF guesses), probabilistic outputs (Llama
+                                                                 log and prompt probabilities), and contextual in-
+                                                                 dicators (sentence index, length, and presence of
+B.3    Sample question on which models are                       phrases like “10 points”). This model was trained
+       well-calibrated                                           on Rodriguez et al. (2019a), also pyramidal ques-
+                                                                 tions, using Llama-13b predictions (Touvron et al.,
+   Q: Sephardic Jews have recently moved into this region
+near the original Vitagraph studios in Midwood. The world
+                                                                 2023).
+headquarters of the Chabad movement is located in this region       A primary distinction from Wallace et al. (2019)
+within a neighborhood where the Rebbe struck and killed          is that their interface only showed the final correct
+Gavin Cato in 1991. Many Jews of the Bobov sect live in this
+region’s neighborhood of Borough Park. This region, where        guess.
+Jews clashed with Black residents in the Crown Heights Riots,
+is where many Hasidic Jews live in the increasingly trendy       D.3       Question editors and writers
+neighborhood of Williamsburg. For 10 points, name this New
+York City borough whose Jewish residents often live near         Writers and editors were recruited via a public
+Coney Island.                                                    quizbowl forum and were located in the US and UK.
+ANSWER: Brooklyn [or Kings County; prompt on New York            All editors underwent IRB training and had written
+City]                                                            for at least three previous tournaments. Writers
+                                                                 were paid $5 per question and editors paid $1 per
+                                                                 question edited. A head editor with 5 years of expe-
+C     Dataset Comparison for                                     rience writing and editing quizbowl questions, in-
+      Adversarialness                                            cluding as head editor of two previous tournaments,
+                                                                 supervised the writers and provided an additional
+We compare GRACE with the TrickMe                                quality check. The consent form is in Table 3.
+dataset (Wallace et al., 2019) on (1) question
+                                                                 D.4       Model confidence elicitation
+length and (2) question difficulty evaluation.
+Overall, GRACE questions are longer: GRACE                       We experiment two approaches to get the model
+has an average of 5.09 sentences per question,                   confidence score for a generated guess.
+while TrickMe has an average of 4.74 sentences.                  Token-logit based confidence. Log probability of
+We compare the difficulty based on the accuracy                  the generation is a common method to estimate the
+rate as the clues are revealed in Table 2. GRACE                     14
+                                                                    https://scikit-learn.org/stable/
+exhibits higher adversarialness throughout the                   modules/generated/sklearn.feature_
+incremental questions.                                           extraction.text.TfidfVectorizer.html
+Privacy Policy
+Introduction
+Welcome to ’Stump the Computer,’ hosted by the research group at xxx. Your participation in our research is voluntary and deeply valued.
+This Privacy Policy outlines how we handle the information you provide during your interaction with our research project.
+Purpose of the Study
+This research, conducted by xxx, aims to collect human-generated data for a fact verification system.
+Participants, like you, who enjoy trivia knowledge and trivia-related games, are invited to help us understand how humans and computers handle challenging questions.
+Information Collection and Use
+As you participate in this project, you will interact with an online interface to submit questions designed to challenge both human and computer intelligence.
+You may use a Google Doc, automatically generated in your Google Account, to draft these questions.
+We collect this data to enhance our research and improve the interaction models between humans and computers.
+Data Confidentiality
+We take your privacy seriously. All data collected during this study will be stored on a password-protected web server with encrypted storage.
+The server is in a secure access data center, managed professionally. Access to the data is strictly limited to the principal investigators of this study.
+After the study concludes, any personally identifiable information will be anonymized or destroyed to ensure your privacy.
+Potential Risks
+We acknowledge the risk of breach of confidentiality in any online activity.
+We have implemented robust security measures to mitigate such risks and protect your data.
+Benefits and Compensation
+While there is no direct personal benefit from participating, your contributions are invaluable in advancing research on human-computer interactions.
+Compensation for participating includes $5 per question written and $2.50 for each question edited.
+Your Rights
+Participation is entirely voluntary. You may withdraw at any time without penalty. Should you have any questions or need to report a concern, please contact:
+xxx
+Changes to This Policy
+We may update this policy periodically to reflect changes in our practices. Continued participation after such changes constitutes your acceptance of the new terms.
+Consent
+By signing up and participating, you affirm that you are at least 18 years old, have reviewed this policy, and consent to engage in this study.
+Your rights and privacy are paramount, and we are committed to protecting them.
+
+Thank you for participating in our task and contributing to the advancement of our research.
+
+
+                                                   Table 3: Consent form for question writers.
+
+
+model confidence (Nguyen and O’Connor, 2015).                                         scores from model outputs, we initially define the
+To get the confidence score in our setup, we retrieve                                 desired format based on the prompt. We then pro-
+the logit for each generated token, and take the aver-                                ceed to identify and print any cases where confi-
+age of the exponentials of these logit values (Huang                                  dence scores are not successfully extracted. By
+et al., 2023).                                                                        observing these cases, we can discern patterns and
+Verbalized confidence. Recent study shows ver-                                        refine our post-processing rules. This iterative ap-
+balized probabilities can be better calibrated than                                   proach allows us to capture as many corner cases
+log probabilities (Tian et al., 2023; Xiong et al.),                                  as possible, enhancing the robustness of our data
+which motivate us to include the verbalized confi-                                    extraction process.
+dence in our experiments. We follow the previous                                      E        Model Buzzpoint Generation
+prompt in Appendix E.1 and add the instructions
+from Tian et al. (2023) to return the confidence:                                     E.1       Guesser details
+       Given the following information, provide the title                             To retrieve a model’s top guess after n clues have
+       of the Wikipedia page that would best answer the                               been revealed, we prompt the model with the first
+       last question fragment. If you are not sure, just
+       give your best guess. If you don’t know, answer                                n clues from the question. To retrieve the best
+       None. The answer should be as short as possible.                               guess, we employ a "retrieval and guess" approach
+       While you give the guess, please also provide                                  to enhance QA performance, using the following
+       the probability that it is correct (0.0 to 1.0).
+       Give ONLY the guess and probability, no other                                  prompt:
+       words or explanation. For example:                                                      Given the following information, provide the title
+       The answer is: <most likely guess, as short                                             of the Wikipedia page that best answers the last
+       as possible; not a complete sentence, just the                                          question fragment. If unsure, provide your best
+       guess!>                                                                                 guess. The answer should be concise.
+       Probability: <the probability between 0.0 and                                           Question: {retrieved examples}
+       1.0 that your guess is correct, without any ex-                                         The answer is: {retrieved examples}
+       tra commentary whatsoever; just the probabil-
+       ity!>                                                                                   Question: {each clue}
+                                                                                               The answer is:
+       Question: {retrieved examples}
+       The answer is: {retrieved examples}                                            E.2       Process for calculating model buzzpoints
+       Question: {each clue}
+                                                                                      The process for calculating model buzzpoints fol-
+   To ensure accurate extraction of probability                                       lowed the steps below.
+Algorithm 1 Find model buzzpoints for a question                 quizbowl players. To incentivize teams to play
+Require: N , the number of clues in the question; and t, the     as well as possible, the top three teams in each
+  buzz threshold.                                                tournament were awarded a prize. The prizes were
+  Let n = 0
+  while n < N do                                                 $150, $100, $50 for the first three places at each site
+      Prompt the model to answer the question, given the first   where the tournament was held. The tournaments
+  n clues (Appendix E.1).                                        were all held in the US and the players were also
+      Compute the model’s confidence c in its top guess by
+  summing the log probabilities of the tokens comprising the     located in the U.S. The consent form is in Table 4.
+  guess.
+      if c > t then                                              F.2   Player expertise
+           Buzz in
+           break                                                 Respondents had an average of 5.5 years of previ-
+      n += 1
+                                                                 ous experience playing quizbowl. 22% of players
+                                                                 had studied or were currently studying in the physi-
+E.3    Assigning buzzer threshold                                cal sciences or engineering; 31% studied computer
+We used question data from the 2023 Expo                         science or math; 17% studied the humanities; 13%
+quizbowl competition, where expert players com-                  studied a combination of fields; and 17% were
+peted against ChatGPT as a testbed to assign buzzer              undecided. Since quizbowl players typically spe-
+threshold. The dataset includes questions covering               cialize in certain categories and learn more about
+various topics, with recorded buzz and guess cor-                those areas, we also asked them for their areas of
+rectness.                                                        specialization. 39.13% of respondents listed the
+   We incorporate the explanation from Rodriguez                 sciences as an area of specialization; 21.74% listed
+et al. (2019a) to explain how the threshold was set              history; 39.13% listed the social sciences; 52.17%
+for our buzzer. To estimate the probability π(t) that            listed literature; 39.13% listed fine arts; and 21.74%
+a player has answered correctly by position t, the               listed geography or current events.
+following formula is used:
+                                                                 F.3 Ranking human performance from survey
+                              Nt
+                   π(t) = 1 −     ,               (3)            Because the survey measures individual accuracy,
+                              N                                  without a competition setting, we rank humans us-
+   where N is the total number of player-question
+                                                                 ing the following metric: participants earn (20 −
+records, and Nt is the number of instances where a
+                                                                 20c) points per question with a correct buzz and
+player has answered correctly by position t. This
+                                                                 lose 5 points per question with an incorrect buzz,
+equation indicates how likely it is that a player has
+                                                                 where c is the proportion of clues seen at the buzz-
+given the correct answer by a certain point in the
+                                                                 point. Human quartiles and top/bottom half catego-
+question. To make this probability easier to use
+                                                                 rization based on the offline buzzpoints (for Figures
+in practice, it is approximated with a polynomial
+                                                                 5 and 6) are taken from rankings under this metric.
+function:
+       π(t) = 0.0775t − 1.278t2 + 0.588t3 .               (4)    G     ECE and Brier Score Details
+   This polynomial provides a smooth estimate of                 Expected Calibration Error (ECE) (Naeini et al.,
+how human accuracy changes as the question pro-                  2015; Guo et al., 2017) and Brier scores (Brier,
+gresses, allowing for a data-driven approach to de-              1950) are widely used metrics for assessing model
+termining optimal buzz thresholds. Since we also                 calibration. Below, we define these metrics using
+want to get the optimal buzzpoints, we adopt a                   the notations introduced in Section 4.1: gt repre-
+threshold from this study to determine the model                 sents the answer correctness at clue t (1 if cor-
+buzzpoints. The confidence thresholds by model                   rect, 0 otherwise, which is slightly different from
+family are: -0.03 for GPT models, and -0.05 for                  C AL S CORE for simplicity); ct represents the corre-
+Mistral models.                                                  sponding model’s confidence in its guess.
+
+F     Tournament and Survey                                      ECE. It measures the weighted average over the
+                                                                 absolute difference between accuracy and confi-
+F.1   Recruiting human players                                   dence. To compute this, we first split confidence
+Human teams were recruited by posting a call for                 values into M = 10 bins equally. Bm represents
+players on social media and public forums for                    the confidence set of the mth bin. N is the total
+Welcome to a quick Trivia Quiz! You’ll tackle 37 questions and decide if you’re confident enough to buzz.
+After each clue, please write down your best guess even if you’re not sure of the answer.
+
+To track your progress, refer to the progress bar at the top of the page (Please disregard the question numbers—they are randomized for fairness).
+
+Please enter your email address here so we can ensure prizes are sent to the right recipients at the end of the quiz.
+We’re giving away 4 raffle prizes (each a $25 gift card) to participants who complete the quiz.
+Additionally, the top scorer with the highest accuracy and fastest buzz will receive a $5 bonus prize.
+Rewards are determined by a combination of your accuracy and buzzing speed.
+Correct answers receive 0 to 20 points depending on how early you buzz. Incorrect answers receive -5 points.
+Good luck and have fun!
+
+Here is the short summary of what this survey will be used for:
+Project Title
+A Leaderboard and Competition for Human-computer Adversarial Question Answering
+Purpose of the Study
+This research is being conducted by xxx at xxx.
+We are inviting you to participate in this research project because you are interested in trivia knowledge and enjoy trivia-related games.
+The purpose of this research project is to collect human-generated data and responses for building a deployable QA system.
+Procedures
+We would like to use two adversarial datasets to test our approach of determining how adversarial the questions are.
+You will provide your best guess and write down your answer in a short form.
+Potential Risks and Discomforts
+There is a risk of breach of confidentiality and that efforts to mitigate this risk are described in the Confidentiality section below.
+Potential Benefits
+While this research is not designed to benefit you personally, we hope that in the future, the researchers might benefit from human computer interaction studies
+with investigation of
+question answering behavior and AI development during this study.
+Confidentiality
+Only the investigators (xxx) of this study will have access to the study data.
+Data will be stored on a password-protected web server with encrypted storage.
+The server is professionally managed in a secure access data center.
+After the study ends, only user names associated with e-mail addresses will be retained and the associated e-mail addresses will be deleted.
+Right to Withdraw and Questions
+Your participation in this research is completely voluntary. You may choose not to take part at all.
+If you decide to participate in this research, you may stop participating at any time.
+If you decide not to participate in this study or if you stop participating at any time, you will not be penalized or lose any benefits to which you otherwise qualify.
+If you decide to stop taking part in the study, if you have questions, concerns, or complaints, or if you need to report an injury related to the research, please contact
+the investigator:
+xxx
+
+If you have any questions, please use this address: xxx
+
+
+                                                          Table 4: Consent form for players.
+
+
+number of clues across the dataset.                                                          • meta-llama/Meta-Llama-3.1-8B-Instruct
+                   M ⃓              ∑︂ ⃓⃓                                                    • meta-llama/Meta-Llama-3.1-70B-Instruct
+               1 ∑︂ ⃓⃓ ∑︂                                                                    • mistralai/Mistral-7B-Instruct-v0.3
+     ECE =                   gt −     ct ⃓⃓
+              N       ⃓
+                                                                                             • meta-llama/Llama-2-70b-chat-hf
+                             m=1 t∈Bm                   t∈Bm
+
+Brier Score. It measures the mean squared dif-
+ference between the predicted probability and the                                       For 7B/8B models, we use 1 NVIDIA RTX A6000
+actual binary outcome, measuring how well the                                           GPU and 32GB of RAM, and processing each ques-
+predicted confidence aligns with the true correct-                                      tion takes approximately about 5 seconds. For 70B
+ness of the answer. A lower Brier Score indicates                                       models, 8 NVIDIA RTX A5000 GPUs and 64GB
+better calibration, as it reflects more accurate and                                    of RAM are used, and approximately each ques-
+well-calibrated probability estimates.                                                  tion takes 40 seconds. The temperature is set to
+                                             N                                          be 0 for all experiments. The metric computation
+                            1 ∑︂                                                        is highly efficient, taking only 5-10 minutes on a
+              Brier Score =     (ct − gt )2
+                            N                                                           single CPU for datasets of moderate size. Our met-
+                                            t=1
+                                                                                        ric is a single-clue metric that evaluates models
+H      Experiment Details
+                                                                                        based on their confidence values. The human-in-
+We query OpenAI APIs for GPT-4 (gpt-4-0613)                                             the-loop process introduces variability, they are
+and GPT-4o (gpt-4o-2024-08-06) experiments. For                                         consistent with the cost of crafting other common
+other experiments, we implement model inference                                         QA datasets. We use NLTK, SpaCy, regex, and
+with vLLM (Kwon et al., 2023) using Hugging                                             PEDANTS packages for data pre-processing of the
+Face model names:                                                                       collected buzzpoints.
+I   License Details                                    C AL S CORE then incorporates human data by the
+                                                       proportion of humans yet to answer correctly, re-
+GRACE is licensed under the Creative Com-
+                                                       flecting calibration relative to human performance.
+mons Attribution 4.0 International License (CC
+                                                       The overall C AL S CORE is computed by averaging
+BY 4.0). To view a copy of this license,
+                                                       the individual scores for each clue (C AL S COREc ).
+visit https://creativecommons.org/licenses/by/4.0/
+                                                       Given the per-clue values of −0.27, −0.08, −0.35,
+or send a letter to Creative Commons, PO Box
+                                                       and 0.09, the resulting score is −0.61. The final
+1866, Mountain View, CA 94042, USA. When us-
+                                                       CALScore is 0.18, obtained by applying the nor-
+ing this dataset, please attribute as follows:
+                                                       malization (0.82), which is then subtracted from
+     GRACE is licensed under CC BY 4.0.                1.
+     To view a copy of this license, visit
+     https://creativecommons.org/
+     licenses/by/4.0/.                                 M    C AL S CORE2 Walkthrough
+
+J   C AL S CORE Normalization                          Table 7 presents a step-by-step breakdown of a
+                                                       question where both system and human buzzes are
+For our C AL S CORE, we apply a normalized sig-        tracked across multiple time steps. At each clue t,
+moid transformation:                                   the system produces a guess with associated con-
+                                                       fidence and a probability of buzzing (bt ). Simul-
+    C AL S CORE(x) = 1 − r (E [(1 − ht )gt ct ]) .     taneously, we track the cumulative proportion of
+                                                       human participants who have correctly answered
+r(x) is a normalized sigmoid function designed to
+                                                       by that time (ht ).
+map an expected value from a [-1, 1] range to a
+                                                          In clue 0, the system guesses incorrectly with
+[0,1] range.
+                                                       low confidence, and only one out of three humans
+                       σ(x) − σ(−1)                    has buzzed correctly (h0 = 0.1, approximating
+              r(x) =                ,                  1/3). The human-adjusted score SHt is zero, as
+                       σ(1) − σ(−1)
+                                                       the system’s guess is incorrect. In clue 1, the sys-
+where                                                  tem correctly guesses “Orwell” with higher confi-
+                             1
+                 σ(x) =           .                    dence (0.7), while the cumulative human correct
+                          1 + e−x                      rate increases to h1 = 0.1. Since the system buzzed
+K    C AL S CORE analysis by category                  before most humans had answered correctly, it re-
+                                                       ceives partial credit: SH1 = 0.06.
+With logit-based C AL S CORE scores, GPT-4o per-          By clue 2, more humans have answered correctly
+forms best in Arts and Science, while LLaMA-2-         (h2 = 0.2), and the system again guesses cor-
+70B-Chat has the highest error in Arts. GPT-4o also    rectly, further increasing the cumulative adjusted
+excels in History and Literature, whereas LLaMA-       score. Finally, in clue 3, both the system confi-
+2-70B-Chat struggles most in Literature.               dence (0.9) and buzz probability (bt = 1.0) are
+  In verbalized-based C AL S CORE scores, GPT-4o       high, but a larger proportion of humans (h3 = 0.3)
+achieves the lowest calibration errors across Arts     have also answered correctly by this point. As a
+and Science. Meanwhile, Mistral-7B-Instruct and        result, the final score SH3 = 0.02 is lower, despite
+LLaMA-2-70B-Chat show the highest errors in Lit-       the correct answer, since the system was slower
+erature, respectively. Verbalized outputs generally    than several humans. The parenthetical value in
+show improved calibration compared to logit-based      SH3 = 0.02 (0.27) represents the unadjusted
+confidence for Mistral and Llama-3 models.             score based solely on correctness and confidence,
+                                                       illustrating the penalty for delayed buzzing.
+L    C AL S CORE Walkthrough
+                                                          The reward for C AL S CORE2 for the question is
+In Table 6, C AL S CORE first builds on unadjusted     reported at the bottom of the table as 0.53, with
+model calibration (MCE), which does not incor-         the value in parentheses (0.77) denoting the unad-
+porate human data (Section 4.2). MCE penal-            justed baseline. This illustrates how incorporating
+izes confidently wrong answers by multiplying cor-     human buzz data provides a more realistic measure
+rectness (1 or -1) with model confidence (0–1);        of model competitiveness under time pressure. In
+this captures models that are confidently wrong,       we C AL S CORE2 , we subtract the reward term from
+when correctness is negative and confidence is high.   1 to quantify the model’s calibration error.
+                      GPT-4                  GPT-4o         Mistral-7b-Instruct   LLama-2-70b-Chat                        Llama-3.1-8B-Instruct                         Llama-3.1-70B-Instruct
+Category
+             Logit     Verbalized    Logit     Verbalized   Logit Verbalized      Logit Verbalized                        Logit    Verbalized                           Logit      Verbalized
+Arts         0.6646      0.564      0.5946       0.5592     0.7489    0.7889      0.8063            0.7218                0.6623               0.7466                   0.6317                   0.6774
+Geo/CE        0.618      0.5465     0.6506       0.5795     0.7193    0.7864      0.8067            0.6872                0.6182               0.6857                   0.6307                   0.6819
+History       0.709      0.5874     0.691        0.6421     0.7904    0.8022      0.8402            0.7478                0.6844                0.803                   0.6764                   0.7278
+Literature   0.7315       0.628     0.7233        0.673     0.7713    0.7773      0.8332            0.7691                0.6861               0.7944                   0.6935                   0.7162
+RMPSS        0.6676      0.5888     0.6456       0.5812     0.8029    0.8128      0.8514             0.755                0.6982               0.8082                   0.6669                   0.7083
+Science      0.5978      0.5584     0.6019       0.5425     0.7256    0.7691      0.792             0.7103                0.6567               0.7325                   0.5883                   0.5928
+
+
+Table 5: Verbalized and logit-based C AL S CORE per category. GPT-4 and GPT-4o, the strongest models, struggle
+with literature and history relative to other categories. Most models are strongest at science. For GPT-4, GPT-4o,
+and Llama-2-70b, logit-based calibration consistently exhibits higher error; for Mistral and the Llama-3 models,
+verbalized calibration exhibits higher error.
+
+    Clue      C AL S COREc          Text                                                                            Model Guess                            Correct                   Confidence
+     0       −0.27                  He was born Eric Arthur Blair. . .                                              Dickens                                −1                                0.3
+     1       −0.08                  This British writer is known for his dystopian                                  Lorca                                  −1                                0.1
+                                    themes. . .
+     2       −0.35                  He coined the term “doublethink” and envisioned a                               Marx                                   −1                                0.7
+                                    regime where “Big Brother” watches everyone.
+     3       0.09                   His most famous works include Animal Farm and                                   Orwell                                 1                                 0.9
+                                    1984.
+
+Table 6: The overall C AL S CORE is computed by averaging the individual scores for each clue. Given the per-
+clue values of −0.27, −0.08, −0.35, and 0.09, the resulting score is −0.61. The final C AL S CORE is 0.18, after
+normalization.
+
+Clue (t)      Question                                                                                      System Guess                              Conf.                 ht              bt             SHq
+    0         This author talked about his time fighting fascists in his autobio-                           Lorca                                       0.1                 0.1            0.1              0
+              graphical book Homage to Catalonia.
+    1         He discussed his poverty in his essay “How the Poor Die” and                                  Orwell                                      0.7                 0.1            0.63            0.06
+              Down and Out in London and Paris.
+    2         The character of Old Major represented Lenin in his allegory                                  Orwell                                      0.8                 0.2            0.22            0.17
+              Animal Farm.
+    3         For ten points, name this author of 1984.                                                     Orwell                                    0.9 1.0               0.3            0.05            0.27
+
+
+Table 7: Clue-by-clue question details with model guesses, confidence scores, human and model buzz probabilities,
+and human-adjusted model scores (SHt ). C AL S CORE2 computes the probability of a system buzzing before the
+humans correctly answer the question. The resulting score is 0.77.
+
+
+N       Comparison with MacroCE
+We also include an existing calibration error metric
+from Si et al. (2022) as comparison. MacroCE                                                                             Verbalized-based Confidence (Sorted by C AL S CORE)
+
+computes the macro-average of calibration er-                                     Model                     Brier Score           ECE            macroCE             MCE            C AL S CORE    C AL S CORE2
+
+                                                                                  GPT-4                    0.274     2       0.259      2     0.481       1     0.584          1   0.588     1     0.878     1
+rors, separately accounting for correct and incor-                                GPT-4o
+                                                                                  Llama-3.1-70B-Instruct
+                                                                                                           0.266
+                                                                                                           0.373
+                                                                                                                     1
+                                                                                                                     3
+                                                                                                                             0.224
+                                                                                                                             0.392
+                                                                                                                                        1
+                                                                                                                                        3
+                                                                                                                                              0.491
+                                                                                                                                              0.486
+                                                                                                                                                          3
+                                                                                                                                                          2
+                                                                                                                                                                0.601
+                                                                                                                                                                0.685
+                                                                                                                                                                               2
+                                                                                                                                                                               3
+                                                                                                                                                                                   0.604
+                                                                                                                                                                                   0.719
+                                                                                                                                                                                             2
+                                                                                                                                                                                             3
+                                                                                                                                                                                                   0.900
+                                                                                                                                                                                                   0.955
+                                                                                                                                                                                                             2
+                                                                                                                                                                                                             3
+
+rect predictions. Across both confidence elicita-                                 Llama-2-70b-Chat
+                                                                                  Llama-3.1-8B-Instruct
+                                                                                                           0.490
+                                                                                                           0.623
+                                                                                                                     4
+                                                                                                                     5
+                                                                                                                             0.570
+                                                                                                                             0.693
+                                                                                                                                        4
+                                                                                                                                        5
+                                                                                                                                              0.497
+                                                                                                                                              0.495
+                                                                                                                                                          5
+                                                                                                                                                          4
+                                                                                                                                                                0.739
+                                                                                                                                                                0.774
+                                                                                                                                                                               4
+                                                                                                                                                                               5
+                                                                                                                                                                                   0.803
+                                                                                                                                                                                   0.843
+                                                                                                                                                                                             4
+                                                                                                                                                                                             5
+                                                                                                                                                                                                   0.961
+                                                                                                                                                                                                   0.978
+                                                                                                                                                                                                             4
+                                                                                                                                                                                                             5
+                                                                                  Mistral-7b-Instruct      0.716     6       0.784      6     0.497       5     0.790          6   0.881     6     0.973     6
+tion methods, models consistently show higher er-                                                                          Logit-based Confidence (Sorted by C AL S CORE)
+
+ror under human-adjusted metrics—C AL S CORE                                      Model                     Brier Score
+
+                                                                                                                     3
+                                                                                                                                  ECE            macroCE
+
+                                                                                                                                                          3
+                                                                                                                                                                     MCE            C AL S CORE    C AL S CORE2
+
+                                                                                  GPT-4o                   0.341             0.353      2     0.484             0.654          2   0.654     1     0.955     2
+
+and C AL S CORE2 —compared to MacroCE. While                                      Llama-3.1-70B-Instruct
+                                                                                  GPT-4
+                                                                                                           0.323
+                                                                                                           0.380
+                                                                                                                     2
+                                                                                                                     4
+                                                                                                                             0.339
+                                                                                                                             0.388
+                                                                                                                                        1
+                                                                                                                                        3
+                                                                                                                                              0.470
+                                                                                                                                              0.489
+                                                                                                                                                          2
+                                                                                                                                                          4
+                                                                                                                                                                0.651
+                                                                                                                                                                0.672
+                                                                                                                                                                               1
+                                                                                                                                                                               3
+                                                                                                                                                                                   0.679
+                                                                                                                                                                                   0.684
+                                                                                                                                                                                             2
+                                                                                                                                                                                             3
+                                                                                                                                                                                                   0.939
+                                                                                                                                                                                                   0.962
+                                                                                                                                                                                                             1
+                                                                                                                                                                                                             3
+
+MacroCE measures average calibration error across                                 Llama-3.1-8B-Instruct
+                                                                                  Mistral-7b-Instruct
+                                                                                                           0.302
+                                                                                                           0.553
+                                                                                                                     1
+                                                                                                                     5
+                                                                                                                             0.397
+                                                                                                                             0.677
+                                                                                                                                        4
+                                                                                                                                        5
+                                                                                                                                              0.463
+                                                                                                                                              0.490
+                                                                                                                                                          1
+                                                                                                                                                          5
+                                                                                                                                                                0.675
+                                                                                                                                                                0.766
+                                                                                                                                                                               4
+                                                                                                                                                                               5
+                                                                                                                                                                                   0.718
+                                                                                                                                                                                   0.846
+                                                                                                                                                                                             4
+                                                                                                                                                                                             5
+                                                                                                                                                                                                   0.965
+                                                                                                                                                                                                   0.980
+                                                                                                                                                                                                             4
+                                                                                                                                                                                                             5
+                                                                                  Llama-2-70b-Chat         0.774     6       0.829      6     0.501       6     0.825          6   0.921     6     0.992     6
+correct and incorrect predictions, C AL S COREs
+further penalize confidently wrong or undercon-                                   Table 8: Models are sorted by C AL S CORE. Com-
+fident correct answers. This distinction reveals that                             pared to MacroCE and MCE, C AL S CORE offers a more
+C AL S COREs capture severe miscalibration cases                                  human-aligned assessment of calibration quality.
+that MacroCE may underestimate, aligning more
+closely with human judgment.
+

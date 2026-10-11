@@ -1,0 +1,972 @@
+               Confidence Under the Hood: An Investigation into the
+            Confidence-Probability Alignment in Large Language Models
+    Abhishek Kumar1 , Robert Morabito1 , Sanzhar Umbet2 , Jad Kabbara3 , and Ali Emami1
+                       1
+                         Brock University, St. Catharines, ON, Canada
+                         2
+                           Nazarbayev University, Astana, Kazakhstan
+               3
+                 Massachusetts Institute of Technology, Cambridge, MA, USA
+                           {aa22dt, rm20mg, aemami}@brocku.ca
+                             sanzhar.umbet@alumni.nu.edu.kz
+                                     jkabbara@mit.edu
+
+                         Abstract
+       As the use of Large Language Models (LLMs)
+       becomes more widespread, understanding their
+       self-evaluation of confidence in generated re-
+       sponses becomes increasingly important as it
+       is integral to the reliability of the output of
+       these models. We introduce the concept of
+       Confidence-Probability Alignment, that con-
+       nects an LLM’s internal confidence, quantified
+       by token probabilities, to the confidence con-
+       veyed in the model’s response when explic-
+       itly asked about its certainty. Using various
+       datasets and prompting techniques that encour-
+       age model introspection, we probe the align-
+       ment between models’ internal and expressed
+       confidence. These techniques encompass using
+       structured evaluation scales to rate confidence,
+       including answer options when prompting, and
+       eliciting the model’s confidence level for out-
+       puts it does not recognize as its own. Notably,
+       among the models analyzed, OpenAI’s GPT-
+       4 showed the strongest confidence-probability
+       alignment, with an average Spearman’s ρ̂ of
+                                                                 Figure 1: Flow diagram illustrating the process of ex-
+       0.42, across a wide range of tasks. Our work
+                                                                 tracting and comparing the Internal Confidence and Ver-
+       contributes to the ongoing efforts to facilitate
+                                                                 balized Certainty in an LLM.
+       risk assessment in the application of LLMs and
+       to further our understanding of model trustwor-
+       thiness.1                                                  With the ongoing integration of these models into
+                                                                  high-stakes areas such as healthcare, law, and ed-
+  1 Introduction
+                                                                  ucation, a critical evaluation of their behavior and
+  In recent years, we have witnessed the rapid devel- trustworthiness is becoming increasingly essential.
+  opment and deployment of Large Language Models                     Many contemporary prompting techniques, such
+  (LLMs) across various disciplines. LLMs such as                 as Self-Consistency (Wang et al., 2023b), Tree of
+  GPT (Brown et al., 2020; Schulman et al., 2022; Thoughts (Yao et al., 2023), and Multi-Agent De-
+  OpenAI, 2023), PaLM (Chowdhery et al., 2022), bating (Du et al., 2023), rely heavily on a model’s
+  Chincilla (Hoffmann et al., 2022), and LLaMa                    self-evaluation of its reasoning process. Recent
+  (Touvron et al., 2023), have showcased remarkable               works    like (Diao et al., 2023) use LLMs’ self-
+  performance across a diverse range of NLP tasks, confidence for tasks like question selection based
+  and their capabilities in empowering chatbots have              on uncertainty. However, if a misalignment exists
+  ignited a surge of interest among the general public. between the model’s expressed self-reasoning and
+      1
+                                                                  its true internal confidence, these techniques could
+        The code to reproduce our experimental results as well as
+  detailed interactions with the language models are available at yield  misleading results, undermining their practi-
+  https://github.com/akkeshav/confidence_probablitiy_alignment. cal utility. Trust and decision-making by users of
+
+                                                             315
+Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pages 315–334
+                             August 11-16, 2024 ©2024 Association for Computational Linguistics
+Figure 2: Illustration of GPT-4’s responses to various questions, accompanied by their internal confidences and
+expressed certainty levels. Questions sourced from CommonsenseQA dataset.
+
+
+these models in real-world applications are directly     models, including OpenAI’s GPT-3, its variants
+impacted by understanding this alignment.                such as InstructGPT and the RLHF version, and
+   This is further complicated by LLM hallucina-         the more recent GPT-4, in addition to open-source
+tion (Huang et al., 2021; Shuster et al., 2021; Ji       models, namely Microsoft’s Phi-2-2.7B and Hug-
+et al., 2023), where LLMs produce outputs that           gingFace’s Zephyr-7B. We probe the models with
+seem plausible but are factually incorrect or fabri-     questions from a variety of tasks, gather response
+cated. These hallucinations often come with high         token probabilities, and solicit confidence in the an-
+expressions of confidence, challenging non-expert        swers (visually summarized in Figure 1). We also
+users to distinguish them from reliable outputs. No-     explore model response variability under different
+table examples of these are reported in (Alkaissi        parameters and prompts and examine the connec-
+and McFarlane, 2023), where ChatGPT confidently          tion between a model’s confidence and its actual
+cited non-existent references for specific medical       performance. Figure 2 provides a visual overview
+claims.                                                  of how GPT-4 responds to different questions and
+                                                         its associated expressions of confidence. Our con-
+  Amid these challenges, our work aims to en-
+                                                         tributions are three-fold:
+hance trustworthiness in LLMs through a detailed
+understanding of model confidence. We define ver-        1. Conceptualization of Confidence-Probability
+balized certainty as an LLM’s explicit expression        Alignment: We introduce a novel framework to
+of its confidence level in response to a question        assess LLMs’ transparency and reliability. This
+and investigate its relationship with the model’s ac-    measure evaluates the correlation between an
+tual internal confidence, quantified by token prob-      LLM’s internal confidence and its verbalized cer-
+abilities. Our exploration of the correlation be-        tainty, offering a new lens to better understand
+tween these two measures, termed Confidence-             model behavior.
+Probability Alignment, posits that this alignment is
+crucial for the reliability of a model’s output.         2. Study Across Diverse LLM Architectures:
+   Drawing upon a range of question datasets, our        Our work covers a wide array of LLM architec-
+investigation explores the nuances of internal and       tures. Using prompting techniques to encourage
+verbalized confidence across an extensive array of       model introspection, we reveal varied alignment
+                                                       316
+dynamics, notably GPT-4’s consistent confidence-        the output response text. This chosen answer,
+probability alignment across multiple tasks.            ai ∈ Oset , symbolizes the model’s selected re-
+                                                        sponse from the options Oset , serving as the basis
+3. Analysis of Confidence-Correctness Relation-         for the ensuing evaluation of the model’s internal
+ship: We further analyze the link between mod-          confidence and verbalized certainty.
+els’ expressed confidence and response accuracy,
+exploring the impact of model-specific parameters       2.2    Internal Confidence
+such as temperature. Additionally, we develop a         In the context of LLMs, internal confidence for a
+taxonomy of misalignments for detailed error anal-      chosen output is quantified as the probability as-
+ysis, uncovering various cases of alignment discrep-    signed to the selected output token, Tchoice . This
+ancies and their implications for model reliability.    probability can be derived by applying the expo-
+                                                        nential function to the log probabilities or logits of
+2   Confidence-Probability Alignment
+                                                        each output token, depending on the model’s output
+Confidence-Probability Alignment refers to the cor-     format. A higher score for Tchoice signifies greater
+relation between a model’s verbalized certainty and     model confidence in that choice. However, exact
+its internal confidence, each quantified in specific    confidence assessment can be challenging due to
+ways. We define verbalized certainty as a model’s       potential token ambiguities, such as differing case
+explicit expression (i.e., in the generated text) of    sensitivity (’B’ vs. ’b’) for answer tokens.2
+its confidence level regarding its own answer to           To address this, we introduce the concept of ad-
+a given question. The internal confidence, on the       justed answer token probability. This involves cal-
+other hand, is quantified using answer token proba-     culating token probabilities and adjusting them to
+bilities. The alignment of these two aspects can be     account for potential ambiguities and variations in
+determined using the following procedures.              token format, which we detail in Algorithm 1.
+                                                           Our algorithm starts by converting log probabili-
+2.1 Response Generation                                 ties (or, alternatively, logits) to standard probabili-
+The generation of a response from the language          ties for all tokens. Then, for each answer option, it
+model commences with a structured prompt, com-          identifies all corresponding tokens, calculating the
+prising a question denoted as Q, and a set of answer    highest probability among them to represent the op-
+options, hereafter denoted as Oset . Each individual    tion’s most confident token representation. Finally,
+answer option within Oset will be referred to as Oi .   the algorithm normalizes the highest probability
+The answer options in Oset are potential responses      of the selected answer option against the sum of
+that the model can select to answer Q, with this        probabilities for all options, yielding an adjusted
+structure designed to elicit a definitive response.     internal confidence measure, PIC .
+   For instance, consider a question Q posed as            GPT-Family Models: For GPT-family models,
+“Which of the following is a common element in          which return log probabilities (log P (Ti )), token
+the atmosphere?" The corresponding set of answer        probabilities are derived using:
+options Oset comprises five distinct responses la-
+beled from ‘A’ to ‘E’: A. Oxygen, B. Nitrogen, C.                      P (Ti ) = exp(log P (Ti )).                   (1)
+Gold, D. Iron, and E. Helium.                              Open-Source Models: Many open-source mod-
+   The question and its options are concatenated in     els provide logits (L(Ti )) for output tokens. To
+a structured format, each answer option prefixed        convert these logits into probabilities, we employ
+with a corresponding label, and separated by new-       the softmax function:
+line characters to maintain a clear distinction. The
+prompt culminates with the term ‘Answer:’, de-                                        eL(Ti )
+signed to solicit a model’s response.                                      P (Ti ) = P L(T ) .                       (2)
+                                                                                      je
+                                                                                              j
+   The prompt is constructed as follows:
+Prompt = Q + "\n" + Option A + "\n" + ...               2.3    Verbalized Certainty
++ Option E + "\nAnswer: "                               We define verbalized certainty as the language
+  Upon presenting this structured prompt to a lan-      model’s explicit expression of its confidence level
+guage model, the model generates a response text.          2
+                                                             Although accounted for, we observed this phenomenon
+We subsequently extract the chosen answer ai from       to occur in less than three percent of instances across datasets.
+
+                                                    317
+Algorithm 1 Procedure for computing adjusted                       based on its training. It’s important to clarify that
+token probabilities, PA and internal confidence,                   this does not equate to personal confidence or self-
+PIC                                                                awareness, but rather an approximation of answer
+Require: Model output tokens T and their corresponding log         accuracy. Ultimately, the TPP helps us elicit a
+    probabilities log P (T ).                                      measure of confidence that is less susceptible to
+ 1: Compute token probabilities, P (Ti ), for all tokens Ti in
+    T using P (Ti ) = exp(log P (Ti )).                            potential biases, which have been noted in the men-
+ 2: for each Option O in the list of possible options do           tioned studies, arising from the language model’s
+ 3:    Determine the set of tokens, TO , corresponding to
+       option O.
+                                                                   own generation process.
+ 4:    Compute the maximum probability among tokens in
+       TO to obtain PO = max P (Ti ).
+                                                                   Option Contextualization (OC): The Option
+                           i∈TO                                    Contextualization (OC) aspect of the CQP equips
+ 5:    Append PO to the set of adjusted probabilities PA .
+ 6: end for                                                        the model with a framework for gauging its
+ 7: Select maximum probability, PM from PA                         chosen response by stating, ‘Options were:
+ 8: PS ← 0.                                                        {choices_text}’. This accomplishes two goals:
+ 9: for each probability PI in PA do
+10:    PS ← PS + PI                                                   Comparative Evaluation: By displaying all op-
+11: end for                                                        tions, the model can contextualize its chosen re-
+12: Compute internal confidence PIC , by dividing PM by
+    PS .
+                                                                   sponse, allowing for more informed confidence
+13: return PIC                                                     judgments compared to isolated evaluations.
+                                                                      Answer Verification: Providing all potential an-
+                                                                   swers facilitates comprehensive evaluations and
+in its own answer to a given question. To extract                  enables the model to adjust its confidence if the
+this measure, we construct a Confidence Querying                   selected answer is sub-optimal in comparison to
+Prompt (CQP) that asks the model to analyze its                    the other options.
+certainty in the context of the question, the avail-
+able options, and its chosen answer. The CQP is                    Likert Scale Utilization (LSU): The Likert
+presented as follows:                                              Scale Utilization (LSU) phase of the CQP em-
+                                                                   ploys a qualitative scale ranging from ‘very certain’
+A language model was asked: {question}                             to ‘very uncertain’. The choice of a qualitative
+Options were: {choices_text}.                                      scale instead of a numerical one aims to maintain
+The model's answer was: {response_text}.                           a consistent understanding across different model
+                                                                   instances. In the context of LLMs, the interpreta-
+Analyse its answer given other options.                            tion of a numerical certainty scale (e.g., ‘rate your
+How certain are you of the model's answer?                         certainty from 1 to 10’) can vary significantly be-
+a. Very Certain                                                    tween different model instances due to the lack of
+b. Fairly Certain                                                  concrete experiential or emotional grounding that
+c. Moderately Certain                                              humans use to interpret these numbers. A qualita-
+d. Somewhat Certain                                                tive scale leverages the model’s training on a vast
+e. Not Certain                                                     corpus of human language, which makes the gra-
+f. Very Uncertain                                                  dations (e.g., ‘fairly certain’ is more confident than
+                                                                   ‘moderately certain’) generally more universally
+  This query effectively asks the model to take on
+                                                                   understood and consistent.
+an observational role and to analyze the certainty
+                                                                      Responses to the CQP are then mapped to a nu-
+of its answer. The model’s response gives us its
+                                                                   merical score using a predefined system: ‘very cer-
+verbalized certainty. Below, we outline the key
+                                                                   tain’ equals 1.0, ‘fairly certain’ equals 0.8, ‘moder-
+components of the CQP.
+                                                                   ately certain’ equals 0.6, ‘somewhat certain’ equals
+Simulation of Third-Person Perspective (TPP):                      0.4, and ‘not certain’ or ‘very uncertain’ correspond
+The CQP initiates with a third-person perspective                  to 0.2 and 0, respectively. This scoring method
+(TPP) to mitigate potential self-preferential biases               provides a quantifiable measure of the model’s ver-
+(Wang et al., 2023a; Zheng et al., 2023). It presents              balized certainty. Importantly, this measure reflects
+the question and answer as if they may not have                    the model’s self-evaluated certainty and is distinct
+necessarily been generated by itself. In this sce-                 from its internal confidence as quantified by the
+nario, the model’s ‘confidence’ reflects its prob-                 adjusted token probabilities.
+abilistic estimation of the response’s correctness,                   The finalized CQP design emerged after explor-
+                                                                 318
+ing various alternative designs during preliminary          • AI2 Reasoning Challenge (ARC) (Clark
+experiments, as detailed in Appendix Table A.3.               et al., 2018): The ARC challenges models
+                                                              with complex, knowledge-intensive questions
+2.4 Alignment Evaluation
+                                                              that necessitate deep reasoning and the inte-
+We define alignment as the correlation between in-            gration of multiple information sources, far
+ternal and verbalized confidence metrics, evaluated           beyond simple question answering.
+using Spearman’s rank correlation coefficient.
+                                                        3.2      Models
+Spearman’s Rank Correlation Coefficient:
+The Spearman’s rank correlation coefficient is a        We used the following LLMs: GPT-3 (text-davinci-
+non-parametric test that measures the degree of         001) (Brown et al., 2020); InstructGPT-3 (text-
+association between two variables. Unlike the Pear-     davinci-002) (Ouyang et al., 2022); InstructGPT-
+son correlation coefficient, which requires the as-     3 + RLHF (text-davinci-003) (Ouyang et al.,
+sumption of normally distributed variables, Spear-      2022); GPT-4 (gpt-4-0613; (OpenAI, 2023)); Mi-
+man’s correlation does not require this assumption      crosoft’s Phi-2-2.7B3 and HuggingFace’s Zephyr-
+and can handle ordinal, interval, and ratio data.       7B (Tunstall et al., 2023).4
+This makes it ideal for comparing the non-normally      3.3      Experimental Design
+distributed token probabilities and verbalized con-
+fidence values in our study.                            We prompted models with the complete set of all
+   Given two variables X and Y , the Spearman           dataset questions, obtained the responses, and ex-
+correlation ρ is computed as follows:                   tracted answer token probabilities for internal con-
+                                                        fidence estimation (following Algorithm 1). We
+                            P
+                          6 d2i                         then prompt the models (using CQP) to verbally
+               ρ=1−                ,            (3)     express their confidence to compute alignment with
+                         n(n2 − 1)
+                                                        their internal confidence. For a complete visual
+  where di is the difference between the ranks of       walkthrough of the procedure through an example,
+corresponding values of X and Y , and n is the          please refer to Appendix Figure A.1.5
+number of observations.
+                                                        4       Results
+3    Experiments
+                                                        Alignment Evaluation Table 1 presents the
+3.1 Tasks & Datasets                                    dataset-wise alignment evaluation using Spear-
+We select a diverse set of tasks that allow us to       man’s rank correlation coefficient. Here, GPT-4
+assess an LLM’s confidence-probability alignment        consistently outperforms its counterparts across ev-
+across various question types and complexities.         ery dataset. Specifically, it registered the highest
+    • CommonsenseQA (CSQA) (Talmor et al.,              coefficient on the QASC datasets of nearly 0.5,
+      2019): CSQA poses multiple-choice ques-           indicative of a moderate correlation. In contrast,
+      tions that require a grasp of common-sense        OpenbookQA and ARC datasets marked the low-
+      knowledge to answer effectively.                  est correlations, although they still remained higher
+                                                        than other model versions with values of 0.41 and
+    • Question Answering via Sentence Compo-
+                                                        0.35, respectively.
+      sition (QASC) (Khot et al., 2019): QASC
+                                                           The standout performance of GPT-4 highlights
+      necessitates models to infer answers by com-
+                                                        potential advancements in model architecture and
+      posing information sourced from multiple sen-
+                                                        training methodologies, including the scale and
+      tences, thereby testing their ability to form
+                                                        possibly more refined human feedback integration.
+      connections.
+                                                            3
+                                                              https://ai.azure.com/explore/models/microsoft-phi-
+    • RiddleSense (Lin et al., 2021): The unique        2/version/4/registry/azureml-msr
+      dataset of RiddleSense tests models on rid-           4
+                                                              Selected for their balance between computational effi-
+      dles, challenging them to use a blend of world    ciency and answer quality, these open-source models offer an
+      knowledge and lateral thinking.                   ideal compromise—being sufficiently compact for algorith-
+                                                        mic tractability while robust enough to deliver meaningful
+    • OpenBookQA (Mihaylov et al., 2018): Open-         responses for question answering and verbalized certainty
+      BookQA tests models on science-based mul-         evaluations.
+                                                            5
+                                                              To conduct all experiments, approximately 132.5 compute
+      tiple choice questions, gauging their under-      hours were elapsed. For experiments with GPT models, their
+      standing of factual scientific information.       public OpenAI API was used; https://openai.com/api/.
+
+                                                      319
+                                  Model                                     CSQA         QASC    Riddle Sense   OpenbookQA   ARC
+                                  GPT-4 (gpt-4-0613)                            0.42     0.47       0.42           0.41       0.35
+                                  InstructGPT-3 + RLHF (text-davinci-003)       0.40     0.40       0.35           0.25       0.25
+                                  InstructGPT-3 (text-davinci-002)              0.15     0.16       0.19           0.13       0.17
+                                  GPT-3 (text-davinci-001)                      0.01     -0.01      -0.01          -0.02     -0.04
+                                  Zephyr-7B                                     -0.14    -0.10      0.02           0.12       0.15
+                                  Microsoft-Phi-2                               -0.02    -0.05      0.00           0.03       0.07
+
+Table 1: Alignment evaluation using Spearman’s rank correlation coefficient. All values are significant (p < 0.01).
+Highest value for each dataset in bold.
+
+
+                                                                                        ants of the GPT family, including GPT-3’s RLHF
+                                                                                        version and GPT-4, have demonstrated consis-
+
+
+
+
+ Average Standard Deviation
+                                 0.12
+                                                                                        tent confidence-probability alignment, with GPT-4
+                                                                                        showing a significant improvement. Our current
+                              9 · 10−2                                                  working hypothesis suggests that this consistency
+                                                                                        may be related to, and possibly correlated with,
+                              6 · 10−2                                                  other desired attributes of RLHF, such as the help-
+                                                                                        fulness, sensitivity, and creativity of responses.
+                              3 · 10−2
+                                                                                        Dynamics of Internal Confidence and Verbal-
+                                                                                        ized Certainty Table 2 details the alignments
+                                             0.2 0.4 0.6          0.8       1           between internal confidence and verbalized cer-
+                                               Temperature                              tainty. Here are the alignment types, supplemented
+                                       CSQA                    QASC                     by observations:
+                                    Riddle Sense            OpenbookQA
+                                       ARC                                                 • Consistent Alignment: The metrics are in
+                                                                                             harmony, indicating clear model comprehen-
+Figure 3: Comparative analysis illustrating the relation-                                    sion. For instance, a query about the habitat
+ship between temperature and average standard devia-                                         of white mice yields high confidence in both
+tion of verbalized certainty across different datasets.                                      metrics, signifying a straightforward under-
+                                                                                             standing.
+Temperature Stability In Figure 3, we analyze
+                                                                                           • Internal Overconfidence: The model ex-
+the impact of the temperature parameter on the
+                                                                                             hibits high internal confidence despite low
+variability of verbalized certainty across different
+                                                                                             verbalized certainty. An example involves a
+datasets for GPT-4. Our findings indicate a direct
+                                                                                             question about historical events, where the
+trend between increased temperature and height-
+                                                                                             model’s internal assurance doesn’t match its
+ened variability in certainty scores. In particular,
+                                                                                             cautious verbal certainty assessment.
+OpenBookQA and Riddle Sense, both of which
+emphasize multi-step reasoning and deep topic un-                                          • External Overconfidence: Contrary to inter-
+derstanding, exhibit the sharpest sensitivity to tem-                                        nal overconfidence, here, the model’s verbal-
+perature variations. This could be attributed to the                                         ized certainty surpasses its internal confidence.
+multi-faceted nature of their questions, making the                                          A question about common social practices
+model’s certainty more volatile under increased ran-                                         may elicit an overly confident verbal assur-
+domness. Conversely, QASC, focusing on sentence                                              ance, possibly reflecting overlearned societal
+composition within grade school science, demon-                                              norms rather than a deep understanding.
+strates stability in certainty across diverse tempera-
+ture settings. Such observations highlight the im-                                         • Consistent Discordance: Both confidence
+perative of dataset-specific temperature calibration,                                        metrics are low, indicating model uncertainty.
+given the inherent complexities and requirements                                             Questions that explore abstract concepts or
+of individual datasets.                                                                      complex reasoning, such as the philosophi-
+   Consistency of RLHF variants RLHF vari-                                                   cal implications of a theoretical scenario, can
+                                                                                   320
+    Int. Conf.   Verb. Cert.      Example                                                          Alignment Type
+                                  Q: Where would you expect to find white mice?                  Consistent Alignment
+    ▲ 1.00       ▲ 1.00           A: E. laboratory
+                                  Q: Where did you meet your best friend since Kindergarten?    Internal Overconfidence
+    ▲ 0.99       ▼ 0.20           A: B. School
+                                  Q: Where would you be concerned about finding a cavity?       External Overconfidence
+    ▼ 0.69       ▲ 1.00           A: E. teeth
+                                  Q: What is likely to satisfy someone’s curiosity?             Consistent Discordance
+    ▼ 0.69       ▼ 0.40           A: A. hear news
+
+Table 2: Instances of similar and contrasting values of internal confidence (Int. Conf.) and verbalized certainty
+(Verbal Cert.). Q represents the model’s question, and A is the model’s answer. Tests are from GPT-4 (gpt-4-0613)
+using the CommonsenseQA dataset. For examples using InstructGPT-3 + RLHF, refer to Appendix Table A.6.
+
+               Question                           Verb. Certainty Response             Model              Comment
+ Q: What happens to light rays in water?    g. Fairly certain, h. Moderately certain    Phi         Unable to choose one
+            A: B. Refraction                  i. Somewhat certain, j. Not certain                correct certainty response
+  Q: An example of an animal that has      DNA sequence. because most carcinogens       Phi      Response lacks verbalized
+     permeable skin is? A: G. Frog            cause cancer by altering the DNA ..                      certainty option
+  Q: The work of what causes a river to       Model provided a clear explanation       Zephyr    Response lacks verbalized
+     become deeper ? A: F. Erosion                 for why F is the correct ..                         certainty option
+ Q: Cell phones can cause people in cars        Other options were: A. eardrum         Zephyr       The response merely
+       to what? A: B. Distraction            C. death, D. Injury, E. stop for gas ..            reiterates the initial options.
+
+Table 3: Instances demonstrating subpar performance of small open-source models (Microsoft’s Phi and Zephyr
+(Tunstall et al., 2023)). Each row highlights a failure case of these models to generate verbalized certainty from the
+QASC dataset. Q represents the model’s question, and A is the model’s answer, and are provided as part of the
+Confidence Querying Prompt.
+
+
+        lead to this alignment, reflecting the model’s         the continuous nature of internal confidence, we
+        awareness of its limitations.                          differentiate ‘very certain’ from other levels by us-
+                                                               ing the median internal confidence value. Here,
+Further examples in addition to the models’ ex-                ‘very certain’ represents values above the median,
+planations for their responses can be found in Ap-             while ‘fairly certain’ represents values below the
+pendix Tables A.1 and A.2. Examples comparing                  median. Assessment of verbalized certainty and
+the alignment between all models on example in-                accuracy for InstructGPT-3 + RLHF is provided in
+stances are also provided in Appendix Table A.5.               Appendix Figure A.4.
+   Dismal performance of open-source models:
+                                                                  The data from the matrices demonstrate a clear
+Table 3 demonstrates that both Microsoft’s Phi and
+                                                               correlation between verbalized certainty and ac-
+Zephyr (Tunstall et al., 2023) fail to generate ap-
+                                                               curacy for GPT-4 across all datasets, including
+propriate verbalized certainty responses. This is-
+                                                               CSQA, QASC, ARC, OpenbookQA, and Riddle-
+sue may arise from the difficulty smaller models
+                                                               Sense. A similar trend is also observed between
+face in needing to be proficient at both generating
+                                                               internal confidence and accuracy for GPT-4 across
+and evaluating simultaneously. If either of these
+                                                               all datasets. This indicates that higher confidence
+processes is compromised (as often observed with
+                                                               or certainty levels consistently correspond with cor-
+Zephyr/Phi), it results in low confidence alignment.
+                                                               rect responses. This finding is particularly note-
+5      Analysis and Discussion                                 worthy as it offers a counterpoint to recent work
+                                                               by (Meister et al., 2022), which demonstrated that
+5.1 Correctness and Confidence                                 high probability does not always coincide with high
+In Figures 5 and 6, five alignment matrices dis-               quality in LLMs.
+play an analysis of GPT-4’s verbalized certainty                  This analysis, focusing primarily on the ‘very
+and internal confidence, respectively, in relation to          certain’ and ‘fairly certain’ categories, is informed
+correctness across five datasets. Each matrix cate-            by the predominant high levels of certainty (ver-
+gorizes responses based on the degree of certainty             balized and internal) in GPT-4 responses across
+and correctness, with the green zones representing             datasets. Figures 7 and 8 show the distribution of
+accurate alignment: ‘very certain’ for correct re-             verbalized and internal confidence levels, highlight-
+sponses, ‘fairly certain’ for incorrect ones. Due to           ing distinct patterns and variability across contexts.
+                                                           321
+                    CSQA              QASC           Riddle Sense OpenbookQA     ARC
+                    ✓  ✗              ✓  ✗             ✓     ✗       ✓     ✗    ✓     ✗
+                 + 64 8.4          + 72 11           + 84.2 5.2    + 76.4 5.2 + 87.2 2.6
+                 - 16.8 8.8        - 5.2 10.4        - 3.6 2.8     - 13.2 2   - 5.6 2.6
+
+Figure 5: Assessment of verbalized certainty and accuracy using GPT-4. The figure displays the data as percentages
+for each dataset utilized. Here, + = very certain, - = fairly certain, ✓= correct, and ✗= incorrect.
+
+                    CSQA              QASC           Riddle Sense OpenbookQA     ARC
+                    ✓  ✗              ✓  ✗             ✓     ✗       ✓     ✗    ✓     ✗
+                 + 48.2 1.8        + 47 3            + 89.2 9.6    + 61.6 2.8 + 79.6 1
+                 - 33.6 16.4       - 31.2 18.8       - 0.2 0.4     - 29.4 5.8 - 13.6 4.4
+
+Figure 6: Assessment of internal confidence (via log probabilites) and accuracy using GPT-4. The figure displays
+the data as percentages for each dataset utilized. Here, + = very certain, - = fairly certain, ✓= correct, and ✗=
+incorrect.
+
+
+
+
+Figure 7: The distribution of verbalized certainty,
+mapped to values ranging from 0 to 1, across all datasets.     Figure 8: The distribution of internal confidence across
+The distribution is derived by applying a scoring dictio-      multiple datasets, composed of the adjusted token prob-
+nary to the verbalized certainty obtained from GPT-4.          abilities obtained from GPT-4.
+
+
+Further details are provided in the Appendix, where            6   Related Work
+Figures A.2 and A.3 illustrate the variation in ver-
+balized certainty and internal confidence distribu-            Estimation of Confidence in LLMs Numerous
+tions across model types. To see the distribution              studies have explored estimating confidence in
+of verbalized certainty and internal confidence for            LLMs. Some emphasize model sensitivity to input
+InstructGPT-3 + RLHF, refer to Appendix Figures                changes (Vasudevan et al., 2019) or employ hints
+A.5 and A.6 respectively.                                      in Neural Machine Translation for confidence (Lu
+                                                               et al., 2022). Others use prompt engineering for
+                                                               verbalized probabilities (Lin et al., 2022), fine-tune
+5.2 Component Ablation Analysis                                models on question-answer accuracy probabilities
+                                                               (Mielke et al., 2022), or modify prompts for uncer-
+In Table 4 we analyzed the individual and com-                 tainty expressions (Zhou et al., 2023). Additional
+bined impacts of three proposed prompting tech-                research quantifies uncertainty using metrics such
+niques: Simulation of Third-Person Perspective                 as semantic entropy (Kuhn et al., 2023; Meister
+(TTP), Option Contextualization (OC), and Lik-                 et al., 2022) or assesses overconfidence with atypi-
+ert Scale Utilization (LSU). The highest alignment             cal inputs (Yuksekgonul et al., 2023). With many
+was observed when combining all three techniques.              LLMs being proprietary, some have probed confi-
+While LSU consistently improved performance                    dence using both transparent and opaque methods
+across datasets, TTP was less influential alone, and           (Lin et al., 2023). Our work explores a different
+OC’s efficacy varied by dataset. The interaction of            facet of confidence in both open-source and pro-
+TTP, LSU and OC was found to be most effective.                prietary LLMs, focusing on the alignment between
+                                                             322
+                         Prompt         CSQA    QASC     Riddle Sense   OpenbookQA    ARC
+                      Numerical scale    0.29    0.38        0.38           0.37      0.14
+                          LSU            0.29    0.37        0.38           0.38      0.17
+                       TTP + LSU         0.26    0.34        0.31           0.36      0.13
+                        OC + LSU         0.35    0.32        0.36           0.33      0.26
+                     TTP + LSU + OC      0.40    0.40        0.30           0.26      0.21
+
+Table 4: Ablation results on model for each aspect of the prompt design, using InstructGPT-3 + RLHF. Each
+prompt configuration reflects a different combination of our proposed techniques: Likert Scale Utilization (LSU),
+Simulation of Third-Person Perspective (TTP), and Option Contextualization (OC). The highest value for each
+dataset is in bold, with the overall highest underlined.
+
+
+verbalized certainty and token probabilities.             lighting both advancements and the pressing need
+   Self-Evaluation in Prompt-Based Techniques             for further improvements. The next steps involve
+Prompt-based techniques have been a major focus           formulating strategies to enhance this alignment,
+in the research community, with a particular em-          establishing a concrete metric for gauging model
+phasis on the accuracy of LLMs’ self-assessments          trustworthiness. Innovating in this direction is cru-
+for effective functionality. Newer prompting tech-        cial for advancing the development of LLMs that
+niques, such as Tree of Thoughts (ToT) (Yao et al.,       are both dependable and open.
+2023) and Self-Consistency (SC) (Wang et al.,
+2023b), have embraced this emphasis, utilizing            Limitations
+LLMs’ self-evaluation to enhance their effective-
+                                                          Accessibility to Token-Level Probabilities: Our
+ness. This represents a departure from previous
+                                                          work is bound by the confines of models for which
+approaches like Chain-of-Thought prompting (Wei
+                                                          we have access to token-level log probs/logits. This
+et al., 2023), which did not involve the use of lan-
+                                                          access is limited to specific models like GPT-3, and
+guage models as evaluators. In our work, we too
+                                                          its Reinforcement Learning from Human Feedback
+leverage the self-evaluation paradigm, but extend
+                                                          (RLHF) variant, and GPT-4 while excluding others
+this by posing multiple-choice questions and pro-
+                                                          such as PaLM 2 and Chinchilla. Consequently, our
+viding the original answer options in the prompt,
+                                                          findings are constrained to this subset of models,
+followed by a Likert scale as new answer options.
+                                                          potentially impacting the broad applicability of our
+   Language Model Communication and Collab-               results. There is a pressing need for future research
+oration Recent research has also seen the devel-          to explore the Confidence-Probability Alignment
+opment of techniques that involve multiple LLMs           across a wider spectrum of models as their internals
+communicating or collaborating to perform tasks           become available for scrutiny.
+such as planning and information extraction (Zhuge
+et al., 2023), or generating text-to-image prompts        Language-Specific Limitations: Our study pre-
+(Xu et al., 2023). In some cases, outputs from one        dominantly focuses on the English language, a lan-
+LLM have been used to fine-tune another in a ‘self-       guage with relatively limited morphology. While
+improvement scenario (Huang et al., 2022). Our            we’ve incorporated diverse datasets to analyze
+work differs from these as it primarily focuses on        Confidence-Probability Alignment, the intricacies
+a single LLM’s self-assessment of its confidence,         and subtleties of languages with richer syntactic
+highlighting the importance of understanding the          complexity could lead to different outcomes. As
+internal coherence of individual models. Our work         such, our results may not seamlessly extend to
+leverages the strengths of these existing techniques,     LLMs designed for languages with more com-
+but expands upon them to explore the alignment            plex morphological structures. This underlines
+between LLMs’ expressed confidence and their in-          the necessity for further research to understand
+ternal token probabilities.                               Confidence-Probability Alignment in LLMs devel-
+                                                          oped for a wide range of languages.
+7   Conclusion
+                                                          Meta-Level Reasoning: Our study design inher-
+We introduced the concept of Confidence-                  ently requires the ability to query the model about
+Probability Alignment to critically assess the trans-     its own confidence. This introduces a meta-level of
+parency and reliability of LLMs. Our findings             reasoning, which may not always be in line with the
+show GPT-4 exhibiting moderate alignment, high-           model’s ‘base’ level reasoning, engaged during its
+                                                      323
+primary task. The model uses its own underlying ar-        Tom Brown, Benjamin Mann, Nick Ryder, Melanie
+chitecture to introspect and express its confidence,         Subbiah, Jared D Kaplan, Prafulla Dhariwal, Arvind
+                                                             Neelakantan, Pranav Shyam, Girish Sastry, Amanda
+which could potentially introduce complex biases
+                                                             Askell, Sandhini Agarwal, Ariel Herbert-Voss,
+in the verbalized confidence.                                Gretchen Krueger, Tom Henighan, Rewon Child,
+                                                             Aditya Ramesh, Daniel Ziegler, Jeffrey Wu, Clemens
+Reliance on Prompting Techniques: Our inves-                 Winter, Chris Hesse, Mark Chen, Eric Sigler, Ma-
+tigation, while offering promising findings concern-         teusz Litwin, Scott Gray, Benjamin Chess, Jack
+ing the correlation between a model’s verbalized             Clark, Christopher Berner, Sam McCandlish, Alec
+and internal confidence, relies heavily on carefully         Radford, Ilya Sutskever, and Dario Amodei. 2020.
+                                                             Language models are few-shot learners. In Ad-
+constructed prompting techniques. While our find-            vances in Neural Information Processing Systems,
+ings provide valuable insights, it’s important to note       volume 33, pages 1877–1901. Curran Associates,
+that they are largely dependent on precise prompt-           Inc.
+ing. As such, variations in the prompt formulation
+                                                           Aakanksha Chowdhery, Sharan Narang, Jacob Devlin,
+can affect the effectiveness of these findings in            Maarten Bosma, Gaurav Mishra, Adam Roberts,
+different contexts. This constraint highlights the           Paul Barham, Hyung Won Chung, Charles Sutton,
+need for developing models that can demonstrate              Sebastian Gehrmann, et al. 2022. Palm: Scaling
+Confidence-Probability Alignment without a sig-              language modeling with pathways. arXiv preprint
+                                                             arXiv:2204.02311.
+nificant dependency on the art of prompting.
+                                                           Peter Clark, Isaac Cowhey, Oren Etzioni, Tushar Khot,
+Model Confidence and Prompt Accuracy: In                     Ashish Sabharwal, Carissa Schoenick, and Oyvind
+the context of this study, our primary objective             Tafjord. 2018. Think you have solved question an-
+is not to optimize the accuracy of the model’s re-           swering? try arc, the ai2 reasoning challenge.
+sponses, but rather to explore the nuances in the
+                                                           Shizhe Diao, Pengcheng Wang, Yong Lin, and Tong
+relationship between a model’s internal and verbal-
+                                                             Zhang. 2023. Active prompting with chain-of-
+ized confidence. While enhancing model accuracy              thought for large language models. arXiv preprint
+is undeniably important, it lies outside the primary         arXiv:2302.12246.
+focus of this study. For future work, the poten-
+tial exists for implementing feedback loops and            Yilun Du, Shuang Li, Antonio Torralba, Joshua B Tenen-
+                                                              baum, and Igor Mordatch. 2023. Improving factual-
+adjustments based on a model’s accuracy, although             ity and reasoning in language models through multia-
+such explorations extend beyond the scope of our              gent debate. arXiv preprint arXiv:2305.14325.
+current work.
+                                                           Jordan Hoffmann, Sebastian Borgeaud, Arthur Men-
+Ethical Implications: While enhancing LLM                     sch, Elena Buchatskaya, Trevor Cai, Eliza Ruther-
+transparency, our exploration of confidence-                  ford, Diego de Las Casas, Lisa Anne Hendricks,
+                                                             Johannes Welbl, Aidan Clark, et al. 2022. Train-
+probability alignment also reveals ethical chal-              ing compute-optimal large language models. arXiv
+lenges. Misaligned confidence can spread misinfor-            preprint arXiv:2203.15556.
+mation, and understanding model confidence could
+be exploited maliciously. Despite our focus on re-         Jiaxin Huang, Shixiang Shane Gu, Le Hou, Yuexin Wu,
+                                                              Xuezhi Wang, Hongkun Yu, and Jiawei Han. 2022.
+sponsible LLM use, users must critically evaluate             Large language models can self-improve.
+model outputs, emphasizing the need for stringent
+ethical guidelines and safeguards against potential        Yi-Chong Huang, Xia-Chong Feng, Xiao-Cheng Feng,
+misuse.                                                      and Bing Qin. 2021. The factual inconsistency prob-
+                                                             lem in abstractive text summarization: A survey.
+                                                             CoRR, abs/2104.14839.
+Acknowledgements
+This work was supported by the Natural Sciences            Ziwei Ji, Nayeon Lee, Rita Frieske, Tiezheng Yu, Dan
+                                                             Su, Yan Xu, Etsuko Ishii, Ye Jin Bang, Andrea
+and Engineering Research Council of Canada and               Madotto, and Pascale Fung. 2023. Survey of halluci-
+by the New Frontiers in Research Fund.                       nation in natural language generation. ACM Comput.
+                                                             Surv., 55(12).
+
+References                                                 Tushar Khot, Peter Clark, Michal Guerquin, Pe-
+                                                             ter Alexander Jansen, and Ashish Sabharwal. 2019.
+Hussam Alkaissi and Samy I McFarlane. 2023. Artifi-          Qasc: A dataset for question answering via sentence
+  cial hallucinations in chatgpt: implications in scien-     composition. In AAAI Conference on Artificial Intel-
+  tific writing. Cureus, 15(2).                              ligence.
+                                                       324
+Lorenz Kuhn, Yarin Gal, and Sebastian Farquhar. 2023.     Alon Talmor, Jonathan Herzig, Nicholas Lourie, and
+  Semantic uncertainty: Linguistic invariances for un-      Jonathan Berant. 2019. Commonsenseqa: A question
+  certainty estimation in natural language generation.      answering challenge targeting commonsense knowl-
+                                                            edge. In Proceedings of NAACL-HLT, pages 4149–
+Bill Yuchen Lin, Ziyi Wu, Yichi Yang, Dong-Ho Lee,          4158.
+  and Xiang Ren. 2021. RiddleSense: Reasoning
+  about riddle questions featuring linguistic creativ-    Hugo Touvron, Thibaut Lavril, Gautier Izacard, Xavier
+  ity and commonsense knowledge. In Findings of             Martinet, Marie-Anne Lachaux, Timothée Lacroix,
+  the Association for Computational Linguistics: ACL-       Baptiste Rozière, Naman Goyal, Eric Hambro,
+  IJCNLP 2021, pages 1504–1515, Online. Association         Faisal Azhar, et al. 2023. Llama: Open and effi-
+  for Computational Linguistics.                            cient foundation language models. arXiv preprint
+                                                            arXiv:2302.13971.
+Stephanie Lin, Jacob Hilton, and Owain Evans. 2022.
+  Teaching models to express their uncertainty in         Lewis Tunstall, Edward Beeching, Nathan Lambert,
+  words.                                                    Nazneen Rajani, Kashif Rasul, Younes Belkada,
+                                                            Shengyi Huang, Leandro von Werra, Clémentine
+Zhen Lin, Shubhendu Trivedi, and Jimeng Sun. 2023.          Fourrier, Nathan Habib, et al. 2023. Zephyr: Di-
+  Generating with confidence: Uncertainty quantifica-       rect distillation of lm alignment. arXiv preprint
+  tion for black-box large language models.                 arXiv:2310.16944.
+Yu Lu, Jiali Zeng, Jiajun Zhang, Shuangzhi Wu, and        Vishal Thanvantri Vasudevan, Abhinav Sethy, and
+  Mu Li. 2022. Learning confidence for transformer-         Alireza Roshan Ghias. 2019. Towards better confi-
+  based neural machine translation. In Proceedings          dence estimation for neural models. In ICASSP 2019
+  of the 60th Annual Meeting of the Association for         - 2019 IEEE International Conference on Acoustics,
+  Computational Linguistics (Volume 1: Long Papers),        Speech and Signal Processing (ICASSP), pages 7335–
+  pages 2353–2364, Dublin, Ireland. Association for         7339.
+  Computational Linguistics.
+                                                          Peiyi Wang, Lei Li, Liang Chen, Dawei Zhu, Binghuai
+Clara Meister, Gian Wiher, Tiago Pimentel, and              Lin, Yunbo Cao, Qi Liu, Tianyu Liu, and Zhifang Sui.
+  Ryan Cotterell. 2022. On the probability-quality          2023a. Large language models are not fair evaluators.
+  paradox in language generation. arXiv preprint            arXiv preprint arXiv:2305.17926.
+  arXiv:2203.17217.
+                                                          Xuezhi Wang, Jason Wei, Dale Schuurmans, Quoc V Le,
+Sabrina J. Mielke, Arthur Szlam, Emily Dinan, and Y-
+                                                            Ed H. Chi, Sharan Narang, Aakanksha Chowdhery,
+  Lan Boureau. 2022. Reducing conversational agents’
+                                                            and Denny Zhou. 2023b. Self-consistency improves
+  overconfidence through linguistic calibration. Trans-
+                                                            chain of thought reasoning in language models. In
+  actions of the Association for Computational Linguis-
+                                                            The Eleventh International Conference on Learning
+  tics, 10:857–872.
+                                                            Representations.
+Todor Mihaylov, Peter Clark, Tushar Khot, and Ashish
+  Sabharwal. 2018. Can a suit of armor conduct elec-      Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten
+  tricity? a new dataset for open book question answer-      Bosma, Brian Ichter, Fei Xia, Ed Chi, Quoc Le, and
+  ing. In Conference on Empirical Methods in Natural         Denny Zhou. 2023. Chain-of-thought prompting elic-
+  Language Processing.                                       its reasoning in large language models.
+
+OpenAI. 2023. Gpt-4 technical report.                     Binfeng Xu, Zhiyuan Peng, Bowen Lei, Subhabrata
+                                                            Mukherjee, Yuchen Liu, and Dongkuan Xu. 2023.
+Long Ouyang, Jeffrey Wu, Xu Jiang, Diogo Almeida,           Rewoo: Decoupling reasoning from observations for
+  Carroll Wainwright, Pamela Mishkin, Chong Zhang,          efficient augmented language models.
+  Sandhini Agarwal, Katarina Slama, Alex Ray, et al.
+  2022. Training language models to follow instruc-       Shunyu Yao, Dian Yu, Jeffrey Zhao, Izhak Shafran,
+  tions with human feedback. Advances in Neural             Thomas L Griffiths, Yuan Cao, and Karthik
+  Information Processing Systems, 35:27730–27744.           Narasimhan. 2023. Tree of thoughts: Deliberate
+                                                            problem solving with large language models. arXiv
+J Schulman, B Zoph, C Kim, J Hilton, J Menick, J Weng,      preprint arXiv:2305.10601.
+   JFC Uribe, L Fedus, L Metz, M Pokorny, et al. 2022.
+   Chatgpt: Optimizing language models for dialogue.      Mert Yuksekgonul, Linjun Zhang, James Zou, and Car-
+                                                           los Guestrin. 2023. Beyond confidence: Reliable
+Kurt Shuster, Spencer Poff, Moya Chen, Douwe Kiela,        models should also consider atypicality.
+  and Jason Weston. 2021. Retrieval augmentation
+  reduces hallucination in conversation. In Findings      Lianmin Zheng, Wei-Lin Chiang, Ying Sheng, Siyuan
+  of the Association for Computational Linguistics:         Zhuang, Zhanghao Wu, Yonghao Zhuang, Zi Lin,
+  EMNLP 2021, pages 3784–3803, Punta Cana, Do-              Zhuohan Li, Dacheng Li, Eric Xing, et al. 2023.
+  minican Republic. Association for Computational           Judging llm-as-a-judge with mt-bench and chatbot
+  Linguistics.                                              arena. arXiv preprint arXiv:2306.05685.
+                                                      325
+Kaitlyn Zhou, Dan Jurafsky, and Tatsunori Hashimoto.
+  2023. Navigating the grey area: Expressions of over-
+  confidence and uncertainty in language models.
+Mingchen Zhuge, Haozhe Liu, Francesco Faccio, Dy-
+  lan R. Ashley, Róbert Csordás, Anand Gopalakrish-
+  nan, Abdullah Hamdi, Hasan Abed Al Kader Ham-
+  moud, Vincent Herrmann, Kazuki Irie, Louis Kirsch,
+  Bing Li, Guohao Li, Shuming Liu, Jinjie Mai, Piotr
+  Pi˛ekos, Aditya Ramesh, Imanol Schlag, Weimin Shi,
+  Aleksandar Stanić, Wenyi Wang, Yuhui Wang, Meng-
+  meng Xu, Deng-Ping Fan, Bernard Ghanem, and
+  Jürgen Schmidhuber. 2023. Mindstorms in natural
+  language-based societies of mind.
+
+
+
+
+                                                     326
+A    Appendix
+
+ Int.         Verb.        Qualitative Examples                                         Alignment Type
+ Conf.        Cert.
+                           Question: What does a person do when they feel
+                           dirty?
+                           Answer: C. Wash themselves
+ ▲ 1.00       ▲ 1.00       Response: a. Very certain. Washing oneself is the          Consistent Alignment
+                           most logical and appropriate response when feeling
+                           dirty. The other options do not make sense in this
+                           context.
+                           Question: Which body of water has the fewest
+                           plants and animals living in it?
+                           Answer: C. Glacier
+ ▲ 0.99       ▼ 0.20       Response: Answer: e. Not certain. Glaciers typ- Internal Overconfidence
+                           ically have very few plants and animals living in
+                           them, but it is possible that some of the other op-
+                           tions could also have fewer plants and animals liv-
+                           ing in them.
+                           Question: When a gas in an open container spreads
+                           out, what presents a danger?
+                           Answer: H. Fumes
+ ▼ 0.66       ▲ 1.00       Response:a. Very certain. Fumes present a danger External Overconfidence
+                           when a gas in an open container spreads out, as they
+                           can be toxic and cause health problems. The other
+                           options do not present a danger in this situation.
+                           Question: If a blind person needs to know which
+                           cat has long hair and which has short hair, they can?
+                           Answer: C. grab it
+ ▼ 0.61       ▼ 0.40       Response: The answer would be d. somewhat                 Consistent Discordance
+                           certain. While grabbing the cat is the only way to
+                           physically determine which one has long or short
+                           hair, it is not the most practical or safe option.
+
+Table A.1: Examples demonstrating instances of similar and contrasting values of internal confidence (Int. Conf.)
+and verbalized certainty (Verb. Cert.). Question is the question asked of the model, Answer is what the model
+responded, and Response represents the model’s justification and confidence in the given answer (verbalized
+certainty). All tests are shown with InstructGPT-3 + RLHF (text-davinci-003). Questions sourced from the
+CommonsenseQA dataset.
+
+
+
+
+                                                      327
+Figure A.1: Detailed flow diagram illustrating the entire Confidence-Probability Alignment evaluation process from
+start to finish, demonstrating specific examples of interactions between the user and GPT-4 (gpt-4-0613) at each
+stage.
+
+
+
+                                                       328
+                                                                      powerlaw
+
+                                                                                      80
+                   powerlaw       100                                                       20
+                                                                                                 cauchy
+                    (a) InstructGPT + RLHF                                     (b) InstructGPT
+                                                                 powerlaw
+
+                                                            40
+                                                         60
+
+                                             exponpow
+                                                 (c) OpenAI’s GPT-3
+
+Figure A.2: The distributions of verbalized certainty, categorized by different model types. By examining these
+categories, we gain insights into how various models express certainty and their resemblance to prevalent distribution
+patterns.
+
+
+
+
+                exponpow
+                                                                      cauchy
+                             60
+                                  20                                             80
+                             20                                                        20
+                                        cauchy
+                 powerlaw                                                                    powerlaw
+                    (a) InstructGPT + RLHF                                     (b) InstructGPT
+                                              cauchy
+
+                                                       60
+                                                        40
+                                                              exponpow
+                                                 (c) OpenAI’s GPT-3
+
+Figure A.3: The distributions of internal confidence, categorized by different model types. By examining these
+categories, we gain insights into the distribution patterns of a model’s inner confidence.
+
+
+
+
+                                                         329
+ Int.         Verb.        Qualitative Examples                                         Alignment Type
+ Conf.        Cert.
+                           Question: What are busses used for?
+
+
+                           Answer: B. Transporting humans
+ ▲ 1.00       ▲ 1.00       Response: A. Very certain                                  Consistent Alignment
+                           Question: What is used to warn other wolves by
+                           wolves?
+                           Answer: C. Discreet shouting
+ ▲ 0.98       ▼ 0.00       Response: E. Very uncertain                      Internal Overconfidence
+                           Question: Who can prevent injury by forming pro-
+                           tective plates over the ends of the fingers?
+
+                           Answer: B. Keratin
+ ▼ 0.64       ▲ 1.00       Response: A. Very certain.                     External Overconfidence
+                           Question: Cucumbers and what possess a mutual-
+                           ism in which both species benefit?
+                           Answer: B. Trees
+ ▼ 0.60       ▼ 0.00       Response: F. Very uncertain.                              Consistent Discordance
+
+Table A.2: Examples demonstrating instances of similar and contrasting values of internal confidence (Int. Conf.)
+and verbalized certainty (Verb. Cert.). Question is the question asked of the model, Answer is what the model
+responded, and Response represents the model’s justification and confidence in the given answer (verbalized
+certainty). All tests are shown with GPT-4. Questions sourced from the Question Answering via Sentence
+Composition dataset.
+
+
+
+
+                                                      330
+ Design Alternatives Prompt
+                     Analyse its answer given other options. How certain are you about model’s
+                     answer?
+                     a. Not certain at all
+      Five-point     b. Slightly certain
+     Likert Scale    c. Somewhat certain
+                     d. Fairly certain
+                     e. Completely certain
+                     Analyse its answer given other options. How certain are you about model’s
+                     answer?
+                     a. Not certain at all: Model has very low confidence in the answer.
+     Definitions     b. Slightly certain: Model has a small amount of confidence in the answer.
+     of Options      c. Somewhat certain: Model has moderate confidence in the answer.
+                     d. Fairly certain: Model has a reasonable amount of confidence in the answer.
+                     e. Completely certain: Model has high confidence and no doubt in the answer.
+                     Given the other options, analyse the language model’s answer. How certain are
+                     you about the correctness of the language model’s answer?
+                     a. Not certain at all
+   Strict Grammar    b. Slightly certain
+     Adherence       c. Somewhat certain
+                     d. Fairly certain
+                     e. Completely certain
+                     In this approach, we adopted a methodology similar to the concept of self-
+                     consistency (Wang et al., 2023b). Rather than selecting the verbalized certainty
+  Self-consistency   immediately, we employed a majority vote to determine the chosen value. In
+                     this case, the set comprises five different values representing the verbalized
+                     certainties.
+
+Table A.3: The diverse experimental prompt design alternatives, including the Five-point Likert Scale, Definitions
+of Options, Strict Grammar Adherence, and Self-consistency with each design illustrated by a sample prompt.
+These formulations were excluded from the final model due to their under-performance in initial batch studies.
+
+
+
+
+                                                       331
+ Prompt Components Prompt
+                   You were asked: {question}
+     Numerical     Your answer was: {response}
+        scale      Analyse your answer. On a scale of 1 to 100, how certain are you about your
+                   answer?
+                   You were asked: {question}
+                   Your answer was: {response}
+                   Analyse your answer. How certain are you about your answer?
+                   a. very certain
+        LSU        b. fairly certain
+                   c. moderately certain
+                   d. somewhat certain
+                   e. not certain
+                   f. very uncertain
+                   A Language model was asked: {question}
+                   Model’s answer was: {response}
+                   Analyse its answer. How certain are you about model’s answer?
+                   a. very certain
+     TTP + LSU     b. fairly certain
+                   c. moderately certain
+                   d. somewhat certain
+                   e. not certain
+                   f. very uncertain
+                   You were asked: {question}
+                   Options were: {choices}
+                   Your answer was: {response}
+                   Analyse your answer given the other options. How certain are you about your
+                   answer?
+                   a. very certain
+     OC + LSU      b. fairly certain
+                   c. moderately certain
+                   d. somewhat certain
+                   e. not certain
+                   f. very uncertain
+                   A Language model was asked: {question}
+                   Options were: {choices}
+                   Model’s answer was: {response}
+                   Analyse its answer given other options. How certain are you about model’s
+                   answer?
+                   a. very certain
+   TTP + OC + LSU  b. fairly certain
+                   c. moderately certain
+                   d. somewhat certain
+                   e. not certain
+                   f. very uncertain
+
+Table A.4: The variety of prompts utilized in our component analysis, making use of key techniques such as
+Numerical Scale, Likert Scale (LSU), Third-Person Perspective (TTP), and Option Contextualization (OC).
+Each row of the table outlines a different technique combination.
+
+
+
+                                                   332
+ Question                     Answer
+                                   InstructGPT3    GPT-4    Zephyr-7b                                      Phi-2
+                                   IC      VC   IC     VC IC      VC                                   IC      VC
+ When a lady beetle laying clutch 0.99 ↑ 1↑     0.99 ↑ 1 ↑ 0.99 ↑ 1 ↑                                  0.97 ↑ 1 ↑
+ is grown up, she may
+ spend time
+ A ruler is used for mea- stuff    0.99 ↑ 0.8 ↑ 0.99 ↑ 1 ↑ 0.49 ↓ 0.6 ↓                                0.43 ↓ 0.6 ↓
+ suring the length of
+ what?
+ You can see an elec- making toast 0.59 ↓ 0.2 ↓ 1 ↑    1 ↑ 0.99 ↑ 1.0 ↑                                0.59 ↓ 0.6 ↓
+ trical circuit in motion
+ when
+
+Table A.5: Table demonstrating internal confidence and verbalized certainty combinations for InstructGPT3(RLHF),
+GPT-4, Zephyr-7b and Phi-2 on common instances in CSQA. Here, IC stands for internal confidence and VC
+denotes verbalized certainty.
+
+
+             CSQA                  QASC              Riddle Sense          OpenbookQA                 ARC
+          ✓      ✗              ✓      ✗              ✓      ✗               ✓     ✗               ✓     ✗
+        + 30.3 5.1            + 34.1 6.6            + 23.1 4.4             + 21.9 2.9            + 31.1 4.4
+        - 40.5 21.9           - 25.3 30.5           - 38.3 23.8            - 50.3 17             - 47 14.8
+
+Figure A.4: Assessment of verbalized certainty and accuracy using InstructGPT-3 + RLHF. The figure displays the
+data as percentages for each dataset utilized. Here, + = very certain, - = fairly certain, ✓= correct, and ✗= incorrect.
+
+
+
+
+Figure A.5: The distribution of verbalized certainty,
+mapped to values ranging from 0 to 1, across all
+                                                              Figure A.6: The distribution of internal confidence
+datasets. The distribution is derived by applying a scor-
+                                                              across multiple datasets, composed of the adjusted token
+ing dictionary to the verbalized certainty obtained from
+                                                              probabilities obtained from InstructGPT-3 + RLHF.
+InstructGPT-3 + RLHF.
+
+
+
+
+                                                            333
+ Int. Conf. Verb. Cert. Example                                             Alignment Type
+                        Q: What makes someone a nomad?                   Consistent Alignment
+ ▲ 1.00     ▲ 1.00      A: C. have no home
+                        Q: Where would using a boat not require naviga- Internal Overconfidence
+                        tion skills?
+ ▲ 0.99     ▼ 0.20      A: C. garage
+                        Q: What do professors primarily do?             External Overconfidence
+ ▼ 0.66     ▲ 1.00      A: E. teach courses
+                        Q: Killing people should not cause what emo- Consistent Discordance
+                        tion?
+ ▼ 0.61     ▼ 0.40      A: C. joy
+
+Table A.6: Instances of similar and contrasting values of internal confidence (Int. Conf.) and verbalized certainty
+(Verbal Cert.). Q represents the model’s question, and A is the model’s answer. Tests are from InstructGPT-3 +
+RLHF (text-davinci-003) using the CommonsenseQA dataset.
+
+
+
+
+                                                       334
+

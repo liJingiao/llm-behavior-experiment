@@ -1,0 +1,1285 @@
+   Beyond Facts: Evaluating Intent Hallucination in Large Language Models
+
+
+               Yijie Hao                             Haofei Yu                              Jiaxuan You
+            Emory University                           UIUC                                    UIUC
+           yhao49@emory.edu                    haofeiy2@illinois.edu                   jiaxuan@illinois.edu
+
+
+
+
+                          Abstract                                   Unlike factual hallucination (Li et al., 2023; Cao
+        When exposed to complex queries contain-
+                                                                  et al., 2021), which researchers can directly detect
+        ing multiple conditions, today’s large language           through search-based fact-checking (Sellam et al.,
+        models (LLMs) tend to produce responses that              2020; Min et al., 2023), detecting and evaluating
+        only partially satisfy the query while neglecting         intent hallucination poses more challenges. This
+        certain conditions. We therefore introduce the            is because complex queries often contain duplicate
+        concept of Intent Hallucination. In this phe-             intents, and LLMs often satisfy only a portion of
+        nomenon, LLMs either omit (neglecting to ad-              them, making dissatisfaction difficult to detect or
+        dress certain parts) or misinterpret (responding
+                                                                  quantify. Furthermore, as LLMs continue to ad-
+        to invented query parts) elements of the given
+        query, leading to intent hallucinated generation.         vance, users tend to provide these stronger LLMs
+        To systematically evaluate intent hallucination,          with increasingly complicated queries, which even
+        we introduce FAITH QA, a novel benchmark for              humans find difficult to understand. This trend
+        intent hallucination that contains 20,068 prob-           highlights the need for LLMs to be not only fac-
+        lems, covering both query-only and retrieval-             tually correct but also intentionally aligned with
+        augmented generation (RAG) setups with vary-              human beings. Our paper addresses two under-
+        ing topics and difficulty. FAITH QA is the first
+                                                                  explored questions: (1) Why do LLMs tend to ex-
+        hallucination benchmark that goes beyond fac-
+        tual verification, tailored to identify the funda-
+                                                                  hibit Intent Hallucination? and (2) How can we
+        mental cause of intent hallucination. By eval-            detect Intent Hallucination? Answering these ques-
+        uating various LLMs on FAITH QA, we find                  tions is vital for LLM applications that rely on both
+        that (1) intent hallucination is a common is-             factual accuracy and faithful intent alignment.
+        sue even for state-of-the-art models, and (2)                For the first question, we propose that LLMs’
+        the phenomenon stems from omission or mis-                omission (e.g., ignoring query components) or mis-
+        interpretation of LLMs. To facilitate future re-          interpretation (e.g., responding to invented query
+        search, we introduce an automatic LLM gener-
+                                                                  components) over word-level meaning constitutes
+        ation evaluation metric, C ONSTRAINT S CORE,
+        for detecting intent hallucination. Human eval-           the fundamental cause of intent hallucination. To
+        uation results demonstrate that C ONSTRAINT               further investigate, we introduce FAITH QA, the
+        S CORE is closer to human performance for in-             first benchmark specifically designed to address
+        tent hallucination compared to baselines.                 intent hallucination’s two key scenarios: omis-
+                                                                  sion and misinterpretation. FAITH QA consists of
+   1    Introduction
+                                                                  20,068 queries, validated through extensive human
+   Large Language Models (LLMs) have demon-                       evaluations to ensure quality. FAITH QA covers a
+   strated utility across various applications (Ope-              wide range of topics with varying levels of diffi-
+   nAI et al., 2024; Dubey et al., 2024). However,                culty and proves challenging even for state-of-the-
+   hallucination remains a significant challenge (Ji              art models. Our benchmark reveals that increasing
+   et al., 2023; Huang et al., 2023). In particular,              query complexity correlates with a higher rate of
+   for complex queries containing multiple conditions             intent hallucination.
+   (Figure 1), LLM outputs often deviate from the                    To address the second question, we introduce
+   query, yielding unsatisfactory results. We term this           C ONSTRAINT S CORE, a new evaluation metric that
+   phenomenon “Intent Hallucination”, which has re-               focuses on detecting intent hallucination. Our ap-
+   ceived little attention in current research (Min et al.,       proach involves two major steps: (1) decomposing
+   2023; Hou et al., 2024; Manakul et al., 2023).                 the query by concepts and actions, then convert-
+                                                             7046
+Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pages 7046–7069
+                            July 27 - August 1, 2025 ©2025 Association for Computational Linguistics
+Figure 1: Examples of two types of intent hallucination (omission and misinterpretation). For omission, GPT-
+4o omits ”particularly from Spain”, leading to factually accurate yet hallucinated outputs. For misinterpretation,
+GPT-4o misinterprets the missing article as provided, which leads to hallucinated outputs.
+
+
+ing it into a series of short statements, each repre-     2019), as noted in several studies (Ji et al., 2023;
+senting a specific requirement the generation must        Azaria and Mitchell, 2023; Huang et al., 2023; Cao
+meet; and (2) assigning an importance-weighted            et al., 2021). To address this issue, many efforts
+binary label to each constraint, which enables fine-      aim to detect and mitigate hallucinations. Min
+grained evaluation. Our human evaluation shows            et al. (2023) evaluate factual accuracy by checking
+that C ONSTRAINT S CORE significantly outper-             core facts (atomic facts) in each sentence against
+forms LLM-as-the-judge (Manakul et al., 2023;             reliable sources such as Wikipedia. Hou et al.
+Mishra et al., 2024; Sriramanan et al., 2024), as         (2024) propose a hidden Markov tree model that
+LLM judgers tend to provide biased evaluations            breaks statements into premises and assigns a fac-
+compared with human judgment.                             tuality score based on the probability of all parent
+   Taken together, our key contributions include:         premises. Manakul et al. (2023) detects halluci-
+(1) We propose the concept of intent hallucination        nations by sampling multiple responses and using
+beyond the existing category of factual hallucina-        self-consistency to identify discrepancies.
+tion; (2) We develop FAITH QA, the first bench-              Despite these significant efforts, limitations re-
+mark that focuses on evaluating intent hallucina-         main. Most existing work either focuses solely on
+tion. Our result shows that intent hallucination          factual precision or on in-context recall, overlook-
+represents a prevalent phenomenon even for state-         ing the role of the query in generation (Li et al.,
+of-the-art LLMs; (3) We introduce C ONSTRAINT             2023; Yang et al., 2023; Niu et al., 2024) (e.g.,
+S CORE, a novel evaluation metric that automati-          scoring both outputs equally in Figure 2), or treats
+cally assesses LLM generations by breaking down           the query as a whole (Zhang et al., 2024a), which
+the query into intent constraints and computing           results in coarse-grained evaluation.
+a weighted score. Our analysis shows that C ON -          Hallucination benchmarks. Recent work on hal-
+STRAINT S CORE significantly outperforms pure             lucination detection for LLMs includes HaluE-
+LLM grading baselines, which tend to be biased.           val (Li et al., 2023) (synthetic and natural re-
+                                                          sponses), FELM (Chen et al., 2023) (natural re-
+2   Related Works
+                                                          sponses across domains), RAGTruth (Niu et al.,
+Hallucinations in LLMs. In LLMs, ”hallucina-              2024) (RAG hallucinations), and InfoBench (Qin
+tion” refers to outputs that are nonfactual, irrele-      et al., 2024) (instruction-following via query de-
+vant, or fabricated. This issue arises in tasks such      composition). These benchmarks mainly focus on
+as question answering (Sellam et al., 2020), trans-       factual hallucinations or require manual annota-
+lation (Lee et al., 2018), summarization (Durmus          tion. In contrast, FAITH QA is, to our knowledge,
+et al., 2020), and dialogue (Balakrishnan et al.,         the first to assess non-factual hallucinations from a
+                                                      7047
+query-centric perspective.                                define the mapping function C : Q −→ P(I) by
+   Although Zhang et al. (2024b) also discusses
+                                                                 C(q) = Cm (q) ∪ Ci (q) ∪ Co (q),             (1)
+a related topic, their work primarily explores the
+causes of intent hallucination from a training cor-       where Cm (q) ⊆ I is the set of mandatory
+pus perspective. In contrast, our paper provides          constraints (those that must be addressed first),
+a comprehensive evaluation metric along with an           Ci (q) ⊆ I is the set of important constraints (those
+extensive benchmark for systematic testing. FaithE-       addressed after mandatory ones), and Co (q) ⊆ I is
+val (Ming et al., 2025) investigates hallucination in     the set of optional constraints (desirable but not re-
+RAG settings by evaluating whether model outputs          quired). This mapping ensures that C(q) captures
+remain faithful to externally retrieved contexts, par-    all intent constraints needed to preserve the original
+ticularly under conditions involving unanswerable         meaning of q.
+or contradictory evidence. FAITH QA adopts a sim-
+ilar RAG setup but shifts the focus from context          3.2   Intent Hallucination: Omission or
+alignment to query alignment. It introduces a novel,            Misinterpretation of Intent Constraints
+query-centric perspective that evaluates whether          After establishing a fine-grained, query-centric per-
+model responses accurately fulfill the user’s query.      spective, we formally define intent hallucination as
+Our experimental results align with the findings          the LLM’s failure to address word-level concepts
+from FaithEval and reveal that when LLMs are              or actions, which manifests as an omission or mis-
+presented with relevant yet incomplete or noisy           interpretation of intent constraints. When LLMs
+retrievals, they frequently exhibit omission-style        either omit parts of the query (e.g., failing to ad-
+intent hallucination, failing to address all aspects      dress specific concepts or actions) or misinterpret
+of the original query.                                    it (e.g., responding to concepts or actions that are
+                                                          not mentioned), the generation fails to align with
+3   Preliminary                                           the original query, regardless of whether it is fac-
+                                                          tually accurate. Treating intent constraints as the
+For a complex query containing multiple condi-            fundamental evaluation unit for intent hallucina-
+tions, studies report that the model produces re-         tion proves especially important when dealing with
+sponses that only partially satisfy the conditions.       complex, multi-condition queries. In such cases,
+To further investigate this, we outline our key in-       an LLM often generates a response that addresses
+sights for intent hallucination in this paper.            the query only partially while neglecting the rest.
+                                                          Evaluating generation outputs against intent con-
+3.1 Intent Constraint: a Fundamental Unit                 straints offers an effective approach to identify and
+A query consists of multiple concepts and actions,        distinguish these nuanced discrepancies.
+each representing a distinct intent and carrying spe-     Definition 3.2 (Intent Hallucination). Let q be a
+cific meaning within the given context. As shown          user query and let Pθ denote our LLM. Denote by
+in Figure 1, LLMs often fail to address constraints       C(q) = { c1 , . . . , ck } the set of intent constraints
+provided in the query, which leads to intent halluci-     extracted from q. Ideally, the model’s distribution
+nated generations that deviate from the query. To         depends only on those constraints, i.e.,
+enable a fine-grained, query-centric evaluation, we                                                 
+                                                                     Pθ · | q = Pθ · | C(q) .                  (2)
+introduce the notion of Intent Constraint—short
+statements that each express a single requirement         However, in practice the model often conditions
+the generation must address (see examples in Fig-         implicitly on a hallucinated constraint set
+ure 2). A query, defined by the concepts and ac-
+                                                                        b
+                                                                        C(q) = {ĉ1 , . . . , ĉk′ },         (3)
+tions within the context, breaks down into these
+intent constraints, with each one representing a dis-     which differs from C(q) (for instance, by replacing
+tinct concept or action. Addressing each of these         a constraint ci with ĉi , or by omitting a constraint).
+constraints helps reduce the risk of hallucinated         In that case, the actual response follows
+responses that misalign with the query’s intent.                                               
+                                                                          yh ∼ Pθ · | C(q) b     ,            (4)
+Definition 3.1 (Intent Constraint Mapping Func-
+tion). Let Q be the set of all queries and I be the set   and the deviation between yh and the ideal response
+of all possible intent constraints. For each q ∈ Q,       y ∼ Pθ (· | C(q)) is defined as intent hallucination.
+                                                      7048
+Figure 2: C ONSTRAINT S CORE calculation process. Despite both generations being factually accurate, Generation
+1 is not ideal compared to Generation 2, as Generation 1 omits ”the explorers must be from Spain”.
+
+
+4   Detecting Intent Hallucination                       given prompt generated from Step 2 across seven
+                                                         categories—location, time, subject, action, quali-
+Based on the definition of intent constraints and
+                                                         fiers, and quantity—and then reformulate these into
+intent hallucinations, we introduce C ONSTRAINT
+                                                         three constraint sets: Cm (q), which includes the lo-
+S CORE, a new evaluation metric that detects intent
+                                                         cation, time, subject, and action constraints; Ci (q),
+hallucination based on intent constraints. To op-
+                                                         which includes qualifiers and quantity constraints;
+erationalize the constraint mapping function C(·)
+                                                         and Co (q), which includes any other constraints
+defined earlier, we develop a multi-step process
+                                                         the LLM provides, such as exclusions or domain-
+that systematically extracts and categorizes the in-
+                                                         specific requirements.
+tent constraint set from queries. Our method has
+                                                         Overall. This process yields a structured decom-
+high flexibility and accommodates different queries
+                                                         position of the original query into constraint sets.
+involving RAG. The prompt template appears in
+                                                         We detect intent hallucination by comparing the im-
+Appendix§D.2.                                                                  b
+                                                         plicit constraint set C(q) used by the model against
+4.1 Intent Constraint Mapping                            our explicitly extracted C(q).
+Step 1: Preliminary assessment. The LLM first
+                                                         4.2   Intent Constraint Scoring
+analyzes the query q to verify the presence of suf-
+ficient information for constraint extraction. This      Given the intent constraint set C(q) together with
+step is crucial for RAG queries, as it mitigates the     three subsets Cm (q), Ci (q), and Co (q), we evalu-
+influence of external content (Liu et al., 2023; Wu      ate the response’s adherence to intent constraints.
+et al., 2024). If it detects insufficient information,   For each intent constraint c ∈ C(q) and each re-
+the constraint mapping process halts and requests        sponse y, we define a binary satisfaction function
+additional input, ensuring that C(q) is well defined.    Sϕ (c, y), parameterized with an LLM. Sϕ (c, y) =
+Step 2: Semantic role identification. Drawing            1 indicates that y satisfies the intent constraint c,
+from Semantic Role Labeling (SRL) (Pradhan et al.,       while Sϕ (c, y) = 0 indicates it does not. To cal-
+2005), we extract the fundamental components of          culate an intent constraint score for each response
+q: subject, action, and context. This structured         y conditioned on a query q, we divide the process
+decomposition enables robust constraint identifica-      into three steps:
+tion across diverse types of real-world queries.         Step 1: Total weight calculation. We begin by
+Step 3: Constraint set extraction. We instruct           computing the total constraint weight Wt (q) for a
+the language model to analyze the context of a           given query q, based on three types of constraints:
+                                                     7049
+mandatory (m), important (i), and optional (o). Let                                               Task Difficulty
+                                                              FAITH QA Datasets
+G = {m, i, o} denote the set of constraint types,                                                Easy Hard Total
+and let αg be the predefined importance weight for
+type g ∈ G. The total weight is computed as:                  Omission
+
+                     X                                        Fact QA             Open Answer 1,500 1,500 3,000
+               Wt =       αg |Cg (q)|,          (5)                               Story          500   500   1,000
+                        g∈G                                   Creative Writing
+                                                                                  Poem           500   500   1,000
+where |Cg (q)| is the number of constraints of type           Misinterpretation
+g for query q.
+                                                              Response Evaluation –               –     –    3,210
+Step 2: Satisfied weight calculation. Next, we
+evaluate how well a response y satisfies each con-            Content Analysis
+                                                                                  Relationship    –     –    5,929
+straint c ∈ Cg (q) using the satisfaction function                                Summary         –     –    5,929
+Sϕ (c, y) ∈ [0, 1]. The total satisfied weight is then:
+                                                           Table 1: FAITH QA’s Statistics. Easy indicates con-
+                  X           X                            straint number ≤ 4, Hard indicates constraint number
+          Ws =          αg              Sϕ (c, y).   (6)
+                                                           > 4. For Omission’s Fact QA, topics include Tech, Cul-
+                  g∈G        c∈Cg (q)                      ture, and History. For Misinterpretation, topics include
+Step 3: Constraint score calculation. Finally, we          Tech, Health, Culture, and History.
+compute the constraint score (CS) by normalizing
+the satisfied weight by the total weight and scaling       QA and Creative Writing as our omission setups,
+it to a range from 0 to 10:                                since omitting query components directly leads to
+                               Ws                          sub-optimal generations.
+               CS(q, y) =         × 10.              (7)   Fact QA. The LLM receives an Open Answer Fact
+                               Wt
+                                                           QA query with multiple intent constraints. We
+This score reflects how well the response adheres to       vary the difficulty of the task by adjusting the num-
+the set of intent constraints. A high score (≥ 9) in-      ber of constraints. More constraints indicate more
+dicates strong adherence to key constraints, scores        complex questions. The model generates a list of
+in the range of 7–8 indicate partial satisfaction or       subjects that meet all specified criteria, with topics
+modified adherence, and low scores (≤ 7) suggest           ranging from culture to technology and history.
+major intent hallucinations. Please refer to Ap-           Creative Writing. Similar to Fact QA, the LLM
+pendix§G for further details and ablation studies.         receives a writing task with multiple intent con-
+                                                           straints. We vary the task difficulty by changing
+5   FAITH QA Benchmark
+                                                           the number of constraints. Tasks take two formats:
+We here introduce FAITH QA benchmark, the first            story and poem.
+benchmark that focuses on intent hallucination,
+with 20,068 queries across four different task se-         5.2     Misinterpretation Task
+tups. The primary goal of FAITH QA is to elicit            This dataset examines the extent to which LLMs
+the two fundamental causes of intent hallucination:        misinterpret intent constraints in a Retrieval-
+(1) Omission, where the LLM ignores part of the            Augmented Generation (RAG) setup, as LLMs tend
+query, and (2) Misinterpretation, where the LLM            to generate hallucinated responses if they misin-
+misunderstands parts of the query. Please refer to         terpret the query. Each query requires all of the
+Table 1 for statistical details, and Table 2 for repre-    multiple external contents provided to answer. We
+sentative examples from FAITH QA. Please refer to          manually remove one piece of content per case to
+Appendix§E for dataset construction details.               test whether the LLM incorrectly assumes it is pro-
+                                                           vided. Detailed analysis appears in Appendix§F.3.
+5.1 Omission Task                                          An ideal response detects the missing content and
+This part of the dataset focuses on the extent to          either seeks clarification or refuses to answer.
+which LLMs tend to omit certain intent constraints         Response Evaluation. The LLM evaluates how
+when only provided with the query as a prompt.             well a human response aligns with an external arti-
+Each query contains varying numbers of constraints         cle, using the query, response, and article as three
+across different topics. An ideal response accu-           required inputs. One of the inputs is randomly re-
+rately addresses all constraints. We choose Fact           moved in each case. The LLM should detect the
+                                                       7050
+missing content and refrain from evaluation. Topics          FAITH QA Examples
+include culture, technology, health, and history.           Fact QA
+Content Analysis. The LLM manipulates three                 List three European explorers who circumnavigated the
+                                                            globe before the 18th century and were not born in England
+external articles based on a query. Tasks come in           or Portugal.
+two forms: relationship analysis, which assesses
+                                                            Creative Writing
+relationships between articles; and content sum-            Compose a poem of four stanzas. Each line must be exactly
+mary, which summarizes and compares the articles.           seven words long, with each word ending with a different
+One article is randomly removed per case. The               vowel (A, E, I, O, U).
+LLM should detect the missing content and refrain           Response Evaluation
+                                                            How well does the given response answer the given query
+from analysis. Topics include culture, technology,          following the provided article?
+health, and history.                                        Query:       Existing Content
+                                                            Article:     Existing Content
+6       Experiment Settings                                 Response: Missing Content
+                                                            Relationship Analysis
+Baselines. Following Li et al. (2023); Mündler et al.      For the following three articles, explain how Article 1 con-
+(2024); Yang et al. (2023), we adopt a zero-shot            tradicts Article 2 but supports Article 3.
+                                                            Article 1: Missing Content
+prompting strategy as the baseline for detecting            Article 2: Existing Content
+intent hallucination. The baseline setup resembles          Article 3: Existing Content
+C ONSTRAINT S CORE by determining, on a scale
+from 1 to 10, to what extent the response addresses      Table 2: Representative examples from FAITH QA.
+the query. To ensure the robustness of the baseline,     Fact QA and Creative Writing are from Omission, while
+we adopt the Self-Consistency strategy. Please re-       Response Evaluation and Relationship Analysis (RAG
+                                                         setup) are from Misinterpretation. Missing Content de-
+fer to Appendix§C for more details.
+                                                         notes missing contents, and Existing Content denotes pro-
+Models and hyper-parameters. We evaluate                 vided contents.
+several LLMs, mostly state-of-the-art models in
+the FAITH QA Benchmark: OpenAI’s (OpenAI
+et al., 2024) GPT-4o1 and GPT-4o-mini, Meta’s            ally accurate upon verification—in Table 4. Please
+LLaMA3-70B2 and LLaMA3-7B3 (Dubey et al.,                refer to Appendix§G for the results of statistical
+2024), Anthropic’s Claude-3.54 and Claude-35 , and       significance tests.
+Mistral-7B6 (Jiang et al., 2023). For all baselines,
+we set the temperature τ = 0.3. For C ONSTRAINT          7     Experimental Results
+S CORE, we use GPT-4o as the default model with          Baseline is biased. We conduct a human evalua-
+temperature τ = 0.3 to generate and evaluate. We         tion to grade 1,000 randomly sampled responses.
+evaluate LLMs on the test set (150 randomly sam-         Specifically, we sample 1,000 prompt-response
+pled questions) of FAITH QA across every single          pairs from the Omission Dataset, with 500 from
+category and difficulty due to monetary costs, while     Fact QA and Creative Writing, respectively. The
+we encourage future research to leverage the ex-         evaluation rubric for human annotators requires cal-
+tended version for enhanced evaluation.                  culating the C ONSTRAINT S CORE based on how
+Evaluation metrics. We report (1) Perfect, indicat-      well the response addresses each of the decom-
+ing the rate of perfect responses (no hallucinated       posed intent constraints. Figure 3 shows the distri-
+responses, C ONSTRAINT S CORE = 10), and (2)             bution of deviations from human scores for both the
+C ONSTRAINT S CORES (CS), the average score of           Baseline and C ONSTRAINT S CORE, using Kernel
+all responses to provide a quantitative perspective.     Density Estimation (KDE).
+Overview results are in Table 3. For the Omission           C ONSTRAINT S CORE demonstrates a much
+dataset’s Fact QA setup, we additionally report the      tighter distribution centered closer to zero, with
+Factual Verifiable Hallucination Rate (Fact)—the         66.3% of the scores falling within one standard
+proportion of hallucinated responses that are factu-     deviation. In contrast, the Baseline method dis-
+    1
+      We refer to gpt-4o-2024-05-13
+                                                         plays a wider spread, with a mean deviation of -
+    2
+      We refer to Meta-Llama-3-70B-Instruct-Turbo        0.73, whereas the mean deviation for C ONSTRAINT
+    3
+      We refer to Meta-Llama-3-8B-Instruct-Turbo         S CORE is 0.47. This indicates that the Baseline
+    4
+      We refer to claude-3-5-sonnet-20240620             tends to underestimate compared to human scores.
+    5
+      We refer to claude-3-sonnet-20240229
+    6
+      We refer to Mistral-7B-Instruct-v0.3
+
+                                                     7051
+                                                                                                        FAITH QA
+ Datasets
+                                             GPT-4o            GPT-4o-mini          LLaMA3-70B          LLaMA3-8B           Claude-3.5          Claude-3               Mistral-7B
+                                           Perfect CS          Perfect      CS      Perfect      CS     Perfect    CS       Perfect CS         Perfect CS          Perfect CS
+ Omission
+ Fact QA             Open Answer            0.49     8.62          0.36     7.86     0.57       8.93     0.46      8.52      0.37   6.73        0.44     8.14          0.20     7.15
+                     Story                  0.38     7.99          0.31     7.75     0.29       7.55     0.25      7.21      0.34   7.64        0.32     7.84          0.08     5.92
+ Creative Writing
+                     Poem                   0.40     8.29          0.30     7.79     0.51       8.64     0.27      7.71      0.60   9.02        0.47     8.45          0.07     5.49
+ Misinterpretation
+ Response Evaluation                        0.09     5.73          0.11     5.44     0.07       4.78     0.11      5.58      0.29   5.92        0.22     5.61          0.23     4.46
+                     Relationship           0.12     6.83          0.14     6.10     0.07       5.46     0.11      6.05      0.15   7.15        0.08     6.63          0.22     5.41
+ Content Analysis
+                     Summary                0.06     7.60          0.07     7.71     0.04       7.35     0.07      7.24      0.09   7.87        0.05     7.41          0.11     6.08
+
+
+Table 3: Overview results for FAITH QA. Metrics are reported on Perfect (rate of hallucination-free generation,
+higher the better) along with Constraint Scores (CS) (score of the generation, higher the better). Results are
+presented by aggregating across different difficulty and topic setups.
+
+                                                                                          Fact QA in FAITH QA
+ Tasks
+                             GPT-4o           GPT-4o-mini                 Llama3-70b            Llama3-8b           Claude-3.5           Claude-3               Mistral-7B
+                       Perfect      Fact     Perfect        Fact      Perfect      Fact       Perfect   Fact      Perfect    Fact    Perfect      Fact      Perfect           Fact
+            Easy        0.51        54.9      0.41          81.7          0.48     75.0        0.57     83.8       0.45      33.3     0.48        82.1          0.30          61.8
+ Culture
+            Hard        0.36        36.1      0.30          47.1          0.66     83.7        0.35     89.5       0.29      56.8     0.28        68.0          0.10          57.7
+            Easy        0.70        30.0      0.47          72.0          0.52     81.1        0.51     92.0       0.43      52.6     0.50        72.9          0.25          70.3
+ History
+            Hard        0.43        39.5      0.29          76.9          0.63     62.8        0.42     87.2       0.30      66.7     0.34        85.7          0.15          50.7
+            Easy        0.42        63.5      0.34          78.6          0.57     82.1        0.45     90.9       0.43      19.2     0.47        82.9          0.28          70.5
+ Tech
+            Hard        0.53        56.6      0.35          85.0          0.56     86.7        0.46     97.6       0.30      14.1     0.37        77.5          0.12          90.1
+
+
+Table 4: Results for Fact QA setup for FAITH QA. Results are reported in Perfect (rate of hallucination-free
+generation, higher the better) and Factual Verifiable Hallucination Rate (Fact) (the percentage of hallucinated
+responses that are factually accurate upon verification, higher the better).
+
+
+   Given the discrete nature of the scores, we
+choose Mean Squared Error (MSE) for perfor-
+mance evaluation. The MSE for C ONSTRAINT
+S CORE is 0.50, which is significantly lower than
+the Baseline’s MSE of 4.72. This result highlights
+that C ONSTRAINT S CORE outperforms the Base-
+line and aligns more closely with human judgment.
+
+The number of intent constraints matters. From
+Table 4, we observe that as the number of intent                                              Figure 3: Deviation distributions from human scores
+constraints increases (from Easy to Hard), the Per-                                           for Baseline (blue) and C ONSTRAINT S CORE (red).
+fect rate consistently declines. This trend is further                                        Distributions are estimated using KDE. C ONSTRAINT
+corroborated by Table 3, where we analyze RAG                                                 S CORE is more tightly centered around zero, indicating
+setups on the Misinterpretation Dataset—featuring                                             closer alignment with human evaluation, whereas base-
+longer and more complex input queries—and ob-                                                 line shows a broader spread, reflecting higher error.
+serve an even more pronounced drop in the Perfect
+rate. These findings suggest a clear pattern: LLM                                             tend to produce fewer factually incorrect responses.
+performance tends to degrade as the number of                                                 Table 4 illustrates this trend across models within
+intent constraints grows.                                                                     the same family (e.g., GPT-4o vs GPT-4o-mini).
+Factual check is less effective for larger models.                                            Larger models consistently show a lower Factual
+We perform an additional factual check for Fact                                               Verifiable Hallucination Rate, which means it be-
+QA responses; implementation details appear in                                                comes more challenging to detect hallucinations
+Appendix§D.2.3. An important finding we observe                                               through factual checks as model size grows—they
+is that as language models increase in size, they                                             tend to generate intent-hallucinated responses.
+                                                                                     7052
+Figure 4: Distribution of violated Intent Constraints across evaluation scenarios in FAITH QA. LLMs frequently
+fail on subjects and actions (blue), especially in open-ended tasks like Creative Writing and Response Evaluation.
+Errors on fine-grained details like location, time, and quantity (green) are less common. This highlights LLMs’
+struggle with core semantic subjects when given long and complex queries.
+
+
+8   Discussion and Analysis                               with exactly 8 words per line). Similar issues are
+                                                          reported in Zhou et al. (2023). We believe this
+In this section, we report the major hallucination
+                                                          phenomenon directly relates to the limitations of
+patterns we find in LLM generations. For detailed
+                                                          LLMs’ tokenizers, which often struggle with strict
+examples please refer to Appendix§F.3.
+                                                          character- and word-level constraints.
+8.1 Omission                                              Subjects and actions are most challenging. Anal-
+LLMs know when they are omitting. We perform              ysis of failed constraints (Figure 4) shows that
+a qualitative analysis of hallucinated outputs in the     LLMs handle fine-grained details such as location,
+Omission dataset; details in Appendix§F.3. A key          time, qualifiers, and quantity relatively well, but
+finding under the Fact QA setup is that LLMs often        often overlook or misinterpret core semantic ele-
+appear aware when they omit parts of the query.           ments like subjects and actions. This suggests that
+LLMs first acknowledge how their responses may            LLMs default to plausible yet flawed outputs when
+not fully satisfy the query, yet still proceed to pro-    key roles are under-specified, highlighting the limi-
+vide an incorrect answer. This behavior tends to          tations of longer context. In the figure, the vertical
+occur when the incorrect answer involves a well-          axis represents the proportion of flawed responses
+known subject. We hypothesize that this arises            (i.e., responses with violated constraints) relative
+from instruction-tuning, where LLMs are explicitly        to the total number of responses in each category.
+encouraged to explain their reasoning processes.          A response may violate multiple categories simul-
+LLMs prefer famous subjects. Another key find-            taneously; therefore, for the independent violation
+ing for the Fact QA setup under the Omission              rates we report, the columns do not sum to 1.
+dataset, as we partially address previously, is that
+                                                          8.2    Misinterpretation
+LLMs prefer famous subjects as answers—even
+when they are incorrect. See Appendix§F.3 for ex-         LLMs alter the query to proceed. In the Re-
+amples. We suppose this phenomenon directly cor-          sponse Evaluation Misinterpretation setup, LLMs
+relates with LLMs’ over-generalization of common          often alter the original query to complete the task.
+subjects within their training corpus, as discussed       Please refer to Appendix§F.3 for examples. Instead
+in Zhang et al. (2024b).                                  of acknowledging there is missing content, LLMs
+LLMs struggle with numbers and words. In the              tend to assume that the missing query component
+Creative Writing setup, a common type of halluci-         is provided, then shift the task from “evaluating
+nation occurs when LLMs fail to generate text that        how well the Response addresses the Query using
+adheres to specific character-level requirements          the Article” to “evaluating how well the Response
+(e.g., creating a poem where every line ends with         summarizes the Article.”
+the letter ’w’) or to produce the correct number          LLMs struggle with missing contents. As shown
+of words per sentence (e.g., generating a poem            in Table 4, all LLMs perform poorly on the Misin-
+                                                      7053
+terpretation Dataset. The models struggle to accu-      tion. C ONSTRAINT S CORE systematically decom-
+rately determine whether specific content is present    poses complex queries into atomic intents, assigns
+within long, complex inputs in an RAG setting.          importance-weighted labels to these individual
+This suggests that, despite advancements in extend-     components, and assesses model outputs through
+ing context window length, LLMs still face diffi-       fine-grained intent alignment scores. Our evalu-
+culties in processing and reasoning over lengthy        ation reveals that C ONSTRAINT S CORE notably
+inputs. While larger models show slightly better        surpasses traditional evaluation methodologies that
+performance, there remains substantial room for         employ LLM-as-the-judge, which exhibit signifi-
+improvement in long-context tasks.                      cant bias compared to human judgment.
+LLMs proceed by inventing. We conduct a                    Through our research, we underscore the neces-
+qualitative analysis of hallucinated cases in the       sity for future LLM developments to emphasize not
+Misinterpretation dataset. In the Content Analy-        only factual correctness but also intentional align-
+sis–Relationship Analysis setup, a notable finding      ment with human queries. By providing FAITH QA
+is that LLMs sometimes invent missing articles in       and C ONSTRAINT S CORE, we lay a foundation
+order to continue generating a response, as shown       for rigorous, nuanced evaluations of LLM perfor-
+in Appendix§G. This phenomenon is particularly          mance, encouraging more precise alignment be-
+intriguing because the invention by the LLM oc-         tween model outputs and user intentions. Ulti-
+curs in two distinct forms: (1) pure hallucination,     mately, addressing intent hallucination effectively
+where the model fabricates a non-existent article, or   enhances the reliability and applicability of LLMs
+(2) intentional invention, where the LLM acknowl-       across diverse, real-world applications.
+edges that the article is hypothetical and explicitly
+states this before proceeding with its invented con-    Limitation
+tent and final response. The second scenario aligns
+with our earlier finding, “LLMs know when they          While we present a first step toward investigating
+are omitting,” suggesting that LLMs, to some ex-        intent hallucinations in LLM, our category is still
+tent, tend to proceed with the task autonomously,       at a rather coarse level with only 2 types of major
+neglecting human instructions.                          causes (omit, misinterpret) and 4 types of tasks
+                                                        (Fact QA, Creative Writing, Response Evaluation,
+9   Conclusion                                          Content Analysis). Future work should investigate
+                                                        sub-categorizations of these tasks, or other new
+In this paper, we introduce the concept of Intent       tasks under new setups (like inference time reason-
+Hallucination, a specific form of hallucination that    ing). Future work can also investigate how to better
+arises when Large Language Models (LLMs) omit           quantify and detect intent hallucination in an even
+or misinterpret crucial elements of complex queries,    more fine-grained way, like from layer-level de-
+leading to outputs that diverge from users’ inten-      tection. Finally, we did not include any reasoning
+tions despite potentially being factually accurate.     models (e.g., o1 series or deepseek-r1) due to their
+Unlike factual hallucinations, intent hallucinations    release date (there was only o1 three months ago,
+are subtle, harder to detect, and have largely been     deepseek-r1 was not released until last month) and
+overlooked in existing research.                        computational cost.
+   To address this gap, we develop FAITH QA, the
+first comprehensive benchmark explicitly designed       Ethics Statement
+to evaluate intent hallucination. Comprising 20,068
+human-validated queries, FAITH QA spans a di-           Based on direct communication with our institu-
+verse range of topics and complexity levels, serving    tion’s IRB office, this line of research is exempt
+as a robust platform for evaluating how effectively     from IRB, and the information obtained during our
+models maintain query intent integrity. Our ex-         study is recorded in such a manner that the identity
+periments on state-of-the-art models demonstrate        of the human subjects cannot readily be ascertained,
+that intent hallucination is prevalent and worsens      directly or through identifiers linked to the subjects.
+as query complexity increases.                          There is no potential risk to participants, and we
+   Additionally, we introduce C ONSTRAINT               do not collect any identifiable information from
+S CORE, an innovative evaluation metric tai-            annotators.
+lored specifically for detecting intent hallucina-
+                                                    7054
+References                                                    Hassan, Naman Goyal, Narjes Torabi, Nikolay Bash-
+                                                              lykov, Nikolay Bogoychev, Niladri Chatterji, Olivier
+Amos Azaria and Tom Mitchell. 2023. The internal              Duchenne, Onur Çelebi, Patrick Alrassy, Pengchuan
+ state of an llm knows when it’s lying. Preprint,             Zhang, Pengwei Li, Petar Vasic, Peter Weng, Pra-
+ arXiv:2304.13734.                                            jjwal Bhargava, Pratik Dubal, Praveen Krishnan,
+                                                              Punit Singh Koura, Puxin Xu, Qing He, Qingxiao
+Anusha Balakrishnan, Jinfeng Rao, Kartikeya Upasani,          Dong, Ragavan Srinivasan, Raj Ganapathy, Ramon
+  Michael White, and Rajen Subba. 2019. Constrained           Calderer, Ricardo Silveira Cabral, Robert Stojnic,
+  decoding for neural NLG from compositional repre-           Roberta Raileanu, Rohit Girdhar, Rohit Patel, Ro-
+  sentations in task-oriented dialogue. In Proceedings        main Sauvestre, Ronnie Polidoro, Roshan Sumbaly,
+  of the 57th Annual Meeting of the Association for           Ross Taylor, Ruan Silva, Rui Hou, Rui Wang, Saghar
+  Computational Linguistics, pages 831–844, Florence,         Hosseini, Sahana Chennabasappa, Sanjay Singh,
+  Italy. Association for Computational Linguistics.           Sean Bell, Seohyun Sonia Kim, Sergey Edunov,
+                                                              Shaoliang Nie, Sharan Narang, Sharath Raparthy,
+Meng Cao, Yue Dong, and Jackie Chi Kit Cheung. 2021.          Sheng Shen, Shengye Wan, Shruti Bhosale, Shun
+  Hallucinated but factual! inspecting the factuality of      Zhang, Simon Vandenhende, Soumya Batra, Spencer
+  hallucinations in abstractive summarization. arXiv          Whitman, Sten Sootla, Stephane Collot, Suchin Gu-
+  preprint arXiv:2109.09784.                                  rurangan, Sydney Borodinsky, Tamar Herman, Tara
+                                                              Fowler, Tarek Sheasha, Thomas Georgiou, Thomas
+Shiqi Chen, Yiran Zhao, Jinghan Zhang, I-Chun Chern,          Scialom, Tobias Speckbacher, Todor Mihaylov, Tong
+  Siyang Gao, Pengfei Liu, and Junxian He. 2023.              Xiao, Ujjwal Karn, Vedanuj Goswami, Vibhor
+  Felm: Benchmarking factuality evaluation of large           Gupta, Vignesh Ramanathan, Viktor Kerkez, Vincent
+  language models. Preprint, arXiv:2310.00741.                Gonguet, Virginie Do, Vish Vogeti, Vladan Petro-
+                                                              vic, Weiwei Chu, Wenhan Xiong, Wenyin Fu, Whit-
+Abhimanyu Dubey, Abhinav Jauhri, Abhinav Pandey,              ney Meers, Xavier Martinet, Xiaodong Wang, Xiao-
+  Abhishek Kadian, Ahmad Al-Dahle, Aiesha Letman,             qing Ellen Tan, Xinfeng Xie, Xuchao Jia, Xuewei
+  Akhil Mathur, Alan Schelten, Amy Yang, Angela               Wang, Yaelle Goldschlag, Yashesh Gaur, Yasmine
+  Fan, Anirudh Goyal, Anthony Hartshorn, Aobo Yang,           Babaei, Yi Wen, Yiwen Song, Yuchen Zhang, Yue
+  Archi Mitra, Archie Sravankumar, Artem Korenev,             Li, Yuning Mao, Zacharie Delpierre Coudert, Zheng
+  Arthur Hinsvark, Arun Rao, Aston Zhang, Aurelien            Yan, Zhengxing Chen, Zoe Papakipos, Aaditya Singh,
+  Rodriguez, Austen Gregerson, Ava Spataru, Bap-              Aaron Grattafiori, Abha Jain, Adam Kelsey, Adam
+  tiste Roziere, Bethany Biron, Binh Tang, Bobbie             Shajnfeld, Adithya Gangidi, Adolfo Victoria, Ahuva
+  Chern, Charlotte Caucheteux, Chaya Nayak, Chloe             Goldstand, Ajay Menon, Ajay Sharma, Alex Boesen-
+  Bi, Chris Marra, Chris McConnell, Christian Keller,         berg, Alex Vaughan, Alexei Baevski, Allie Feinstein,
+  Christophe Touret, Chunyang Wu, Corinne Wong,               Amanda Kallet, Amit Sangani, Anam Yunus, An-
+  Cristian Canton Ferrer, Cyrus Nikolaidis, Damien Al-        drei Lupu, Andres Alvarado, Andrew Caples, An-
+  lonsius, Daniel Song, Danielle Pintz, Danny Livshits,       drew Gu, Andrew Ho, Andrew Poulton, Andrew
+  David Esiobu, Dhruv Choudhary, Dhruv Mahajan,               Ryan, Ankit Ramchandani, Annie Franco, Apara-
+  Diego Garcia-Olano, Diego Perino, Dieuwke Hupkes,           jita Saraf, Arkabandhu Chowdhury, Ashley Gabriel,
+  Egor Lakomkin, Ehab AlBadawy, Elina Lobanova,               Ashwin Bharambe, Assaf Eisenman, Azadeh Yaz-
+  Emily Dinan, Eric Michael Smith, Filip Radenovic,           dan, Beau James, Ben Maurer, Benjamin Leonhardi,
+  Frank Zhang, Gabriel Synnaeve, Gabrielle Lee, Geor-         Bernie Huang, Beth Loyd, Beto De Paola, Bhargavi
+  gia Lewis Anderson, Graeme Nail, Gregoire Mi-               Paranjape, Bing Liu, Bo Wu, Boyu Ni, Braden Han-
+  alon, Guan Pang, Guillem Cucurell, Hailey Nguyen,           cock, Bram Wasti, Brandon Spence, Brani Stojkovic,
+  Hannah Korevaar, Hu Xu, Hugo Touvron, Iliyan                Brian Gamido, Britt Montalvo, Carl Parker, Carly
+  Zarov, Imanol Arrieta Ibarra, Isabel Kloumann, Ishan        Burton, Catalina Mejia, Changhan Wang, Changkyu
+  Misra, Ivan Evtimov, Jade Copet, Jaewon Lee, Jan            Kim, Chao Zhou, Chester Hu, Ching-Hsiang Chu,
+  Geffert, Jana Vranes, Jason Park, Jay Mahadeokar,           Chris Cai, Chris Tindal, Christoph Feichtenhofer, Da-
+  Jeet Shah, Jelmer van der Linde, Jennifer Billock,          mon Civin, Dana Beaty, Daniel Kreymer, Daniel Li,
+  Jenny Hong, Jenya Lee, Jeremy Fu, Jianfeng Chi,             Danny Wyatt, David Adkins, David Xu, Davide Tes-
+  Jianyu Huang, Jiawen Liu, Jie Wang, Jiecao Yu,              tuggine, Delia David, Devi Parikh, Diana Liskovich,
+  Joanna Bitton, Joe Spisak, Jongsoo Park, Joseph             Didem Foss, Dingkang Wang, Duc Le, Dustin Hol-
+  Rocca, Joshua Johnstun, Joshua Saxe, Junteng Jia,           land, Edward Dowling, Eissa Jamil, Elaine Mont-
+  Kalyan Vasuden Alwala, Kartikeya Upasani, Kate              gomery, Eleonora Presani, Emily Hahn, Emily Wood,
+  Plawiak, Ke Li, Kenneth Heafield, Kevin Stone,              Erik Brinkman, Esteban Arcaute, Evan Dunbar, Evan
+  Khalid El-Arini, Krithika Iyer, Kshitiz Malik, Kuen-        Smothers, Fei Sun, Felix Kreuk, Feng Tian, Firat
+  ley Chiu, Kunal Bhalla, Lauren Rantala-Yeary, Lau-          Ozgenel, Francesco Caggioni, Francisco Guzmán,
+  rens van der Maaten, Lawrence Chen, Liang Tan, Liz          Frank Kanayet, Frank Seide, Gabriela Medina Flo-
+  Jenkins, Louis Martin, Lovish Madaan, Lubo Malo,            rez, Gabriella Schwarz, Gada Badeer, Georgia Swee,
+  Lukas Blecher, Lukas Landzaat, Luke de Oliveira,            Gil Halpern, Govind Thattai, Grant Herman, Grigory
+  Madeline Muzzi, Mahesh Pasupuleti, Mannat Singh,            Sizov, Guangyi, Zhang, Guna Lakshminarayanan,
+  Manohar Paluri, Marcin Kardas, Mathew Oldham,               Hamid Shojanazeri, Han Zou, Hannah Wang, Han-
+  Mathieu Rita, Maya Pavlova, Melanie Kambadur,               wen Zha, Haroun Habeeb, Harrison Rudolph, He-
+  Mike Lewis, Min Si, Mitesh Kumar Singh, Mona                len Suk, Henry Aspegren, Hunter Goldman, Ibrahim
+                                                       7055
+  Damlaj, Igor Molybog, Igor Tufanov, Irina-Elena           question answering evaluation framework for faith-
+  Veliche, Itai Gat, Jake Weissman, James Geboski,          fulness assessment in abstractive summarization. In
+  James Kohli, Japhet Asher, Jean-Baptiste Gaya,            Association for Computational Linguistics (ACL).
+  Jeff Marcus, Jeff Tang, Jennifer Chan, Jenny Zhen,
+  Jeremy Reizenstein, Jeremy Teboul, Jessica Zhong,      Bairu Hou, Yang Zhang, Jacob Andreas, and Shiyu
+  Jian Jin, Jingyi Yang, Joe Cummings, Jon Carvill,        Chang. 2024. A probabilistic framework for llm
+  Jon Shepard, Jonathan McPhie, Jonathan Torres,           hallucination detection via belief tree propagation.
+  Josh Ginsburg, Junjie Wang, Kai Wu, Kam Hou              Preprint, arXiv:2406.06950.
+  U, Karan Saxena, Karthik Prasad, Kartikay Khan-
+  delwal, Katayoun Zand, Kathy Matosich, Kaushik         Lei Huang, Weijiang Yu, Weitao Ma, Weihong Zhong,
+  Veeraraghavan, Kelly Michelena, Keqian Li, Kun           Zhangyin Feng, Haotian Wang, Qianglong Chen,
+  Huang, Kunal Chawla, Kushal Lakhotia, Kyle Huang,        Weihua Peng, Xiaocheng Feng, Bing Qin, and Ting
+  Lailin Chen, Lakshya Garg, Lavender A, Leandro           Liu. 2023. A survey on hallucination in large lan-
+  Silva, Lee Bell, Lei Zhang, Liangpeng Guo, Licheng       guage models: Principles, taxonomy, challenges, and
+  Yu, Liron Moshkovich, Luca Wehrstedt, Madian             open questions. Preprint, arXiv:2311.05232.
+  Khabsa, Manav Avalani, Manish Bhatt, Maria Tsim-
+  poukelli, Martynas Mankus, Matan Hasson, Matthew       Ziwei Ji, Nayeon Lee, Rita Frieske, Tiezheng Yu, Dan
+  Lennie, Matthias Reso, Maxim Groshev, Maxim              Su, Yan Xu, Etsuko Ishii, Ye Jin Bang, Andrea
+  Naumov, Maya Lathi, Meghan Keneally, Michael L.          Madotto, and Pascale Fung. 2023. Survey of halluci-
+  Seltzer, Michal Valko, Michelle Restrepo, Mihir          nation in natural language generation. ACM Comput-
+  Patel, Mik Vyatskov, Mikayel Samvelyan, Mike             ing Surveys, 55(12):1–38.
+  Clark, Mike Macey, Mike Wang, Miquel Jubert Her-
+  moso, Mo Metanat, Mohammad Rastegari, Mun-             Albert Q. Jiang, Alexandre Sablayrolles, Arthur Men-
+  ish Bansal, Nandhini Santhanam, Natascha Parks,          sch, Chris Bamford, Devendra Singh Chaplot, Diego
+  Natasha White, Navyata Bawa, Nayan Singhal, Nick         de las Casas, Florian Bressand, Gianna Lengyel, Guil-
+  Egebo, Nicolas Usunier, Nikolay Pavlovich Laptev,        laume Lample, Lucile Saulnier, Lélio Renard Lavaud,
+  Ning Dong, Ning Zhang, Norman Cheng, Oleg                Marie-Anne Lachaux, Pierre Stock, Teven Le Scao,
+  Chernoguz, Olivia Hart, Omkar Salpekar, Ozlem            Thibaut Lavril, Thomas Wang, Timothée Lacroix,
+  Kalinli, Parkin Kent, Parth Parekh, Paul Saab, Pa-       and William El Sayed. 2023. Mistral 7b. Preprint,
+  van Balaji, Pedro Rittner, Philip Bontrager, Pierre      arXiv:2310.06825.
+  Roux, Piotr Dollar, Polina Zvyagina, Prashant Ratan-
+  chandani, Pritish Yuvraj, Qian Liang, Rachad Alao,
+                                                         Katherine Lee, Orhan Firat, Ashish Agarwal, Clara Fan-
+  Rachel Rodriguez, Rafi Ayub, Raghotham Murthy,
+                                                           njiang, and David Sussillo. 2018. Hallucinations in
+  Raghu Nayani, Rahul Mitra, Raymond Li, Rebekkah
+                                                           neural machine translation.
+  Hogan, Robin Battey, Rocky Wang, Rohan Mah-
+  eswari, Russ Howes, Ruty Rinott, Sai Jayesh Bondu,
+  Samyak Datta, Sara Chugh, Sara Hunt, Sargun            Junyi Li, Xiaoxue Cheng, Wayne Xin Zhao, Jian-Yun
+  Dhillon, Sasha Sidorov, Satadru Pan, Saurabh Verma,      Nie, and Ji-Rong Wen. 2023. Halueval: A large-
+  Seiji Yamamoto, Sharadh Ramaswamy, Shaun Lind-           scale hallucination evaluation benchmark for large
+  say, Shaun Lindsay, Sheng Feng, Shenghao Lin,            language models. Preprint, arXiv:2305.11747.
+  Shengxin Cindy Zha, Shiva Shankar, Shuqiang
+  Zhang, Shuqiang Zhang, Sinong Wang, Sneha Agar-        Nelson F. Liu, Kevin Lin, John Hewitt, Ashwin Paran-
+  wal, Soji Sajuyigbe, Soumith Chintala, Stephanie         jape, Michele Bevilacqua, Fabio Petroni, and Percy
+  Max, Stephen Chen, Steve Kehoe, Steve Satterfield,       Liang. 2023. Lost in the middle: How language mod-
+  Sudarshan Govindaprasad, Sumit Gupta, Sungmin            els use long contexts. Preprint, arXiv:2307.03172.
+  Cho, Sunny Virk, Suraj Subramanian, Sy Choudhury,
+  Sydney Goldman, Tal Remez, Tamar Glaser, Tamara        Potsawee Manakul, Adian Liusie, and Mark J. F. Gales.
+  Best, Thilo Kohler, Thomas Robinson, Tianhe Li,          2023. Selfcheckgpt: Zero-resource black-box hal-
+  Tianjun Zhang, Tim Matthews, Timothy Chou, Tzook         lucination detection for generative large language
+  Shaked, Varun Vontimitta, Victoria Ajayi, Victoria       models. Preprint, arXiv:2303.08896.
+  Montanez, Vijai Mohan, Vinay Satish Kumar, Vishal
+  Mangla, Vı́tor Albiero, Vlad Ionescu, Vlad Poenaru,    Sewon Min, Kalpesh Krishna, Xinxi Lyu, Mike
+  Vlad Tiberiu Mihailescu, Vladimir Ivanov, Wei Li,        Lewis, Wen tau Yih, Pang Wei Koh, Mohit Iyyer,
+  Wenchen Wang, Wenwen Jiang, Wes Bouaziz, Will            Luke Zettlemoyer, and Hannaneh Hajishirzi. 2023.
+  Constable, Xiaocheng Tang, Xiaofang Wang, Xiao-          Factscore: Fine-grained atomic evaluation of fac-
+  jian Wu, Xiaolan Wang, Xide Xia, Xilun Wu, Xinbo         tual precision in long form text generation. Preprint,
+  Gao, Yanjun Chen, Ye Hu, Ye Jia, Ye Qi, Yenda Li,        arXiv:2305.14251.
+  Yilin Zhang, Ying Zhang, Yossi Adi, Youngjin Nam,
+  Yu, Wang, Yuchen Hao, Yundi Qian, Yuzi He, Zach        Yifei Ming, Senthil Purushwalkam, Shrey Pandit,
+  Rait, Zachary DeVito, Zef Rosnbrick, Zhaoduo Wen,        Zixuan Ke, Xuan-Phi Nguyen, Caiming Xiong,
+  Zhenyu Yang, and Zhiwei Zhao. 2024. The llama 3          and Shafiq Joty. 2025.    Faitheval: Can your
+  herd of models. Preprint, arXiv:2407.21783.              language model stay faithful to context, even if
+                                                           ”the moon is made of marshmallows”. Preprint,
+Esin Durmus, He He, and Mona Diab. 2020. FEQA: A           arXiv:2410.03727.
+                                                     7056
+Abhika Mishra, Akari Asai, Vidhisha Balachandran,            Jake McNeil, David Medina, Aalok Mehta, Jacob
+  Yizhong Wang, Graham Neubig, Yulia Tsvetkov, and           Menick, Luke Metz, Andrey Mishchenko, Pamela
+  Hannaneh Hajishirzi. 2024. Fine-grained halluci-           Mishkin, Vinnie Monaco, Evan Morikawa, Daniel
+  nation detection and editing for language models.          Mossing, Tong Mu, Mira Murati, Oleg Murk, David
+  Preprint, arXiv:2401.06855.                                Mély, Ashvin Nair, Reiichiro Nakano, Rajeev Nayak,
+                                                             Arvind Neelakantan, Richard Ngo, Hyeonwoo Noh,
+Niels Mündler, Jingxuan He, Slobodan Jenko, and Mar-        Long Ouyang, Cullen O’Keefe, Jakub Pachocki, Alex
+  tin Vechev. 2024. Self-contradictory hallucinations        Paino, Joe Palermo, Ashley Pantuliano, Giambat-
+  of large language models: Evaluation, detection and        tista Parascandolo, Joel Parish, Emy Parparita, Alex
+  mitigation. Preprint, arXiv:2305.15852.                    Passos, Mikhail Pavlov, Andrew Peng, Adam Perel-
+                                                             man, Filipe de Avila Belbute Peres, Michael Petrov,
+Cheng Niu, Yuanhao Wu, Juno Zhu, Siliang Xu, Kashun          Henrique Ponde de Oliveira Pinto, Michael, Poko-
+  Shum, Randy Zhong, Juntong Song, and Tong Zhang.           rny, Michelle Pokrass, Vitchyr H. Pong, Tolly Pow-
+  2024. Ragtruth: A hallucination corpus for develop-        ell, Alethea Power, Boris Power, Elizabeth Proehl,
+  ing trustworthy retrieval-augmented language models.       Raul Puri, Alec Radford, Jack Rae, Aditya Ramesh,
+  Preprint, arXiv:2401.00396.                                Cameron Raymond, Francis Real, Kendra Rimbach,
+                                                             Carl Ross, Bob Rotsted, Henri Roussez, Nick Ry-
+OpenAI, Josh Achiam, Steven Adler, Sandhini Agarwal,         der, Mario Saltarelli, Ted Sanders, Shibani Santurkar,
+  Lama Ahmad, Ilge Akkaya, Florencia Leoni Ale-              Girish Sastry, Heather Schmidt, David Schnurr, John
+  man, Diogo Almeida, Janko Altenschmidt, Sam Alt-           Schulman, Daniel Selsam, Kyla Sheppard, Toki
+  man, Shyamal Anadkat, Red Avila, Igor Babuschkin,          Sherbakov, Jessica Shieh, Sarah Shoker, Pranav
+  Suchir Balaji, Valerie Balcom, Paul Baltescu, Haim-        Shyam, Szymon Sidor, Eric Sigler, Maddie Simens,
+  ing Bao, Mohammad Bavarian, Jeff Belgum, Ir-               Jordan Sitkin, Katarina Slama, Ian Sohl, Benjamin
+  wan Bello, Jake Berdine, Gabriel Bernadett-Shapiro,        Sokolowsky, Yang Song, Natalie Staudacher, Fe-
+  Christopher Berner, Lenny Bogdonoff, Oleg Boiko,           lipe Petroski Such, Natalie Summers, Ilya Sutskever,
+  Madelaine Boyd, Anna-Luisa Brakman, Greg Brock-            Jie Tang, Nikolas Tezak, Madeleine B. Thompson,
+  man, Tim Brooks, Miles Brundage, Kevin Button,             Phil Tillet, Amin Tootoonchian, Elizabeth Tseng,
+  Trevor Cai, Rosie Campbell, Andrew Cann, Brittany          Preston Tuggle, Nick Turley, Jerry Tworek, Juan Fe-
+  Carey, Chelsea Carlson, Rory Carmichael, Brooke            lipe Cerón Uribe, Andrea Vallone, Arun Vijayvergiya,
+  Chan, Che Chang, Fotis Chantzis, Derek Chen, Sully         Chelsea Voss, Carroll Wainwright, Justin Jay Wang,
+  Chen, Ruby Chen, Jason Chen, Mark Chen, Ben                Alvin Wang, Ben Wang, Jonathan Ward, Jason Wei,
+  Chess, Chester Cho, Casey Chu, Hyung Won Chung,            CJ Weinmann, Akila Welihinda, Peter Welinder, Ji-
+  Dave Cummings, Jeremiah Currier, Yunxing Dai,              ayi Weng, Lilian Weng, Matt Wiethoff, Dave Willner,
+  Cory Decareaux, Thomas Degry, Noah Deutsch,                Clemens Winter, Samuel Wolrich, Hannah Wong,
+  Damien Deville, Arka Dhar, David Dohan, Steve              Lauren Workman, Sherwin Wu, Jeff Wu, Michael
+  Dowling, Sheila Dunning, Adrien Ecoffet, Atty Eleti,       Wu, Kai Xiao, Tao Xu, Sarah Yoo, Kevin Yu, Qim-
+  Tyna Eloundou, David Farhi, Liam Fedus, Niko Felix,        ing Yuan, Wojciech Zaremba, Rowan Zellers, Chong
+  Simón Posada Fishman, Juston Forte, Isabella Ful-         Zhang, Marvin Zhang, Shengjia Zhao, Tianhao
+  ford, Leo Gao, Elie Georges, Christian Gibson, Vik         Zheng, Juntang Zhuang, William Zhuk, and Bar-
+  Goel, Tarun Gogineni, Gabriel Goh, Rapha Gontijo-          ret Zoph. 2024. Gpt-4 technical report. Preprint,
+  Lopes, Jonathan Gordon, Morgan Grafstein, Scott            arXiv:2303.08774.
+  Gray, Ryan Greene, Joshua Gross, Shixiang Shane
+  Gu, Yufei Guo, Chris Hallacy, Jesse Han, Jeff Harris,   Sameer Pradhan, Wayne Ward, Kadri Hacioglu,
+  Yuchen He, Mike Heaton, Johannes Heidecke, Chris          James H Martin, and Dan Jurafsky. 2005. Seman-
+  Hesse, Alan Hickey, Wade Hickey, Peter Hoeschele,         tic role labeling using different syntactic views. In
+  Brandon Houghton, Kenny Hsu, Shengli Hu, Xin              Proceedings of the 43rd Annual Meeting of the As-
+  Hu, Joost Huizinga, Shantanu Jain, Shawn Jain,            sociation for Computational Linguistics (ACL’05),
+  Joanne Jang, Angela Jiang, Roger Jiang, Haozhun           pages 581–588.
+  Jin, Denny Jin, Shino Jomoto, Billie Jonn, Hee-
+  woo Jun, Tomer Kaftan, Łukasz Kaiser, Ali Ka-           Yiwei Qin, Kaiqiang Song, Yebowen Hu, Wenlin Yao,
+  mali, Ingmar Kanitscheider, Nitish Shirish Keskar,        Sangwoo Cho, Xiaoyang Wang, Xuansheng Wu, Fei
+  Tabarak Khan, Logan Kilpatrick, Jong Wook Kim,            Liu, Pengfei Liu, and Dong Yu. 2024. Infobench:
+  Christina Kim, Yongjik Kim, Jan Hendrik Kirch-            Evaluating instruction following ability in large lan-
+  ner, Jamie Kiros, Matt Knight, Daniel Kokotajlo,          guage models. Preprint, arXiv:2401.03601.
+  Łukasz Kondraciuk, Andrew Kondrich, Aris Kon-
+  stantinidis, Kyle Kosic, Gretchen Krueger, Vishal       Thibault Sellam, Dipanjan Das, and Ankur Parikh. 2020.
+  Kuo, Michael Lampe, Ikai Lan, Teddy Lee, Jan              BLEURT: Learning robust metrics for text genera-
+  Leike, Jade Leung, Daniel Levy, Chak Ming Li,             tion. In Proceedings of the 58th Annual Meeting of
+  Rachel Lim, Molly Lin, Stephanie Lin, Mateusz             the Association for Computational Linguistics, pages
+  Litwin, Theresa Lopez, Ryan Lowe, Patricia Lue,           7881–7892, Online. Association for Computational
+  Anna Makanju, Kim Malfacini, Sam Manning, Todor           Linguistics.
+  Markov, Yaniv Markovski, Bianca Martin, Katie
+  Mayer, Andrew Mayne, Bob McGrew, Scott Mayer            Sina Semnani, Violet Yao, Heidi Zhang, and Monica
+  McKinney, Christine McLeavey, Paul McMillan,              Lam. 2023. Wikichat: Stopping the hallucination of
+                                                      7057
+  large language model chatbots by few-shot ground-
+  ing on wikipedia. In Findings of the Association for
+  Computational Linguistics: EMNLP 2023. Associa-
+  tion for Computational Linguistics.
+Gaurang Sriramanan, Siddhant Bharti, Vinu Sankar
+  Sadasivan, Shoumik Saha, Priyatham Kattakinda,
+  and Soheil Feizi. 2024. Llm-check: Investigating
+  detection of hallucinations in large language mod-
+  els. In Advances in Neural Information Processing
+  Systems, volume 37, pages 34188–34216. Curran As-
+  sociates, Inc.
+Xuezhi Wang, Jason Wei, Dale Schuurmans, Quoc Le,
+  Ed Chi, Sharan Narang, Aakanksha Chowdhery, and
+  Denny Zhou. 2023. Self-consistency improves chain
+  of thought reasoning in language models. Preprint,
+  arXiv:2203.11171.
+Jinyang Wu, Feihu Che, Chuyuan Zhang, Jianhua Tao,
+   Shuai Zhang, and Pengpeng Shao. 2024. Pandora’s
+   box or aladdin’s lamp: A comprehensive analysis re-
+   vealing the role of rag noise in large language models.
+   Preprint, arXiv:2408.13533.
+
+Shiping Yang, Renliang Sun, and Xiaojun Wan. 2023.
+  A new benchmark and reverse validation method
+  for passage-level hallucination detection. Preprint,
+  arXiv:2310.06498.
+
+Jiawei Zhang, Chejian Xu, Yu Gai, Freddy Lecue, Dawn
+   Song, and Bo Li. 2024a. Knowhalu: Hallucination
+   detection via multi-form knowledge based factual
+   checking. Preprint, arXiv:2404.02935.
+
+Yuji Zhang, Sha Li, Jiateng Liu, Pengfei Yu, Yi R. Fung,
+  Jing Li, Manling Li, and Heng Ji. 2024b. Knowledge
+  overshadowing causes amalgamated hallucination in
+  large language models. Preprint, arXiv:2407.08039.
+
+Chunting Zhou, Pengfei Liu, Puxin Xu, Srini Iyer, Jiao
+  Sun, Yuning Mao, Xuezhe Ma, Avia Efrat, Ping Yu,
+  Lili Yu, Susan Zhang, Gargi Ghosh, Mike Lewis,
+  Luke Zettlemoyer, and Omer Levy. 2023. Lima: Less
+  is more for alignment. Preprint, arXiv:2305.11206.
+
+
+
+
+                                                         7058
+A       Artifacts                                     Claude-3-5-sonnet,      Claude-3-sonnet (An-
+                                                      thropic) (link)
+In this section, we list all the necessary infor-
+                                                      License: Proprietary, limited API access under
+mation for our use of models and data. In
+                                                      Anthropic terms of service
+our paper, we used OpenAI’s (OpenAI et al.,
+                                                      Mistral-7B (Mistral) (link)
+2024) GPT-4o7 and GPT-4o-mini, Meta’s (Dubey
+                                                      License: Open source, Apache-2.0 license
+et al., 2024) LLaMA3-70B8 and LLaMA3-7B9 , An-
+thropic’s Claude-3-5-sonnet10 , Claude-3-sonnet11 ,   A.3    Model and Data Usage
+and Mistral-7B12 (Jiang et al., 2023) for our model
+                                                      Personally identifiable information.. All of the
+usage. We also rely on articles from the follow-
+                                                      used articles in this paper are derived from public
+ing publicly available websites in our research for
+                                                      sources. Therefore, there is no exposure of any
+FAITH QA’s Misinterpretation benchmark: MIT
+                                                      personally identifiable information that requires
+News, Common Crawl, Culture24, Medical News
+                                                      informed consent from those individuals. The used
+Today, WHO News Releases, and The Guardian
+                                                      articles relatesto people insofar as it draws text
+Open Platform. These data sources were used in
+                                                      from public sources that relate to people, or people
+accordance with their respective licenses and terms
+                                                      created, obeying related licenses.
+of use.
+                                                      Offensive content claim.. All the used articles
+A.1 Data License                                      are already public and widely viewed. While these
+                                                      datasets may contain instances of offensive content,
+MIT News (link)
+                                                      our work does not aim to generate or amplify such
+License: All content ©Massachusetts Institute of
+                                                      content. Instead, we employ these articles to study
+Technology
+                                                      and understand intent hallucination. Our use of
+Common Crawl (link)
+                                                      these articles follows ethical guidelines, and we
+License: Open Data Commons Attribution License
+                                                      do not endorse or support any offensive material
+(ODC-BY)
+                                                      contained within them.
+Culture24 (link)
+License: Not explicitly specified; assumed to be      B     Model Details
+for personal and non-commercial use
+Medical News Today (link)                             B.1    Model Name
+License: Copyright owned by Healthline Media,         To simplify the terminology in our paper, we use
+content available for non-commercial use with at-     short names for the models we employ. Specifically,
+tribution                                             GPT-4o refers to OpenAI’s gpt-4o-2024-05-13
+WHO News Releases (link)                              model, while GPT-4o-mini denotes a lightweight
+License: Open access, content may be used with        version from OpenAI’s GPT-4o series. LLaMA3-
+attribution in accordance with WHO terms              70B corresponds to Meta’s Meta-Llama-3-70B-
+The Guardian Open Platform (link)                     Instruct-Turbo, and LLaMA3-7B refers to Meta-
+License:      Content API available for non-          Llama-3-8B-Instruct-Turbo. We use Claude-3.5-
+commercial use, subject to Guardian Open Plat-        sonnet to indicate Anthropic’s claude-3-5-sonnet-
+form terms                                            20240620 model and Claude-3-sonnet for claude-
+                                                      3-sonnet-20240229. Finally, Mistral-7B signifies
+A.2 Model License
+                                                      Mistral’s Mistral-7B-Instruct-v0.3 model.
+GPT-4o, GPT-4o-mini (OpenAI) (link)
+License: Proprietary, limited API access under        B.2    Model Size
+OpenAI terms of service                               GPT-4o and GPT-4o-mini are proprietary models,
+LLaMA3-70B, LLaMA3-7B (Meta) (link)                   and OpenAI has not disclosed their exact parame-
+License: Open source, with a custom commercial        ter counts. LLaMA3-70B is a 70-billion-parameter
+license                                               language model from Meta, while LLaMA3-7B
+    7
+       gpt-4o-2024-05-13                              is a smaller 8-billion-parameter version within
+    8
+       Meta-Llama-3-70B-Instruct-Turbo                the same series. Claude-3.5-sonnet and Claude-
+     9
+       Meta-Llama-3-8B-Instruct-Turbo
+    10
+       claude-3-5-sonnet-20240620
+                                                      3-sonnet are proprietary models from Anthropic
+    11
+       claude-3-sonnet-20240229                       with undisclosed parameter sizes. Mistral-7B is
+    12
+       Mistral-7B-Instruct-v0.3                       a 7-billion-parameter instruction-tuned model de-
+                                                  7059
+veloped by Mistral. These models vary signifi-          self-consistency, the user may run this prompt for
+cantly in scale, with the LLaMA3-70B and GPT-           multiple times to ensure the constraint consistency.
+4o representing large-scale models aimed at high-
+                                                        D.2.2 Intent Constraint Scoring
+performance language understanding and genera-
+tion, while the LLaMA3-7B and Mistral-7B offer          Similarly, we provide Table 7 for the prompt tem-
+more compact alternatives suitable for efficiency-      plate for Intent Constraint Scoring.
+oriented applications. GPT-4o-mini likely repre-        D.2.3 Fact Check
+sents an efficiency-optimized variant of GPT-4o,
+                                                        As defined in Section 3.2, intent hallucination oc-
+though precise parameter details are not publicly
+                                                        curs when an LLM’s generation fails to align with
+available. The Claude models are part of An-
+                                                        the query, regardless of its factual accuracy. While
+thropic’s Claude series, designed to balance per-
+                                                        this is not our primary focus, we introduce an addi-
+formance and efficiency, though their exact archi-
+                                                        tional fact-check step here to provide further analy-
+tectures remain proprietary.
+                                                        sis over LLM’s generation. Inspired by Min et al.
+C     Human Evaluation                                  (2023) and Wang et al. (2023), we adopt a two-
+                                                        step approach to ensure the factual correctness of
+Please refer to Figure 5 for the human annotator’s      LLM’s generation. For the factual evaluation, we
+interface. Annotations from five paid student an-       still use GPT-4o but only change the temperature
+notators, previously discussed in Section 7, were       τ = 0.3.
+utilized. Given the wide range of topics and query      Step 0: Self-Consistency Check. First, we instruct
+amounts covered by the instruction set, it is im-       the language model to evaluate (1) whether there
+probable for a single annotator to possess compre-      are any factual inaccuracies in the generated re-
+hensive proficiency across all subjects. Therefore,     sponse, and (2) whether the generation neglects any
+we implemented a majority voting system, supple-        factual information that is required by the query.
+mented by the use of online research tools, to en-      This check is performed five times independently,
+hance the accuracy of these expert annotations. All     and the most consistent result is selected as the
+annotators were fairly compensated, with wages          final output. We performed a manual evaluation
+exceeding the minimum hourly standard. All an-          before we decided to adopt this strategy.
+notators are told and have consented that their data    Step 1: Wikipedia as a reliable source. When
+will be collected anonymously for research pur-         LLM reports factually inaccurate or missing fac-
+poses. Annotators are asked to read the guidelines      tual information, we further perform knowledge
+before starting the annotation.                         retrieval for the generation. In particular, we
+                                                        adopt the RAG framework developed based on the
+D     Prompt Template                                   Wikipedia knowledge base (Semnani et al., 2023)
+D.1 LLM-as-the-Judge                                    to validate the fact-check result in the previous step.
+                                                        Manual Check. We manually checked the per-
+In Table 5, we provide the detailed prompt tem-
+                                                        formance of self-consistency over 100 cases with
+plate for LLM-as-the-judge. We performed a self-
+                                                        GPT-4o under τ = 0.3. We found that for 93 cases,
+consistency check for running 2 times. If the results
+                                                        the results are consistent and accurate, indicating
+do not match, rerun until the results match. The
+                                                        that it is providing the correct outcome. For the
+model setup follows Section 6, GPT-4o as the de-
+                                                        rest 7 cases, the 5 false-factual-inaccurate cases
+fault model with temperature τ = 0 to generate
+                                                        are detected by LLMs, leaving only 2 wrong cases.
+and evaluate.
+                                                        Due to monetary constraints and time constraints,
+D.2     C ONSTRAINT S CORE.                             we believe this result is satisfying enough for us to
+                                                        adopt the Self-Consistency method.
+Here we provide the Detailed Prompt Template for
+C ONSTRAINT S CORE.                                     E    Dataset Construction
+D.2.1    Intent Constraint Mapping                      Our benchmark dataset was constructed using GPT-
+Table 6 provides the detailed prompt of Intent Con-     4 to generate all queries. To ensure the quality and
+straint Generation in C ONSTRAINT S CORE. We            clarity of the instructions, we adopted a two-stage
+put all steps together instead of separating them for   validation process. First, we employed an LLM-as-
+(1) efficiency, one call of LLM is enough, and (2)      judge system to assess the answerability of each
+                                                    7060
+query. This was followed by a secondary verifi-         (Article). We report the average hallucination rate
+cation step conducted by human experts. Table 1         across all three types only in Section 7.
+provides representative query samples from each
+task category.                                          F.2   Response Evaluation
+                                                        Here we report the detailed result for Response
+E.1    Omission                                         Evaluation in Table 11. To provide a more de-
+The Omission dataset contains two tasks: Fact QA        tailed analysis, we further performed hallucination
+and Creative Writing. For Fact QA, we began             type analysis, where Count refers to LLM fails to
+by extracting 3,000 distinct concepts from Wiki-        clearly mention that only two articles are provided,
+data—a comprehensive knowledge base covering            and Invent refers to LLM invents a third article.
+all Wikipedia entities. These concepts were drawn       Others represent other types of hallucination. As
+from four diverse domains: culture, health, history,    Count is still following the prompt, we report the
+and technology. Each concept was then processed         average of Invent as the hallucination rate in Sec-
+using an LLM to generate a query featuring mul-         tion§7.
+tiple conditions. We calibrated the difficulty level
+based on concept popularity: queries involving          F.3   Analysis
+well-known concepts were designed to be simpler         Here we put the extra case study with examples, as
+(fewer than 3 conditions), while those involving        shown in Table 13 and Table 12.
+less common concepts were made more complex
+(more than 3 conditions). For Creative Writing,         G     Extra Experiments
+we manually designed 40 unique constraints, de-
+                                                        Here we list our results for the extra experiment.
+tailed in the Appendix. The LLM was instructed to
+generate stories and poems while incorporating a        G.1    Weight Selection Analyses
+randomized subset of these constraints. Varying the
+number of constraints allowed us to create samples      Analysis of weight choices’ impact on evaluation
+with different difficulty levels.                       quality. Based on our observations of constraint
+                                                        amount’s distribution, where mandatory constraints
+E.2    Misinterpretation                                typically appear most frequently (2-6 per query),
+                                                        important constraints less so (0-3 per query), and
+The Misinterpretation task contains two tasks: Re-
+                                                        optional constraints least often (0-2 per query), we
+sponse Evaluation and Content Analysis, both un-
+                                                        intuitively set the fixed weights to wm = 3, wi = 2,
+der RAG setup. We first curated a collection of
+                                                        and wo = 1. This weighting scheme serves two
+200 reports from publicly Accessible news web-
+                                                        complementary purposes: a) it reflects the hier-
+sites, ensuring equal representation across four cat-
+                                                        archical importance of constraints (mandatory >
+egories: culture, health, history, and technology
+                                                        important > optional) and b) provides a counter-
+(50 articles each). We then manually crafted task-
+                                                        balance to their frequency distribution in typical
+specific prompts for Response Evaluation and Con-
+                                                        queries. We further conducted an additional exper-
+tent Analysis. Each prompt was paired with three
+                                                        iment to investigate how different weight combi-
+RAG-retrieved reports on the same topic, which
+                                                        nations affect ConstraintScore’s correlation with
+were integrated into the query to simulate realistic
+                                                        human judgments.
+information retrieval and synthesis scenarios.
+                                                        G.2    Detailed Statistical Analyses
+F     Detailed Experiment Result
+                                                        Evaluation bias testing across different judge
+Please refer to Table 9, Table 10, and Table 11 for     models. We conducted additional analyses using
+more results.                                           Claude-3 as the base model for ConstraintScore
+                                                        evaluation on a smaller test set (500 examples) and
+F.1 Content Analysis                                    compared performance trends with our original set.
+Here we report the complete result for Content          The performance patterns remain remarkably con-
+Analysis in Table 10. We report different types         sistent, with a Pearson correlation of 0.93 between
+of missing materials respectively, i.e., No Query       model rankings on both sets. This strong correla-
+Hallucination (Query), No Response Hallucina-           tion suggests minimal bias from using GPT-4o for
+tion (Response), and No Article Hallucination           both generation and evaluation.
+                                                    7061
+G.3 Statistical Significance Tests for Model
+    Comparisons
+Validation of performance differences using
+paired t-tests. We conducted paired t-tests be-
+tween all model pairs to statistically assess perfor-
+mance differences across our main result in Table
+15. For each model pair, we compared both Per-
+fect and CS across 6 diverse tasks (n=6, Fact QA,
+Creative Writing (Story), Creative Writing (Poem),
+Response Evaluation, Content Analysis (Relation-
+ship), Content Analysis (Summary)), calculating
+mean differences, t-statistics, degrees of freedom
+(df=5), and p-values.
+
+
+
+
+                                                    7062
+Figure 5: Human Evaluation Webpage Screenshot.
+
+                    7063
+Component   Details
+Context     Your goal is to evaluate whether a response from a language model (LLM) fully and accurately satisfies
+            the requirements of a given query. A query can be broken down into smaller, specific requirements
+            called intent constraints, which represent distinct conditions that must be addressed in the response.
+            Key Definitions
+            Intent Constraints: Clear, specific requirements derived from the query. They can be categorized as:
+
+               • Mandatory (Cm ): Must be addressed with the highest priority.
+
+               • Important (Ci ): Should be addressed but are slightly less critical.
+
+               • Optional (Co ): Nice to have but not essential.
+
+            Intent Hallucination: When the model’s response fails to satisfy the query due to:
+
+               • Omission: Skipping one or more intent constraints.
+
+               • Misinterpretation: Addressing concepts or actions that were not in the query or distorting the
+                 intended meaning.
+
+            Evaluation Instructions
+
+               • Identify Intent Constraints: Given the query, list the key intent constraints (Cm , Ci , Co ).
+
+               • Check Response Alignment: Assess whether the response addresses each constraint:
+                      – Does it fulfill all mandatory constraints (Cm )?
+                      – Does it reasonably cover important constraints (Ci )?
+                      – Does it optionally address optional constraints (Co )?
+
+               • Detect Hallucination:
+                      – Omission: Are any mandatory or important constraints missing?
+                      – Misinterpretation: Does the response introduce concepts or actions not present in the
+                        query?
+
+            Output
+            For each evaluation, return:
+
+               • Constraint Fulfillment: List each constraint and whether it was addressed.
+
+               • Hallucination Summary:
+                      – Omission (Yes/No): [describe if applicable]
+                      – Misinterpretation (Yes/No): [describe if applicable]
+
+
+
+                        Table 5: LLM-as-the-judge Prompt Template.
+
+
+
+
+                                               7064
+Component            Details
+Prefix               You are an advanced linguist tasked with processing queries using a constraint-based approach.
+                     Decompose the given query step by step, following the instructions below.
+
+                     Query: Existing Content
+Suffix              0. Preliminary Check:
+                         - Focus solely on the TASK QUERY.
+                         - Check if any external content, documents, or data are provided.
+                         - Verify if ALL NECESSARY external contents are provided.
+                    If ANYTHING is missing, request clarification.
+                    Example: If the user asks you to evaluate a response based on a given article but forgets to provide it,
+                    you should request the missing information.
+                    If the Preliminary Check fails, IGNORE the following steps and politely ask for clarification. Use
+                    ”START:” to begin the final listing.
+                     1. Identify Core Elements:
+                          - Determine the main subject, action, and context of the query. Focus on the query’s intent, but
+                     not the task itself (e.g., put words like ”name/list” as an action).
+                          - Ensure the necessary content is available if the action involves processing external content.
+                          - DECOMPOSE AS THOROUGHLY AS YOU CAN. EACH ELEMENT MUST BE A SINGLE
+                     OBJECT, NOT MULTIPLE. Do not overanalyze the query—if the query is simple, then it would not
+                     have many constraints.
+                     2. Decompose into Constraints:
+                     a) Essential Components Extraction:
+                          - Identify all explicit conditions, requirements, or limitations in the query.
+                          - Map each to one of the following components: Location, Time, Subject, Action, Qualifiers,
+                     Quantity.
+                          - Treat each condition as a separate constraint.
+                     b) Constraint Prioritization and Formulation:
+                          - For each constraint, assess its importance:
+                             - Mandatory: Critical elements that must be addressed. Include all Location, Time, Subject,
+                     Action.
+                             - Important: Elements that should be addressed if possible. Include all Qualifiers, Quantity.
+                             - Optional: Elements that can be addressed if convenient. Include all others.
+                             - Formulate constraints for each component, specifying the priority, using the template:
+                        ”[Priority Level]: [Component] must/should [condition]”
+                     At the end, provide the list of constraints a response should cover, grouped by priority levels ONLY.
+                     Use ”START:” to begin the final listing.
+                     YOU MUST ONLY LIST THE FINAL CONSTRAINTS AT THE END, AFTER START. NOTHING
+                     ELSE.
+
+   Table 6: Prompt Template for Intent Constraint Mapping. The final prompt is Prefix + Query + Suffix.
+
+
+
+Component            Details
+Task Overview        Given a query and a response, evaluate if the response addresses all constraints derived from the query.
+Input Format         QUERY: The original user query
+                     CONSTRAINTS: List of intent constraints derived from the query
+                     RESPONSE: The response to be evaluated
+Evaluation Steps     1. Manual Constraint Evaluation:
+                         - Evaluate each constraint individually
+                         - Determine if each constraint is satisfied in the response
+                     2. Constraint Satisfaction Summary:
+                         - Group constraints by priority levels
+                         - Calculate satisfaction ratio for each group
+                         - Format as ”[Priority Level]: X/Y”
+Output Format        Final Listing:
+                         - Begin with ”START:”
+                         - List satisfaction ratios by priority groups
+                         - No additional content after the listing
+
+                         Table 7: Prompt Template for Intent Constraint Scoring.
+
+
+                                                         7065
+                                                                     FAITH QA: Dataset Statistics
+                     Datasets
+                                                                   Easy               Hard         Total
+                     Minor Fabrication
+                                              Tech                 500                500          1000
+                     Fact QA      Open Answer Culture              500                500          1000
+                                              History              500                500          1000
+
+                     Creative     Story          –                 500                500          1000
+                     Writing      Poem           –                 500                500          1000
+                     Major Fabrication
+                                                 Tech               –                  –           810
+                     Response                    Health             –                  –           750
+                     Evaluation                  Culture            –                  –           810
+                                                 History            –                  –           840
+                                                 Tech               –                  –           1431
+                     Content                     Health             –                  –           1225
+                                  Relationship
+                     Analysis                    Culture            –                  –           1436
+                                                 History            –                  –           1837
+                                                 Tech               –                  –           1431
+                                                 Health             –                  –           1225
+                                  Summary
+                                                 Culture            –                  –           1436
+                                                 History            –                  –           1837
+
+Table 8: Dataset statistics for FAITH QA. Each cell shows the number of problems across difficulty and topic. Easy:
+constraints ≤ 4, Hard: constraints > 4.
+
+
+
+
+                                                        FAITH QA: Creative Writing
+      Tasks
+                      GPT-4o      GPT-4o-mini LLaMA3-70B LLaMA3-8B Claude-3.5                      Claude-3   Mistral-7B
+                     Perfect CS Perfect CS       Perfect    CS      Perfect CS         Perfect CS Perfect CS Perfect CS
+      Creative Writing
+              Easy    0.53 8.41 0.41      8.17       0.36   7.84        0.32   7.65     0.43 7.79 0.43 8.03 0.12 6.42
+      Story
+              Hard    0.22 7.58 0.20      7.33       0.22   7.26        0.17   6.76     0.25 7.48 0.21 7.66 0.04 5.42
+              Easy    0.44 8.51 0.35      8.22       0.51   8.61        0.33   8.11     0.60 8.88 0.48 8.44 0.09 6.38
+      Poem
+              Hard    0.35 8.06 0.25      7.37       0.51   8.68        0.20   7.32     0.59 9.16 0.45 8.46 0.04 4.60
+
+Table 9: Results for the Omission dataset, categorized by difficulty level. Performance metrics include Perfect
+(higher the better) and Constraint Score (CS) (average score, higher the better) for Fact QA and Creative Writing
+(Story/Poem) tasks. Tasks are classified as Easy (constraints ≤ 4) or Hard (constraints > 4). Bold and underlined
+values indicate the best performance for each task and difficulty level. CS column is highlighted for visual emphasis.
+
+
+
+
+                                                             7066
+                                            Benchmark: Misinterpretation - Content Analysis
+Models
+                        Culture                       Health                       History                   Technology
+               Query Response Article Query Response Article Query Response Article Query Response Article
+GPT-4o          0.20      0.13      0.20     0.13     0.40        0.33      0.00       0.67    0.13   0.07     0.60       0.13
+GPT-4o-mini     0.07      0.27      0.07     0.53     0.13        0.20      0.27       0.40    0.27   0.00     0.00       0.13
+LLaMA3-70B      0.00      0.07      0.00     0.07     0.00        0.07      0.00       0.13    0.00   0.07     0.20       0.00
+LLaMA3-8B       0.00      0.47      0.00     0.00     0.13        0.07      0.00       0.13    0.00   0.00     0.20       0.07
+Claude-3        0.27      0.60      0.20     0.20     0.60        0.20      0.40       0.53    0.20   0.27     0.53       0.00
+Claude-3.5      0.33      0.40      0.20     0.27     0.60        0.20      0.47       0.40    0.00   0.07     0.53       0.00
+Mistral         0.00      0.07      0.00     0.00     0.00        0.00      0.00       0.13    0.00   0.00     0.07       0.00
+
+Table 10: Results of Perfect (rate of hallucination-free generation). Reported on No Query (Query), No
+Response (Response), and No Article (Article) (higher is better). LLMs struggle to notice the missing content.
+
+
+
+
+                                      Categorized types of Hallucination for Response Evaluation
+                    Models
+                                            Culture                   Health                   Tech
+                                    Count Invent Other Count Invent Other Count Invent Other
+                    GPT-4o           0.08    0.83     0.09     0.05      0.95   0.00    0.19   0.81   0.00
+                    GPT-4o-mini      0.20    0.79     0.01     0.07      0.91   0.02    0.13   0.86   0.01
+                    LLaMA3-70B       0.05    0.94     0.01     0.10      0.86   0.04    0.15   0.84   0.01
+                    LLaMA3-8B        0.07    0.88     0.05     0.14      0.86   0.00    0.16   0.84   0.00
+                    Claude-3         0.07    0.92     0.01     0.01      0.89   0.09    0.11   0.81   0.08
+                    Claude-3.5       0.05    0.89     0.06     0.05      0.92   0.03    0.08   0.87   0.05
+                    Mistral          0.02    0.84     0.14     0.29      0.66   0.05    0.37   0.50   0.13
+
+Table 11: Results of Case-Study for Response Evaluation Task’s Hallucination Types. Here, Count refers to
+LLM fails to clearly mention that only two articles are provided, and Invent refers to LLM invents a third article.
+Others represent other types of hallucination. As Count is still following the prompt, we report the average of Invent
+as the hallucination rate in Section§7.
+
+
+
+
+         Prompt                                                   Generation
+         List three European explorers who circumnavigated       Here is a list:
+         the globe before the 18th century and were not born     1. Ferdinand Magellan - Although originally from
+         in England or Portugal.                                 Portugal, Magellan sailed under the Spanish flag...
+         Name two traditional festivals celebrated in England    Here is a list:
+         only, meanwhile, these festivals originated before      1. Midsummer: Despite being widely celebrated in
+         the Norman Conquest in 1066.                            Scandinavia and Baltic States, Midsummer is...
+
+Table 12: Examples from GPT-4o under Fact QA’s Open Answer setup. GPT knows it could be omitting, as it
+mentions how the answer may not address the query, but it can’t help with providing these famous subjects as
+answers. In the first example, GPT (intentionally) omits the constraint ”not born in England or Portugal” and
+provides Magellan as the answer, who was born in Portugal. In the second example, GPT omits ”celebrated in
+England only” and names Midsummer, a festival that is also widely celebrated in Scandinavia and Baltic States.
+
+
+
+                                                             7067
+         Prompt                                                    Generation
+         For the following three articles, explain how the first   To analyze the relationship between the three articles,
+         article contradicts the second article and is supported   we can break down how Article 1 contradicts Article
+         by the third article.                                     2 while being supported by Article 3.
+         Article 1: Existing Content                                  • Article 1: (summary)
+         Article 2: Existing Content                                  • Article 2: (summary)
+         Article 3: Missing Content                                   • Article 3: (invented summary)
+                                                                   In summary, Article 1 contradicts Article 2 by (con-
+                                                                   cepts), which is supported by arguments in Article 3
+                                                                   (invented concepts)...
+
+         How well does the given response answer the given         The response provided addresses the query by sum-
+         query following the provided article?                     marizing the key sectors of (concepts). Here’s an
+         Query: Missing Content                                    evaluation of how well the response answers the
+         Article: Existing Content                                 query:...
+         Response: Existing Content                                Overall, the response effectively captures the main
+                                                                   points from the article and provides a clear summary
+                                                                   of the (concepts). It accurately reflects the article’s
+                                                                   argument on (concepts).
+
+Table 13: Examples from GPT-4o under Content Analysis (Relationship Analysis) and Response Evaluation setup.
+GPT misinterprets by either (1) inventing a non-existent article to help itself or (2) altering the query to avoid the
+missing content. In the first example, GPT invents a non-existent Article 3 to complete the analysis task required by
+the query. In the second example, GPT similarly invents a non-existent query to provide an answer, but ultimately
+claims that the Response offers a clear summary of the Article—thereby altering the original query, which was
+meant to evaluate how well the Response addressed the Query with the provided Article.
+
+
+                                               Complete Statistical Significance Tests for Model Comparisons
+   Model Pairs
+                                                 Perfect Score (PS)                          Constraint Score (CS)
+                                      Mean Diff ± SD t-value p-value Sig. Mean Diff ± SD t-value p-value Sig.
+   GPT-4o vs GPT-4o-mini             0.0417 ± 0.0668 1.5288         0.1263   n.s.   0.4017 ± 0.3305     2.9766    0.0029     **
+   GPT-4o vs LLaMA3-70B              -0.0017 ± 0.0773 -0.0528       0.9579   n.s.   0.3917 ± 0.6832     1.4043    0.1602     n.s.
+   GPT-4o vs LLaMA3-8B               0.0450 ± 0.0680 1.6199         0.1052   n.s.   0.4583 ± 0.3016     3.7221    0.0002     ***
+   GPT-4o vs Claude-3.5              -0.0500 ± 0.1287 -0.9517       0.3412   n.s.   0.1217 ± 0.9327     0.3195    0.7493     n.s.
+   GPT-4o vs Claude-3                -0.0067 ± 0.0766 -0.2132       0.8312   n.s.   0.1633 ± 0.2044     1.9572    0.0503     n.s.
+   GPT-4o vs Mistral                 0.1050 ± 0.2231 1.1526         0.2491   n.s.   1.7583 ± 0.5788     7.4412    0.0000     ***
+   GPT-4o-mini vs LLaMA3-70B -0.0433 ± 0.1302 -0.8154               0.4149   n.s.   -0.0100 ± 0.7592 -0.0323      0.9743     n.s.
+   GPT-4o-mini vs LLaMA3-8B 0.0033 ± 0.0554 0.1474                  0.8828   n.s.    0.0567 ± 0.4376 0.3172       0.7511     n.s.
+   GPT-4o-mini vs Claude-3.5 -0.0917 ± 0.1212 -1.8522               0.0640   n.s.   -0.2800 ± 0.8591 -0.7984      0.4247     n.s.
+   GPT-4o-mini vs Claude-3   -0.0483 ± 0.0866 -1.3674               0.1715   n.s.   -0.2383 ± 0.3409 -1.7125      0.0868     n.s.
+   GPT-4o-mini vs Mistral    0.0633 ± 0.1611 0.9631                 0.3355   n.s.    1.3567 ± 0.6623 5.0177       0.0000     ***
+   LLaMA3-70B vs LLaMA3-8B 0.0467 ± 0.1117 1.0238                   0.3059   n.s.    0.0667 ± 0.6515 0.2507       0.8021 n.s.
+   LLaMA3-70B vs Claude-3.5 -0.0483 ± 0.1370 -0.8640                0.3876   n.s.   -0.2700 ± 1.3402 -0.4935      0.6217 n.s.
+   LLaMA3-70B vs Claude-3   -0.0050 ± 0.0916 -0.1337                0.8936   n.s.   -0.2283 ± 0.7061 -0.7921      0.4283 n.s.
+   LLaMA3-70B vs Mistral    0.1067 ± 0.2681 0.9746                  0.3297   n.s.    1.3667 ± 1.1188 2.9921       0.0028 **
+   LLaMA3-8B vs Claude-3.5           -0.0950 ± 0.1452 -1.6031 0.1089 n.s. -0.3367 ± 1.1088 -0.7437 0.4570 n.s.
+   LLaMA3-8B vs Claude-3             -0.0517 ± 0.0924 -1.3698 0.1708 n.s. -0.2950 ± 0.4320 -1.6728 0.0944 n.s.
+   LLaMA3-8B vs Mistral              0.0600 ± 0.1691 0.8690 0.3848 n.s. 1.3000 ± 0.5175 6.1534 0.0000 ***
+   Claude-3.5 vs Claude-3             0.0433 ± 0.0668     1.5882    0.1122 n.s. 0.0417 ± 0.7643 0.1335            0.8938 n.s.
+   Claude-3.5 vs Mistral              0.1550 ± 0.2201     1.7252    0.0845 n.s. 1.6367 ± 1.2559 3.1920            0.0014 **
+   Claude-3 vs Mistral                0.1117 ± 0.2115     1.2932    0.1959 n.s. 1.5950 ± 0.7408 5.2741            0.0000 ***
+
+Table 15: Statistical Significance Tests for Model Comparisons. We conducted paired t-tests between all model
+pairs to statistically assess performance differences across our main result in Table 15.
+
+                                                              7068
+                                   Model          Accuracy (%)
+                                   GPT-4o         98.23 ± 0.31
+                                   Claude-3.5     97.30 ± 0.12
+
+Table 16: Performance of Different Base Models for LLM-as-Judge in Constraint Satisfaction.
+
+
+
+
+                      Type                 Task                  Easy   Hard
+                                           Fact QA (Tech)        150    150
+                                           Fact QA (Culture)     150    150
+                      Omission
+                                           Fact QA (History)     150    150
+                                           Creative Writing       –     300
+                                           Response Eval.        150     –
+                      Misinterpretation
+                                           Content Analysis      150     –
+
+                  Table 17: Test Set Distribution of FAITH QABenchmark.
+
+
+
+
+                                                7069
+

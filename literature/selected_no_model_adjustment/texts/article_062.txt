@@ -1,0 +1,1633 @@
+    GSM-P LUS: A Comprehensive Benchmark for Evaluating the Robustness
+                of LLMs as Mathematical Problem Solvers
+               Qintong Li1∗ Leyang Cui2 Xueliang Zhao1∗ Lingpeng Kong1† Wei Bi2†
+                            1 The University of Hong Kong 2 Tencent AI Lab
+
+                                    {qtli,xlzhao,lpk}@cs.hku.hk
+                                        nealcly.nlp@gmail.com
+                                       victoriabi@tencent.com
+                                      qtli.github.io/GSM-Plus/
+
+                             Abstract                              Question Context: James leaves home for shopping. He walks 4 miles/hour in the first 2 hours.
+
+                                                                                Question 1                                           Question 2
+        Large language models (LLMs) have achieved                 Then he increased his speed to 5 miles/
+                                                                   hour. After one more hour, how far is he
+                                                                                                                 Then he realized that he forgot something at home
+                                                                                                                 and had to return and increased his speed to 5 miles/
+        impressive performance across various mathe-               from home?
+                                                                        Answer:
+                                                                                                                 hour. After one more hour, how far is he from home?
+                                                                                                                      Answer:
+        matical reasoning benchmarks. However, there               Step 1: In the first 2 hours, James walks 2
+                                                                   * 4 = 8 miles.
+                                                                                                                 Step 1: In the first 2 hours, he walks 2 * 4 = 8 miles.
+                                                                                                                 Step 2: In the third hour, he walks 1 * 5 = 5 miles.
+        are increasing debates regarding whether these             Step 2: For the remaining one hour, he
+                                                                   walks 1 * 5 = 5 miles.
+                                                                                                                 Step 3: Therefore, James is 8 + 5 = 13 miles away
+                                                                                                                 from home.       (It should be 8 - 5 = 3 miles due to
+        models truly understand and apply mathemati-               Step 3: Therefore, James is 8 + 5 = 13
+                                                                   miles away from home.
+                                                                                                                 “return” yielding the opposite directions.)
+
+        cal knowledge or merely rely on shortcuts for
+        mathematical reasoning. One essential and fre-             Figure 1: Comparing the answers of GPT-3.5-Turbo to
+        quently occurring evidence is that when the                a math word question and its variation with additional
+        math questions are slightly changed, LLMs can              constraints, the former answer is correct, while the latter
+        behave incorrectly. This motivates us to eval-             answer is incorrect (red) due to the misuse of operators.
+        uate the robustness of LLMs’ math reasoning
+        capability by testing a wide range of question
+        variations. We introduce the adversarial grade
+        school math (GSM-P LUS) dataset, an exten-                 math GSM8K (Cobbe et al., 2021), high school
+        sion of GSM8K augmented with various math-                 math MATH (Hendrycks et al., 2021), and college
+        ematical perturbations. Our experiments on 25              math Theoremqa (Chen et al., 2023). Regarding the
+        LLMs and 4 prompting techniques show that                  widely-used GSM8K benchmark, proprietary mod-
+        while LLMs exhibit different levels of math                els like GPT-4 and cutting-edge open-source mod-
+        reasoning abilities, their performances are far            els have reported accuracy rates exceeding 90%
+        from robust. In particular, even for problems
+                                                                   and 80%, respectively. However, the debate within
+        that have been solved in GSM8K, LLMs can
+        make mistakes when new statements are added
+                                                                   the research community regarding whether these
+        or the question targets are altered. We also               models truly understand and apply mathematical
+        explore whether more robust performance can                knowledge or merely solve math word problems
+        be achieved by composing existing prompting                based on superficial patterns (Patel et al., 2021) or
+        methods, in which we try an iterative method               even due to training data leakage (Golchin and Sur-
+        that generates and verifies each intermediate              deanu, 2023) has never ceased. Apparent evidence
+        thought based on its reasoning goal and calcu-             supports such concerns. Figure 1 shows an exam-
+        lation result.
+                                                                   ple case of GPT-3.5-turbo performing multiple-step
+   1    Introduction                                               reasoning on the GSM8K dataset, where LLMs
+                                                                   sometimes make simple errors that humans would
+   Mathematical reasoning stands as a crucial tes-                 not (Zhou et al., 2023b; Shi et al., 2023). Sim-
+   tament to the development of artificial intelli-                ply due to the fact that GPT-3.5-turbo struggles
+   gence (Lake et al., 2017). It requires rigorous                 with distinguishing the directions of “leave” and
+   problem understanding, strategy formulating, and                “return”, resulting in the misuse of an operator.
+   calculation performing abilities (Baroody, 1987;                   In response to these issues, we advocate for a
+   Verschaffel et al., 1999). Large language models                more rigorous and adversarial evaluation bench-
+   (LLMs) (Brown et al., 2020; Touvron et al., 2023a)              mark that can systematically study the math reason-
+   have demonstrated strong performance on various                 ing capability of LLMs. Our benchmark revealed
+   mathematical benchmarks including grade school                  a gap of up to 20% between the accuracy reported
+        ∗                                                          by the current model and the accuracy observed
+            Work done during an internship at Tencent AI Lab.
+        †
+            Corresponding authors.                                 in our setting, while human performance remains
+                                                                2961
+Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pages 2961–2984
+                              August 11-16, 2024 ©2024 Association for Computational Linguistics
+  Grade School Math Dataset             Parent Set    Size       Answer Format     Annotation                 Perturbation
+
+  ASDiv-A (Miao et al., 2020)           N/A            2,305     Equation-formed   Human (A.)                 N/A
+  GSM8K (Cobbe et al., 2021)            N/A            1,319     Open-formed       Human (Q.,A.)              N/A
+
+  SVAMP (Patel et al., 2021) ?          ASDiv-A        1,000     Equation-formed   Human (Q.,A.)              P R
+  MetaMathQA (Yu et al., 2023a)         GSM8K, MATH    240K      Open-formed       GPT-3.5-Turbo              R
+  GSM-HARD (Gao et al., 2023)           GSM8K          1,319     Program-formed    Codex (Q.A.), Human (A.)   D
+  GSM-IC (Shi et al., 2023) ?           GSM8K         58,052     Open-formed       Human (Q.)                 P D
+  GSM8k_robust (Chern et al., 2023) ?   GSM8K          1,319     Open-formed       GPT-4                      N
+  GSM-P LUS (Our) ?                     GSM8K         10,552     Open-formed       GPT4, Human (Q.,A.)        N D I A R P D C
+
+
+Table 1: Overview of the grade school math datasets. ?refers to datasets specifically designed to evaluate the
+robustness of model performance. Different colors represent different perturbation types: N umerical Substitution;
+D igit Expansion; I integer-decimal-fraction Conversion; A dding Operation; R eversing Operation; P roblem
+Understanding; D istractor Insertion; C ritical Thinking.
+
+
+unaffected due to the unchanged inherent difficulty                  • LLMs perform far less well when confronted
+level of the questions. In this work, we perturb the              with critical thinking, arithmetic variation, and dis-
+most popularly used GSM8K dataset, yielding an                    tractor insertion, but they are relatively resilient to
+adversarial dataset for grade school math GSM-                    perturbations in numerical variation and problem
+P LUS. Motivated by the capability taxonomy for                   understanding (§5.2).
+solving math problems mentioned in Polya’s prin-                     • All investigated prompting techniques show a
+ciples (Polya, 2004), we identify 5 perspectives                  lack of robustness, especially for arithmetic vari-
+to guide the development of GSM-P LUS: (1) nu-                    ation and critical thinking. We further explore a
+merical variation refers to altering the numerical                compositional prompting method by drawing on
+data or its types (e.g., from integer to decimal).                advancements in other domains, which involves
+(2) arithmetic variation refers to reversing or in-               iteratively generating and verifying each reasoning
+troducing additional operations, such as addition,                thought, and demonstrates good performance on
+subtraction, multiplication, and division, to math                both GSK8K and GSM-P LUS (§5.4).
+problems. (3) problem understanding refers to
+                                                                  Based on the endeavors and results of this work,
+rephrasing the text description of the math prob-
+                                                                  we urge further research on LLMs in math domains
+lems. (4) distractor insertion refers to inserting
+                                                                  to enhance not only their performance for math
+topic-related but useless sentences to the problems.
+                                                                  reasoning but also their performance robustness.
+(5) critical thinking focuses on question or doubt
+ability when the question lacks necessary state-                  2     Related Work
+ments. Based on the 1,319 test questions from
+GSM8K, we create eight variations for each ques-                  Numerous datasets have been curated to assess
+tion, the yielding GSM-P LUS comprises 10,552                     the mathematical reasoning abilities of AI systems.
+question variations. By testing LLMs using each                   Early math datasets (Kushman et al., 2014; Ling
+question and its eight variations, GSM-P LUS can                  et al., 2017, i.a.) focused on basic math prob-
+facilitate the holistic evaluation of LLMs’ robust-               lems with equation-based solutions. Subsequently,
+ness in solving math word problems.                               more difficult datasets have been introduced, span-
+                                                                  ning grade-school level (Cobbe et al., 2021; Mishra
+   We use GSM-P LUS to evaluate the robustness
+                                                                  et al., 2022), high-school level (Hendrycks et al.,
+of 25 LLMs with different model scales and task-
+                                                                  2021), and college-level datasets (Sawada et al.,
+specific fine-tuning, along with 4 popular prompt-
+                                                                  2023; Zheng et al., 2021). Amid this progress,
+ing techniques to obtain LLMs’ math reasoning
+                                                                  there has been a surge in the development of LLMs
+results. Overall, we find that LLMs can accurately
+                                                                  towards solving those math benchmarks (Ahn et al.,
+solve the GSM8K questions while struggling with
+                                                                  2024). Despite the substantial difficulties posed
+answering the variations in GSM-P LUS. Our de-
+                                                                  by advanced-level math for LLMs, recent LLMs
+tailed findings are in three folds:
+                                                                  has shown huge potential for solving grade school
+   • Task-specific optimization, e.g., math SFT,                  math (Touvron et al., 2023a).
+usually gives better accuracy on benchmarks, while                   Supervised fine-tuning (SFT) is a line of work to
+the robustness depends more on the selection of the               effectively adapt language models to mathematics
+base model and fine-tuning dataset (§5.1).                        domains (Luo et al., 2023; Azerbayev et al., 2023;
+                                                               2962
+  Seed Question: Janet’s ducks lay 16 eggs per day. She eats three for breakfast every morning and bakes muffins for her
+  friends every day with four. She sells the remainder at the farmers’ market daily for $2 per fresh duck egg. How much in
+  dollars does she make every day at the farmers’ market?
+  Solution: Janet sells 16 - 3 - 4 = 9 duck eggs a day. She makes 9 * 2 = 18 every day at the farmer’s market. Answer: 18
+  Perturbation Category       Question Variation
+                Num. Sub.     16 → 20     three → five     four → six    2→3
+  Numerical
+  Variation     Digit Exp.    16 → 1600      four → 400
+                IDF Conv.     three → 1/4     2 → 2.5
+                              Janet’s ducks lay . . . every day with four. She also uses two eggs to make a homemade hair
+                Add. Op.
+                              mask every day. She sells . . . make every day at the farmers’ market?
+  Arithmetic
+  Variation                   Janet’s ducks lay 16 eggs per day. She eats three . . . with four. She sells the remainder at
+                Rev. Op.      the farmers’ market daily for a certain amount per fresh duck egg. She makes $18 every
+                              day at the farmers’ market. How much does each duck egg cost?
+                              Janet’s ducks lay 16 eggs daily. She eats three for breakfast and uses four to bake muffins for
+  Problem Understanding
+                              her friends. She sells the remaining eggs at the local farmers’ market for $2 per fresh duck
+                              egg. How much money does she make each day by selling eggs at the farmers’ market?
+  Distractor Insertion        Janet’s ducks . . . with four. She also uses two eggs to feed her pet parrot, but her neighbor
+                              gives her two eggs from his own ducks to replace them. She sells . . . at the farmers’ market?
+  Critical Thinking           Janet’s ducks lay eggs per day. She eats three for breakfast every morning and . . . How
+                              much in dollars does she make every day at the farmers’ market?
+
+Table 2: An example of question variations generated using 8 perturbations from 5 perspectives based on a seed
+math question. Modifications are marked in green.
+
+Liang et al., 2023; Gou et al., 2023, i.a.). Meta-               existing evaluation settings only cover limited types
+Math (Yu et al., 2023a) highlights the efficacy of               of automatically constructed perturbations. In con-
+question bootstrapping, while MAmmoTH (Yue                       trast, we create eight variations of a single question
+et al., 2023) proved the benefits of training LLMs               by perturbing it with eight different math reasoning
+on various data sources and hybrid rationales.                   skills. Using GSM-P LUS, we conduct a systematic
+   Another trend improves LLMs’ math capabilities                evaluation of the LLM’s robustness across vari-
+by prompting with carefully designed inputs (Yao                 ous reasoning types. For most LLMs, GSM-P LUS
+et al., 2023; Yang et al., 2023; Zhou et al., 2023a,             is a challenging benchmark, with GPT-3.5-Turbo
+i.a.). Chain-of-thought prompting guides models                  reaching only 61.19% accuracy.
+to generate natural language reasoning steps before
+                                                                 3      The GSM-P LUS Dataset
+reaching the final answer (Wei et al., 2022; Ko-
+jima et al., 2022). Program-of-thought prompting                 To comprehensively evaluate the robustness of
+generates programs as the intermediate steps and                 LLMs in utilizing math-related skills, we build an
+integrates external tools like a Python interpreter              adversarial dataset GSM-P LUS using the GSM8K
+for precise calculation (Gao et al., 2023; Chen et al.,          dataset as a foundation. Inspired by Polya’s princi-
+2022). The promising outcomes made by LLMs, es-                  ples, we design eight types of perturbations from
+pecially in grade school math, motivate researchers              five different perspectives to test the robustness of
+to study whether they can maintain high perfor-                  LLMs in math reasoning, as depicted in Table 2.
+mance in realistic settings (Bubeck et al., 2023).
+                                                                 3.1     Perturbation Categories
+   In this work, we aim to develop a consolidated
+benchmark that systematically examines the robust-               Numerical variation tests whether LLMs have
+ness of LLMs in solving math word problems. Re-                  been overfitted by altering the numerical data and
+cent work concerns the robustness of math reason-                seeing the prediction behaviors. We define three
+ing using different perturbations, such as semantic              subcategories of numerical variation below:
+substitution (Jin et al., 2020; Li et al., 2020; Wang               • Numerical Substitution: replaces numerical
+et al., 2023; Zhou et al., 2023b), reversal predic-              data with another number that has the same number
+tion (Berglund et al., 2023; Yu et al., 2023a), and              of digits, such as replacing “16” with “20”.
+irrelevant context distraction (Shi et al., 2023; Li                • Digit Expansion: increases the number of dig-
+et al., 2023). However, as shown in Table 1, most                its in a number, such as replacing “16” with “1600”.
+                                                            2963
+   • Integer-decimal-fraction Conversion: uses dif-              Seed      Self-generated   Human-corrected
+ferent representation types of numbers instead of              Questions     Questions        Questions
+only integers, e.g., converting “2” into “2.5”.                  93.25         87.36             85.58
+Arithmetic variation focuses on the models’ flexi-
+bility in applying arithmetic operations according       Table 3: Accuracy of GPT-4 on GSM8K seed questions,
+to the question requirements. We define two sub-         self-generated question variations, and human-corrected
+                                                         variants (i.e., GSM-P LUS).
+categories of arithmetic variation as below:
+   • Adding Operation: increases seed question’s
+statements but restricts the operations in addition,     e.g., for “distractor insertion”, the newly-added
+subtraction, multiplication, and division.               sentences affect the final answer, (ii) include addi-
+                                                         tional changes beyond the specified perturbations,
+   • Reversing Operation: transforms a statement         (iii) generate invalid questions, (iv) significantly
+of the seed question into the queried answer in the      increase questions’ difficulty, surpassing the grade
+generated variation. For example, the statement          school level, or (v) generate incorrect answers.
+“$2 per fresh duck egg” in the seed question is
+transformed into the question sentence “How much            To ensure data quality, all question variations
+does each duck egg cost?”.                               and answers produced by GPT-4 are further refined
+                                                         by human annotators through a rigorous process.
+Problem understanding rephrases the question
+                                                         Annotators are first required to annotate 24 varia-
+to investigate the potential impact of question-
+                                                         tions as a qualifying exam to ensure the accuracy
+wording on the model’s understanding.
+                                                         of their annotation. To further control annotation
+Distractor insertion introduces topic-related but
+                                                         quality, the annotators are assigned workloads in
+useless sentences with numbers to test models’ abil-
+                                                         batches, with each batch consisting of 50 seed ques-
+ity of statement evaluation.
+                                                         tions. Prompt feedback is provided throughout the
+Critical thinking requires that models can ques-
+                                                         annotation process. Specifically, 10% of the varia-
+tion or doubt during the process of mathematical
+                                                         tions were cross-annotated by at least 3 annotators
+reasoning, rather than mindless sycophancy (Wei
+                                                         with a high inter-annotation consistency rate of
+et al., 2023a). This means that a model should ex-
+                                                         90.02%, demonstrating the reliability of human re-
+plicitly specify this issue if an essential statement
+                                                         visions. Overall, human annotators revised 18.85%
+is removed from the seed question.
+                                                         of the variations produced by GPT-4, highlighting
+   Previous findings indicate that LLMs are typi-
+                                                         the importance of human revision. Detailed statis-
+cally robust to numerical variation (Bubeck et al.,
+                                                         tics across perturbation types are presented in Ta-
+2023) and problem understanding (Zhou et al.,
+                                                         ble 7 of the Appendix. Details of human annotation
+2023b), but sensitive to distractor insertion (Wei
+                                                         can be found in Appendix B.2.
+et al., 2023b). Other perturbations such as arith-
+metic variation and critical thinking remain under-         Given GPT-4’s involvement in the question-
+explored in math domains due to annotation diffi-        rewriting process, we further analyze the potential
+culties, but all of them are important for humans to     preference bias that may be introduced towards
+solve problems. Our pilot experiments found that         question variations. Table 3 shows that GPT-4 ex-
+models struggle to perform well on these pertur-         hibits similar performance on question variations
+bations. Our work offers a comprehensive dataset         generated by itself and those that are corrected by
+and evaluation of the math reasoning robustness in       humans, suggesting the minimal influence of in-
+fine-grained eight perturbations.                        herent bias on the model’s performance. Despite
+                                                         successfully generating variations, GPT-4 can still
+3.2 Dataset Construction                                 provide incorrect answers, indicating that GPT-4’s
+In previous work (Norberg et al., 2023; Yu et al.,       question-rewriting capabilities do not completely
+2023a), GPT-4 has been exclusively used to con-          align with its question-answering capabilities.
+struct variations. We initially utilize GPT-4’s
+question-rewriting capabilities to generate question     3.3   Evaluation Metrics
+variations and then prompt it to generate answer
+candidates for these variations. However, we dis-        We adopt the performance drop rate (PDR) met-
+cover that GPT-4 is not always reliable: it may (i)      ric to measure the relative performance decline on
+fail to incorporate perturbations into the variations,   question variations compared to the performance
+                                                     2964
+     Model               Foundation        Math-SFT               Output Format       GSM8K    GSM-P LUS   PDR (%) ↓   ASP (%) ↑
+     Human                   -                 -                     NL Rationale      96.77     98.75       -2.05       92.11
+                                                           closed-source models
+     GPT-4                   -             Unknown                   NL Rationale      93.25     85.58        8.23       81.54
+     GPT-3.5-Turbo           -             Unknown                   NL Rationale      73.62     61.19       16.88       51.36
+                                                   open-source foundation models (7-70B)
+     Mistral-7B‡             -                No                     NL Rationale      39.58     26.18       33.86       18.66
+     LLaMA-2-7B‡             -                No                     NL Rationale      13.42      8.12       39.49        3.97
+     CodeLlama-7B‡        LLaMA-2             No                      Program          25.32     15.05       40.56       10.00
+     LLaMA-2-13B‡            -                No                     NL Rationale      25.40     16.57       34.76        9.96
+     CodeLlama-13B‡       LLaMA-2             No                      Program          35.94     21.67       39.71       15.22
+     CodeLlama-34B‡       LLaMA-2             No                      Program          45.64     30.00       34.27       22.42
+     LLaMA-2-70B‡            -                No                     NL Rationale      56.71     40.04       29.40       32.31
+                                               open-source models in mathematics (7B)
+     MetaMath-Mistral      Mistral      MetaMathQA-395K            NL Rationale        77.79     56.25       27.69       50.56
+     MetaMath             LLaMA-2       MetaMathQA-395K            NL Rationale        66.72     44.35       33.53       37.91
+     Abel                 LLaMA-2           Unreleased             NL Rationale        59.51     37.09       37.67       29.64
+     ToRA                 LLaMA-2      TORA-CORPUS-16k         Program+NL Rationale    67.48     43.60       35.39       37.89
+     MAmmoTH              LLaMA-2       MathInstruct-260K            Program           52.84     32.14       39.17       25.63
+     MAmmoTH-Coder       CodeLLaMA      MathInstruct-260K            Program           59.89     38.73       35.33       32.02
+     SEGO                CodeLLaMA    GSM8K+MATH+AQuA                Program           68.69     44.71       34.91       40.68
+                                               open-source models in mathematics (13B)
+     MetaMath             LLaMA-2       MetaMathQA-395K            NL Rationale        70.81     48.58       31.39       41.06
+     Abel                 LLaMA-2           Unreleased             NL Rationale        66.72     45.39       31.97       37.45
+     ToRA                 LLaMA-2      TORA-CORPUS-16k         Program+NL Rationale    71.80     47.88       33.31       42.43
+     MAmmoTH              LLaMA-2       MathInstruct-260K            Program           62.40     40.82       34.58       34.05
+     MAmmoTH-Coder       CodeLLaMA      MathInstruct-260K            Program           64.90     43.97       32.25       36.93
+     SEGO                CodeLLaMA    GSM8K+MATH+AQuA                Program           72.50     49.30       32.00       44.79
+                                               open-source models in mathematics (70B)
+     MetaMath             LLaMA-2      MetaMathQA-395K               NL Rationale      82.11     59.37       27.69       52.30
+     Abel                 LLaMA-2          Unreleased                NL Rationale      83.85     59.94       28.52       55.31
+     MAmmoTH              LLaMA-2      MathInstruct-260K              Program          75.89     53.41       29.62       47.96
+
+
+Table 4: Accuracy of current LLMs on GSM8K and GSM-P LUS. Models marked with ‡ indicate their performance
+under an 8-shot setting. Math-SFT means whether the model has been fine-tuned on any math reasoning datasets.
+
+
+on initial questions.                                                    models, i.e., Mistral (Jiang et al., 2023), LLaMA-
+                      ∑(x,y)∈Da I[LM(x), y]/∣Da ∣
+                                                                         2 (Touvron et al., 2023b), and CodeLlama (Roziere
+    PDR = 1 −                                                  (1)       et al., 2023), as well as open-source SFT mod-
+                       ∑(x,y)∈D I[LM(x), y]/∣D∣
+                                                  ,
+                                                                         els specifically designed for math reasoning, i.e.,
+where Da and D represent the GSM-P LUS and                               MetaMath (Yu et al., 2023a), Abel (Chern et al.,
+GSM8K datasets, respectively. Additionally, we                           2023), ToRA (Gou et al., 2023), MAmmoTH (Yue
+measure the percentage of accurately solved pairs                        et al., 2023), and SEGO (Zhao et al., 2023). The
+(ASP), where the seed question x and its variation                       decoding temperature is set to 0 for deterministic
+x′ are both correctly answered by a specific LLM.                        predictions. Open-source base models are inferred
+                                                                         using 8 demonstrations. Our results on the GSM8K
+             ∑x,y;x′ ,y′ I[LM(x), y] ⋅ I[LM(x′ ), y ′ ]
+    ASP =
+                                                                         of the listed LLMs match their previously reported
+                             N ⋅ ∣D∣
+                                                        ,
+                                                                         accuracy. We also establish a human performance
+                                                        (2)              baseline by engaging qualified human annotators
+                                                                         who have successfully passed a qualification exam.
+Each (x, y) sample in D has N sample pairs                               All annotators possess at least a bachelor’s degree.
+(x, y; x′ , y ′ ) across N perturbations.                                Further details can be found in Appendix C.1.
+4    Experimental Setup
+                                                                         5     Experiments
+We compare the accuracy of representative LLMs
+on the GSM8K and GSM-P LUS datasets, and use                             5.1    Overall Results on GSM-P LUS
+the PRD and ASP metrics to evaluate the robust-                         We first evaluate whether LLMs achieve similar
+ness in diverse math reasoning.                                         performance on GSM8K and GSM-P LUS. Results
+   We consider closed-source foundation mod-                            are shown in Table 4. We observe a substantial
+els, i.e., GPT-4 (OpenAI, 2023) and GPT-3.5-                            decline in performance on all investigated LLMs.
+Turbo (OpenAI, 2022), open-source foundation                            The ASP of all models is notably lower than their
+                                                                  2965
+accuracy on the GSM8K dataset. GPT-4 exhibits                 Crit. Thinking
+                                                              Add. Op.
+                                                                               Rev. Op.
+                                                                               Dist. Ins.
+                                                                                            IDF Conv.
+                                                                                            Digit Exp.
+                                                                                                         Num. Sub.
+                                                                                                         Prob. Underst.
+the highest level of robustness with the smallest
+                                                      300
+PDR of 8.23%. CodeLlama shows the largest PDR
+                                                      250
+(40.56%, 39.71%, and 34.27% for 7B, 13B, and
+                                                      200
+34B), exceeding its foundation model LLaMA-2-
+                                                      150
+7B (39.49%) and math SFT models fine-tuned on it,
+                                                      100
+e.g., SEGO-7B (34.91%). The limited robustness
+                                                         50
+of program-only LLMs suggests the necessity of
+                                                         0
+natural language guidance and task-specific fine-
+tuning for robust math reasoning. We make some                      moT H-7
+                                                              MAml-70B -70B 0B
+                                                              AbeaMathB er-13
+                                                              Met O-13 H-Cod
+                                                              SEG moTH-13B
+                                                                               B
+detailed comparisons of the LLMs in the following.
+                                                              MAmmoT
+                                                              MAmA-13B
+                                                              ToR l-13B -13B
+                                                              AbeaMath er-7B
+                                                              Met O-7B H-Cod
+                                                              SEG moTH-7B
+                                                              MAmmoT
+                                                              MAmA-7B
+                                                              ToR l-7B -7B ral
+                                                              AbeaMath-Mist
+                                                              MetaMath70B B
+                                                              MetMA-2- a-34B
+                                                              LLa eLlama-13
+                                                              CodeLlam13B
+                                                              CodMA-2- a-7B
+                                                              LLa eLlam7B
+                                                              CodMA-2-
+Math SFT models vs. Foundation models.
+                                                              LLatral-7Burbo
+                                                              Mis -3.5-T
+                                                              GPT-4
+                                                              GPT an
+                                                              Hum
+While the math fine-tuning models achieve bet-
+                                                      Figure 2: The PDR distribution across 8 perturbation
+ter performance on both GSM8K and GSM-P LUS
+                                                      types. The bars below the line indicate an increase in
+compared to their foundation models, the PDR          performance for the corresponding perturbation com-
+of these SFT models is not significantly smaller      pared to the performance on GSM8K.
+than that of their foundation models. For instance,
+the PDR of LLaMa-2-13B and LLaMa-2-70B is
+34.76% and 29.40%, respectively, whereas the          5.2     Performance of LLMs across Diverse
+PDR of the subsequent SFT models, Abel-13B and                Question Variations
+MAmmoTH-70B, is 31.97% and 29.62%, showing            Next, we evaluate the models’ performance sta-
+the math SFT process may be hard to improve the       bility across eight question variations (Figure 2).
+model’s math problem-solving robustness.              Detailed performance drops and specific cases are
+                                                      provided in Figure 6 and Table C.3 in the Appendix.
+Comparisons between Math SFT models.                  All models demonstrate inferior robustness com-
+Among Math SFT models, larger models gener-           pared to humans in critical thinking (purple), addi-
+ally display lower PDR than smaller models. For       tion operation and reversing operation from arith-
+instance, the PDR of Abel-7B, Abel-13B, and Abel-     metic variation (blue), distractor insertion (pink),
+70B stand at 37.67%, 31.97%, and 28.52%, respec-      and integer-decimal-fraction conversion (orange).
+tively. Notably, good foundation models are helpful   For numerical substitution and problem understand-
+in both the accuracy and robustness of the subse-     ing, models maintain their performance and even
+quent math SFT models. MetaMath-Mistral-7B            show slight improvements. Program-based mod-
+(SFT on Misral-7B with its PDR 33.86%) presents       els (e.g. MAmmoTH-Coder-13B with a PDR of
+notable stability (with a PDR of 27.69%) than other   11.80%) exhibit greater robustness in numerical
+math SFT models of similar or larger sizes, such      variation than natural-language-based models (e.g.
+as MetaMath-7B (SFT on LLaMa-2-13B with its           Abel-13B with a PDR of 14.03%). Whereas for
+PDR 34.76% ) with a PDR of 33.53%. Similarly,         non-numerical variations, e.g., distractor insertion,
+MAmmoTH-Coder-13B (SFT on CodeLLaMA-                  NL-based models are more stable, the PDR values
+13B with its PDR 41.24%) demonstrates lower ac-       of the two models are 23.2% and 16.1%. Detailed
+curacy drops compared to MAmmoTH-13B (SFT             analysis of each variation is provided below.
+on LLaMA-2-13B with its PDR 34.76%) (32.25%
+vs. 34.58%).                                          Critical thinking. Except for humans and closed-
+                                                      source models, the performance of other models
+Effectiveness of SFT datasets. Among SFT              notably deteriorates (nearly 100% as shown in Fig-
+models from the same foundation model, there are      ure 6) when an essential statement is removed from
+noticeable gaps in their performance stability. For   the problems. In such cases, they may generate a
+example, after LLaMA-2-7B finetuned on Meta-          hallucinated solution instead of acknowledging the
+MathQA, Abel-data, TORA-CORPUS, and Math-             absence of the required information.
+Instruct datasets, the PDRs are 33.53%, 37.67%,
+35.39%, and 39.17% respectively. This shows the       Arithmetic variation. For questions with an in-
+critical impact of SFT datasets.                      creased number of statements (adding operation),
+                                                  2966
+                         10000
+
+
+
+
+Number of Sample Pairs
+                          8000
+
+
+                          6000
+
+
+                          4000
+
+
+                          2000
+
+
+                             0
+                                 GPT-4   GPT-3.5-Turbo   LLaMA-2-7B   LLaMA-2-13B   LLaMA-2-70B   CodeLlama-34B    Mistral-7B   MetaMath-Mistral   Abel-70B   MetaMath-70B   ToRA-7B   MAmmoTH-70B   SEGO-7B
+                                                              GSM8K GSM++                     GSM8K GSM++                       GSM8K GSM++                      GSM8K GSM++
+
+ Figure 3: The reasoning transferability of LLMs between the question pairs of GSM8K and GSM-P LUS. The
+ purple (both correct) and blue (both wrong) bars represent consistent model behavior, while the red (GSM8K
+ correct&GSM-P LUS wrong) and yellow (GSK8K wrong&GSM-P LUS correct) bars represent the inconsistent
+ model behavior. The heights of the purple and red bars indicate the number of correctly solved GSM8K questions.
+
+
+models exhibit limited capacity. Except GPT-4 and                                                                       rectly answering its variations in GSM-P LUS, and
+GPT-3.5-Turbo, most models, regardless of size                                                                          vice versa (high ASP value). If this assertion holds,
+and output format, experience an accuracy drop                                                                          we can say that LLMs exhibit robust performance
+exceeding 40%. Despite the importance of flexi-                                                                         on this specific subset of math problems, even if
+ble reasoning from different perspectives, all mod-                                                                     not across the entire dataset. In our setup, each
+els exhibit notable PDR values when reversing the                                                                       GSM8K question and its variations in GSM-P LUS
+statements of the questions (reversing operation).                                                                      are transformed into eight pairs. The distribution
+This finding aligns with the observations of Deb                                                                        of each partition set is presented in Figure 3.
+et al. (2023) that model performance significantly                                                                         Among the 6 right-most mathematical models,
+deteriorates when engaging in backward reasoning.                                                                       Abel-70B stands out with the highest ASP value
+                                                                                                                        (55.31%), even surpassing the ASP for GPT-3.5-
+Distractor insertion. Larger models exhibit a
+                                                                                                                        Turbo (51.36%). The existence of the red bars,
+greater capacity to resist disturbances, e.g., Abel-
+                                                                                                                        where the seed question is solved correctly but its
+70B has a lower PDR value than GPT-3.5-Turbo.
+                                                                                                                        variations are not, indicates the limited transfer-
+Program-based models tend to be sensitive when
+                                                                                                                        ability of most models. While the performance
+inserting distractors. For example, MammoTH-
+                                                                                                                        on seed questions varies (heights of purple and
+13B (40.6%) and SEGO-13B (43.9%) have higher
+                                                                                                                        red bars), their performance transferability shows a
+PDRs than NL-based models MetaMath-13B
+                                                                                                                        similar level (height of red bars). This implies the
+(39.4%) and Abel-13B (31.8%).
+                                                                                                                        inadequacy of existing benchmarks for accurately
+ Numerical variations. The model’s performance                                                                          assessing the true ability of models in math rea-
+ shows minimal fluctuations for general numerical                                                                       soning. High accuracy alone does not necessarily
+ substitution and digit expansion. LLaMA-2-13B                                                                          indicate strong reasoning robustness.
+ even exhibits a slight improvement (2.1%) on nu-                                                                          Notably, a small proportion of seed questions
+ merical substitution. In contrast, even for program-                                                                   are not solved, but their variations are correctly
+ based models, integer-decimal-fraction conversions                                                                     answered (yellow bars). This further implies that
+ lead to a significant decline.                                                                                         a model’s incapacity to reason mathematically on
+                                                                                                                        some samples not always be implied by failures in
+ Problem understanding. Most LLMs show ro-
+                                                                                                                        those samples. A holistic evaluation is valuable for
+ bust performances when answering rephrased ques-
+                                                                                                                        assessing the nuanced performance of the models.
+ tions by GPT-4, which is somewhat surprising as
+ models are typically sensitive to question wording.
+                                                                                                                        5.4         Prompting to Enhance the Robustness of
+ 5.3 Mathematical Reasoning Transferability                                                                                         LLMs for Math Word Problems?
+ Previous sections have presented the results ob-                                                                       As reviewed in Section 2, various prompting meth-
+ tained from the complete sets of GSM8K and                                                                             ods that require LLMs to generate their explicit rea-
+ GSM-P LUS. Here, we partition the entire set based                                                                     soning steps have demonstrated improvement for
+ on whether the questions are answered correctly                                                                        math reasoning, such as Chain-of-thought prompt-
+ or not. This division allows us to study whether                                                                       ing, i.e., C OT (Wei et al., 2022; Kojima et al.,
+ a seed question from GSM8K, when successfully                                                                          2022), and Program-of-Thought Prompting, i.e.,
+ solved by an LLM, increases the likelihood of cor-                                                                     P OT (Gao et al., 2023; Chen et al., 2022). Similarly,
+                                                                                                                  2967
+                        GPT-4                                              GPT-3.5-Turbo                                                    LLaMA-2-70B                                                  MAmmoTH-70B
+                       GSM8K                                                   GSM8K                                                          GSM8K                                                          GSM8K
+       Num. Sub.                     Crit. Thinking            Num. Sub.                     Crit. Thinking                     Num. Sub.                   Crit. Thinking                   Num. Sub.                    Crit. Thinking
+                                                                                                                                                                  70
+                                                                                                  70                                                                                                                           70
+                                      70                                                                                                                     50
+                                                                                             50                                                                                                                           50
+                                50
+Digit Exp.                                     Rev. Op. Digit Exp.                                           Rev. Op. Digit Exp.                                          Rev. Op. Digit Exp.                                          Rev. Op.
+                                                                                      0                                                              0                                                             0
+
+
+
+
+  IDF Conv.                                 Dist. Ins.     IDF Conv.                                     Dist. Ins.         IDF Conv.                                  Dist. Ins.        IDF Conv.                                  Dist. Ins.
+
+             Prob. Underst.   Add. Op.                               Prob. Underst.       Add. Op.                                  Prob. Underst.       Add. Op.                                 Prob. Underst.       Add. Op.
+                                                                                 CoT                   PoT            LtM          Complexity-based CoT
+
+
+Figure 4: The accuracy of LLMs across various question variations and GSM8K questions differs based on the
+prompting techniques used. Complexity-based CoT and LT M use 8 and 1 in-context examples, respectively.
+
+
+Least-to-most prompting (LT M (Zhou et al., 2022))                                                                            A phone costs for $800.                                         #1 A phone costs $800.
+                                                                                                                              Lisa has $500. Her dad                   Question               #2 Lisa initially has $500.
+simplifies the problem-solving process by breaking                                                                            gave her some money so                            Prompt1       #3 Her dad gave some money
+                                                                                                                              she only needs $160.                                            #4 She only needs $160.
+down a complex problem into a series of subprob-                                                                              How much money does
+                                                                                                                                                                  Key Premises                #5 How much money does her
+                                                                                                                              Lisa’s dad give her?                                            dad give Lisa
+lems. Besides, complexity-based C OT (Fu et al.,                                                                                                         Prompt2
+2022) uses examples with a greater number of steps                                                                             Subgoal of Thought 1                                     Calculation of Thought 1
+as in-context demonstrations and enhances LLMs’                                                                                         Subgoal
+                                                                                                                                                                          Prompt3
+                                                                                                                                                                                                       Subresult
+reasoning capability. The above progress motivates                                                                            Step 1: Calculate the remaining                        Lisa has $500 saving. The phone costs
+                                                                                                                              amount Lisa needs.                                     $800. So Lisa needs $800 - $500 = $300.
+us to investigate whether employing a prompting                                                                                                                                                        Success?            No
+                                                                                                                                                                                        Prompt4
+method can help LLM attain comparable perfor-                                                                                                                                       …
+
+mance on both seed questions from GSM8K and
+their eight variations from GSM-P LUS.                                                                                           Subgoal of Thought N                               Calculation of Thought N
+                                                                                                                              Step 2: Calculate the amount of                                          Success? Yes
+                                                                                                                              money Lisa’s dad gives her.                               Prompt4
+Which prompts are more robust? We select                                                                                                                                                             Lisa only needs $160. The
+                                                                                                                                                                                                     remaining amount Lisa needs is
+four representative LLMs: GPT-4 and GPT-3.5-                                                                                                                             Final Result                $300. So Lisa’s dad gives her
+                                                                                                                                                                                                     $300 - $160 = $140. Result: $140
+Turbo as the highest-performing instruction-tuned
+models, LLaMA-2-70B as the best open-source                                                                                 Figure 5: Illustration of a compositional prompting
+general model, and MAmmoTH-70B as an SFT-                                                                                   method that alternates between generating a subgoal
+model fine-tuned on LLaMA-2-70B. Then we ran-                                                                               and performing the corresponding calculation.
+domly select a subset of 120 seed questions and 960
+variations to evaluate the performance of different
+prompting methods when applied to these LLMs.                                                                               issue, a straightforward strategy is to prompt LLMs
+Results are shown in Figure 4. Overall, complexity-                                                                         to iteratively decompose complex problems, as
+based C OT shows superior performance for GPT-4,                                                                            demonstrated in multi-hop-QA (Khot et al., 2022).
+GPT-3.5-Turbo, and LLaMA-2-70B, while P OT ex-                                                                              To address the second issue, we attempt to have
+hibits the least effectiveness across all question vari-                                                                    LLMs provide feedback for each iteration of their
+ations. C OT and LT M exhibit similar patterns, ex-                                                                         generation, which has proven effective across multi-
+celling in variations such as problem understanding                                                                         ple domains (Madaan et al., 2023; Yu et al., 2023b).
+and numerical substitution, but performing poorly                                                                           Given these observations, we try to study whether
+on distractor insertion and adding operation. For                                                                           methods from other domains can be beneficial
+MAmmoTH, the performance of the four prompts                                                                                for math reasoning, and explore a compositional
+is similar due to the task-specific training. None of                                                                       prompting method C OMP, as shown in Figure 5.
+the studied prompting techniques are sufficiently ro-                                                                          Specifically, the LLM is first prompted to extract
+bust to attain consistent performance across all vari-                                                                      essential premises, particularly those related to
+ations comparable to the performance on GSM8K.                                                                              numbers, as auxiliary contexts (P ROMPT 1). Based
+                                                                                                                            on the question and the premises, LLM is itera-
+Compositional Prompting. Based on the results                                                                               tively instructed to generate a goal (P ROMPT 2) and
+in Figure 4, we want to explore how to enhance ro-                                                                          calculate the goal (P ROMPT 3) for each reasoning
+bustness based on existing prompting methods. We                                                                            thought. For each thought, its goal and calcula-
+find that LLMs often overlook steps or make errors                                                                          tion and query the LLM to determine if the desired
+in the middle stages of the solution. For the first                                                                         answer is obtained (P ROMPT 4). If not, we will
+                                                                                                                 2968
+ Method       GSM8K   GSM-P LUS   Num. Var   Arith. Var.   Crit. Thinking
+                                                                               its impact is limited in terms of both performance
+ C OT         74.17     62.92      70.33       57.08           40.83
+ LT M ‡       74.17     62.60      71.67       54.58           39.17           and robustness. It is crucial to acknowledge that
+ C OMP
+ C OT + SC
+              76.67
+              76.67
+                        65.52
+                        66.88
+                                   70.83
+                                   75.83
+                                               58.34
+                                               62.50
+                                                               54.17
+                                                               40.00
+                                                                               most LLMs, particularly for open-source models,
+ C OMP + SC   80.00     69.47      76.64       66.25           55.83           still fall significantly short of human performance,
+                                                                               particularly in math domains where even small er-
+Table 5: Performance of GPT-3.5-Turbo with different
+prompting techniques. The C OT + SC method aggre-
+                                                                               rors can lead to task failure. Overall, GSM-P LUS
+gates each answer by sampling 5 predictions.                                   aims to facilitate detailed evaluation and under-
+                                                                               standing of LLMs on math reasoning. Dataset and
+                                                                               evaluation suits will be released.
+proceed with generating the next thought. The full
+prompts are listed in Appendix C.4.                                            Limitations
+   As shown in Table 5, C OMP improves the
+model’s performance across various variation types                             The limitations of our work are as follows.
+by iterative generation and verification. Compared                                 • In this work, we mainly focus on the ro-
+to LT M, C OMP exhibits a notable improvement of                                     bustness of math reasoning at the elemen-
+3.4% on GSM8K and 4.7% on GSM-P LUS. Since                                           tary school level, given the promising results
+self-consistency (SC) technique (Wang et al., 2022)                                  achieved by various LLMs, including open-
+can further boost performance with majority vot-                                     sourced models. Evaluating the robustness of
+ing, we implement an ensemble-based approach                                         math reasoning at other levels of education is
+C OMP + SC, which marginalizes over intermediate                                     left as future work.
+thoughts that produce the same subgoal and cal-
+culation. When compared to the ensemble-based                                      • To assess robustness, we compare the an-
+C OT, i.e., C OT + SC, C OMP + SC shows remark-                                      swer accuracy of models on both GSM8K and
+able improvements with compositional prompting.                                      GSM-P LUS, along with the utilization of two
+See Appendix C.7 and Appendix C.8 for accuracy                                       customized metrics. However, we do not in-
+on eight perturbations and model predictions.                                        vestigate the accuracy of solution chains due
+   Although compositional prompting improves                                         to the challenges in designing a reliable metric
+performance on seed questions and their variations,                                  for this purpose.
+it does not bridge the performance gap of LLMs
+between the standard benchmark and the adversar-                                   • GSM-P LUS focuses on evaluating the robust-
+ial benchmark. Greater dedication should be given                                    ness of LLMs in solving math word problems
+to the development of robust models.                                                 under various perturbations but does not in-
+                                                                                     vestigate the underlying reasons behind the
+6    Conclusions and Discussions                                                     failures of solving problems.
+In this work, we introduce GSM-P LUS, a bench-                                 Ethics Statement
+mark designed to systematically analyze the ro-
+bustness of LLMs in solving math word problems.                                We honor the Code of Ethics. No private data or
+We examine a variety of perturbation types to eval-                            non-public information is used in this work.
+uate the performance stability of LLMs in under-
+standing and utilizing math-related knowledge, Our
+                                                                               Acknowledgements
+evaluation of 25 prominent models found that com-                              We express our gratitude to the HKU NLP group
+pared to their performance on the standard bench-                              and the anonymous reviewers for reviewing the
+mark, significant declines are observed in perfor-                             paper and providing helpful feedback. This re-
+mance when perturbations are introduced in math                                search was supported in part by the joint research
+questions that were successfully solved.                                       scheme of the National Natural Science Foundation
+   This disparity set a clear direction for future re-                         of China (NSFC) and the Research Grants Council
+search: (1) the systematic evaluation of models                                (RGC) under grant number N_HKU714/21.
+across diverse math-related skills; (2) the develop-
+ment of models capable of consistently and flexi-
+bly performing math reasoning while remaining re-                              References
+silient to minor variations. Although compositional                            Janice Ahn, Rishu Verma, Renze Lou, Di Liu, Rui
+prompting can enhance the performance of LLMs,                                   Zhang, and Wenpeng Yin. 2024. Large language
+                                                                            2969
+  models for mathematical reasoning: Progresses and          Yao Fu, Hao Peng, Ashish Sabharwal, Peter Clark,
+  challenges. arXiv preprint arXiv:2402.00157.                 and Tushar Khot. 2022. Complexity-based prompt-
+                                                               ing for multi-step reasoning.    arXiv preprint
+Zhangir Azerbayev, Hailey Schoelkopf, Keiran Paster,           arXiv:2210.00720.
+  Marco Dos Santos, Stephen McAleer, Albert Q Jiang,
+  Jia Deng, Stella Biderman, and Sean Welleck. 2023.         Luyu Gao, Aman Madaan, Shuyan Zhou, Uri Alon,
+  Llemma: An open language model for mathematics.              Pengfei Liu, Yiming Yang, Jamie Callan, and Gra-
+  arXiv preprint arXiv:2310.10631.                             ham Neubig. 2023. Pal: Program-aided language
+                                                               models. In International Conference on Machine
+Arthur J Baroody. 1987. Children’s mathematical think-         Learning, pages 10764–10799.
+  ing: A developmental framework for preschool, pri-
+  mary, and special education teachers. Teachers Col-        Shahriar Golchin and Mihai Surdeanu. 2023. Time
+  lege Press.                                                  travel in llms: Tracing data contamination in large
+Lukas Berglund, Meg Tong, Max Kaufmann, Mikita                 language models. arXiv preprint arXiv:2308.08493.
+  Balesni, Asa Cooper Stickland, Tomasz Korbak, and
+                                                             Zhibin Gou, Zhihong Shao, Yeyun Gong, Yujiu Yang,
+  Owain Evans. 2023. The reversal curse: Llms trained
+                                                               Minlie Huang, Nan Duan, Weizhu Chen, et al.
+  on" a is b" fail to learn" b is a". arXiv preprint
+                                                               2023. Tora: A tool-integrated reasoning agent
+  arXiv:2309.12288.
+                                                               for mathematical problem solving. arXiv preprint
+Tom Brown, Benjamin Mann, Nick Ryder, Melanie                  arXiv:2309.17452.
+  Subbiah, Jared D Kaplan, Prafulla Dhariwal, Arvind
+  Neelakantan, Pranav Shyam, Girish Sastry, Amanda           Dan Hendrycks, Collin Burns, Saurav Kadavath, Akul
+  Askell, et al. 2020. Language models are few-shot            Arora, Steven Basart, Eric Tang, Dawn Song, and
+  learners. Advances in neural information processing          Jacob Steinhardt. 2021. Measuring mathematical
+  systems, 33:1877–1901.                                       problem solving with the math dataset. In Thirty-
+                                                               fifth Conference on Neural Information Processing
+Sébastien Bubeck, Varun Chandrasekaran, Ronen El-              Systems Datasets and Benchmarks Track (Round 2).
+  dan, Johannes Gehrke, Eric Horvitz, Ece Kamar,
+  Peter Lee, Yin Tat Lee, Yuanzhi Li, Scott Lund-            Albert Q Jiang, Alexandre Sablayrolles, Arthur Men-
+  berg, et al. 2023. Sparks of artificial general intelli-     sch, Chris Bamford, Devendra Singh Chaplot, Diego
+  gence: Early experiments with gpt-4. arXiv preprint          de las Casas, Florian Bressand, Gianna Lengyel, Guil-
+  arXiv:2303.12712.                                            laume Lample, Lucile Saulnier, et al. 2023. Mistral
+                                                               7b. arXiv preprint arXiv:2310.06825.
+Thomas P Carpenter, Elizabeth Fennema, Penelope L
+  Peterson, Chi-Pang Chiang, and Megan Loef. 1989.           Di Jin, Zhijing Jin, Joey Tianyi Zhou, and Peter
+  Using knowledge of children’s mathematics thinking           Szolovits. 2020. Is bert really robust? a strong base-
+  in classroom teaching: An experimental study. Amer-          line for natural language attack on text classification
+  ican educational research journal, 26(4):499–531.            and entailment. In Proceedings of the AAAI con-
+                                                               ference on artificial intelligence, volume 34, pages
+Wenhu Chen, Xueguang Ma, Xinyi Wang, and                       8018–8025.
+ William W Cohen. 2022. Program of thoughts
+ prompting: Disentangling computation from reason-           Tushar Khot, Harsh Trivedi, Matthew Finlayson, Yao
+ ing for numerical reasoning tasks. arXiv preprint             Fu, Kyle Richardson, Peter Clark, and Ashish Sab-
+ arXiv:2211.12588.                                             harwal. 2022. Decomposed prompting: A modular
+                                                               approach for solving complex tasks. In The Eleventh
+Wenhu Chen, Ming Yin, Max Ku, Pan Lu, Yixin Wan,
+                                                               International Conference on Learning Representa-
+ Xueguang Ma, Jianyu Xu, Xinyi Wang, and Tony
+                                                               tions.
+ Xia. 2023. Theoremqa: A theorem-driven question
+ answering dataset. arXiv preprint arXiv:2305.12524.         Takeshi Kojima, Shixiang Shane Gu, Machel Reid, Yu-
+Ethan Chern, Haoyang Zou, Xuefeng Li, Jiewen Hu, Ke-           taka Matsuo, and Yusuke Iwasawa. 2022. Large lan-
+  hua Feng, Junlong Li, and Pengfei Liu. 2023. Gen-            guage models are zero-shot reasoners. Advances in
+  erative ai for math: Abel. https://github.com/               neural information processing systems, 35:22199–
+  GAIR-NLP/abel.                                               22213.
+
+Karl Cobbe, Vineet Kosaraju, Mohammad Bavarian,              Nate Kushman, Yoav Artzi, Luke Zettlemoyer, and
+  Mark Chen, Heewoo Jun, Lukasz Kaiser, Matthias               Regina Barzilay. 2014. Learning to automatically
+  Plappert, Jerry Tworek, Jacob Hilton, Reiichiro              solve algebra word problems. In Proceedings of the
+  Nakano, et al. 2021. Training verifiers to solve math        52nd Annual Meeting of the Association for Compu-
+  word problems. arXiv preprint arXiv:2110.14168.              tational Linguistics (Volume 1: Long Papers), pages
+                                                               271–281.
+Aniruddha Deb, Neeva Oza, Sarthak Singla, Dinesh
+  Khandelwal, Dinesh Garg, and Parag Singla. 2023.           Brenden M Lake, Tomer D Ullman, Joshua B Tenen-
+  Fill in the blank: Exploring and enhancing llm capa-         baum, and Samuel J Gershman. 2017. Building ma-
+  bilities for backward reasoning in math word prob-           chines that learn and think like people. Behavioral
+  lems. arXiv preprint arXiv:2310.01991.                       and brain sciences, 40:e253.
+                                                         2970
+Linyang Li, Ruotian Ma, Qipeng Guo, Xiangyang Xue,         Arkil Patel, Satwik Bhattamishra, and Navin Goyal.
+  and Xipeng Qiu. 2020. Bert-attack: Adversarial at-         2021. Are nlp models really able to solve simple
+  tack against bert using bert. In Proceedings of the        math word problems? In Proceedings of the 2021
+  2020 Conference on Empirical Methods in Natural            Conference of the North American Chapter of the
+  Language Processing (EMNLP), pages 6193–6202.              Association for Computational Linguistics: Human
+                                                             Language Technologies, pages 2080–2094.
+Zekun Li, Baolin Peng, Pengcheng He, and Xifeng
+  Yan. 2023. Do you really follow me? adversarial          George Polya. 2004. How to solve it: A new aspect of
+  instructions for evaluating the robustness of large        mathematical method, volume 85. Princeton univer-
+  language models. arXiv preprint arXiv:2308.10819.          sity press.
+
+Zhenwen Liang, Dian Yu, Xiaoman Pan, Wenlin Yao,           Baptiste Roziere, Jonas Gehring, Fabian Gloeckle, Sten
+  Qingkai Zeng, Xiangliang Zhang, and Dong Yu.               Sootla, Itai Gat, Xiaoqing Ellen Tan, Yossi Adi,
+  2023. Mint: Boosting generalization in mathematical        Jingyu Liu, Tal Remez, Jérémy Rapin, et al. 2023.
+  reasoning via multi-view fine-tuning. arXiv preprint       Code llama: Open foundation models for code. arXiv
+  arXiv:2307.07951.                                          preprint arXiv:2308.12950.
+
+Wang Ling, Dani Yogatama, Chris Dyer, and Phil Blun-       Tomohiro Sawada, Daniel Paleka, Alexander Havrilla,
+  som. 2017. Program induction by rationale genera-          Pranav Tadepalli, Paula Vidas, Alexander Kranias,
+  tion: Learning to solve and explain algebraic word         John J Nay, Kshitij Gupta, and Aran Komatsuzaki.
+  problems. In Proceedings of the 55th Annual Meet-          2023. Arb: Advanced reasoning benchmark for large
+  ing of the Association for Computational Linguistics,      language models. arXiv preprint arXiv:2307.13692.
+ ACL, pages 158–167.
+                                                           Freda Shi, Xinyun Chen, Kanishka Misra, Nathan
+Haipeng Luo, Qingfeng Sun, Can Xu, Pu Zhao, Jian-            Scales, David Dohan, Ed H Chi, Nathanael Schärli,
+  guang Lou, Chongyang Tao, Xiubo Geng, Qingwei              and Denny Zhou. 2023. Large language models can
+  Lin, Shifeng Chen, and Dongmei Zhang. 2023. Wiz-           be easily distracted by irrelevant context. In Inter-
+  ardmath: Empowering mathematical reasoning for             national Conference on Machine Learning, pages
+  large language models via reinforced evol-instruct.        31210–31227. PMLR.
+  arXiv preprint arXiv:2308.09583.                         Hugo Touvron, Thibaut Lavril, Gautier Izacard, Xavier
+                                                             Martinet, Marie-Anne Lachaux, Timothée Lacroix,
+Aman Madaan, Niket Tandon, Prakhar Gupta, Skyler
+                                                             Baptiste Rozière, Naman Goyal, Eric Hambro, Faisal
+ Hallinan, Luyu Gao, Sarah Wiegreffe, Uri Alon,
+                                                             Azhar, et al. 2023a. Llama: Open and effi-
+ Nouha Dziri, Shrimai Prabhumoye, Yiming Yang,
+                                                             cient foundation language models. arXiv preprint
+ et al. 2023. Self-refine: Iterative refinement with
+                                                             arXiv:2302.13971.
+ self-feedback. arXiv preprint arXiv:2303.17651.
+                                                           Hugo Touvron, Louis Martin, Kevin Stone, Peter Al-
+Shen-Yun Miao, Chao-Chun Liang, and Keh-Yih Su.              bert, Amjad Almahairi, Yasmine Babaei, Nikolay
+  2020. A diverse corpus for evaluating and developing       Bashlykov, Soumya Batra, Prajjwal Bhargava, Shruti
+  english math word problem solvers. In Proceedings          Bhosale, et al. 2023b. Llama 2: Open founda-
+  of the 58th Annual Meeting of the Association for          tion and fine-tuned chat models. arXiv preprint
+  Computational Linguistics, pages 975–984.                  arXiv:2307.09288.
+Swaroop Mishra, Arindam Mitra, Neeraj Varshney,            Lieven Verschaffel, Erik De Corte, Sabien Lasure,
+  Bhavdeep Sachdeva, Peter Clark, Chitta Baral, and          Griet Van Vaerenbergh, Hedwig Bogaerts, and Elie
+  Ashwin Kalyan. 2022. Numglue: A suite of funda-            Ratinckx. 1999. Learning to solve mathematical
+  mental yet challenging mathematical reasoning tasks.       application problems: A design experiment with
+  In Proceedings of the 60th Annual Meeting of the           fifth graders. Mathematical thinking and learning,
+  Association for Computational Linguistics (Volume          1(3):195–229.
+  1: Long Papers), pages 3505–3523.
+                                                           Haoyu Wang, Guozheng Ma, Cong Yu, Ning Gui, Linrui
+Kole Norberg, Husni Almoubayyed, Stephen E Fanc-             Zhang, Zhiqi Huang, Suwei Ma, Yongzhe Chang, Sen
+  sali, Logan De Ley, Kyle Weldon, April Murphy, and         Zhang, Li Shen, et al. 2023. Are large language mod-
+  Steven Ritter. 2023. Rewriting math word problems          els really robust to word-level perturbations? arXiv
+  with large language models. In Proceedings of the          preprint arXiv:2309.11166.
+  Workshop on Empowering Education with LLMs-the
+  Next-Gen Interface and Content Generation 2023           Xuezhi Wang, Jason Wei, Dale Schuurmans, Quoc V Le,
+  co-located with 24th International Conference on Ar-       Ed H Chi, Sharan Narang, Aakanksha Chowdhery,
+  tificial Intelligence in Education (AIED 2023), Tokyo,     and Denny Zhou. 2022. Self-consistency improves
+  Japan, volume 3487, pages 163–172.                         chain of thought reasoning in language models. In
+                                                             The Eleventh International Conference on Learning
+OpenAI. 2022. Gpt-3.5-turbo.                                 Representations.
+OpenAI. 2023. GPT-4 technical report.            CoRR,     Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten
+  abs/2303.08774.                                             Bosma, Fei Xia, Ed Chi, Quoc V Le, Denny Zhou,
+                                                       2971
+  et al. 2022. Chain-of-thought prompting elicits rea-   Zihao Zhou, Qiufeng Wang, Mingyu Jin, Jie Yao, Jianan
+  soning in large language models. Advances in Neural      Ye, Wei Liu, Wei Wang, Xiaowei Huang, and Kaizhu
+  Information Processing Systems, 35:24824–24837.          Huang. 2023b. Mathattack: Attacking large language
+                                                           models towards math solving ability. arXiv preprint
+Jerry Wei, Da Huang, Yifeng Lu, Denny Zhou, and            arXiv:2309.01686.
+   Quoc V Le. 2023a. Simple synthetic data reduces
+   sycophancy in large language models. arXiv preprint
+   arXiv:2308.03958.
+Tianwen Wei, Jian Luan, Wei Liu, Shuang Dong, and
+  Bin Wang. 2023b. Cmath: can your language model
+  pass chinese elementary school math test? arXiv
+  preprint arXiv:2306.16636.
+Sen Yang, Xin Li, Leyang Cui, Lidong Bing, and
+  Wai Lam. 2023. Neuro-symbolic integration brings
+  causal and reliable reasoning proofs.
+Shunyu Yao, Dian Yu, Jeffrey Zhao, Izhak Shafran,
+  Thomas L Griffiths, Yuan Cao, and Karthik
+  Narasimhan. 2023. Tree of thoughts: Deliberate
+  problem solving with large language models. arXiv
+  preprint arXiv:2305.10601.
+Longhui Yu, Weisen Jiang, Han Shi, Jincheng Yu,
+  Zhengying Liu, Yu Zhang, James T Kwok, Zhen-
+  guo Li, Adrian Weller, and Weiyang Liu. 2023a.
+  Metamath: Bootstrap your own mathematical ques-
+  tions for large language models. arXiv preprint
+  arXiv:2309.12284.
+Wenhao Yu, Nimrod Gileadi, Chuyuan Fu, Sean Kir-
+ mani, Kuang-Huei Lee, Montse Gonzalez Arenas,
+ Hao-Tien Lewis Chiang, Tom Erez, Leonard Hasen-
+ clever, Jan Humplik, et al. 2023b. Language to
+ rewards for robotic skill synthesis. arXiv preprint
+ arXiv:2306.08647.
+Xiang Yue, Xingwei Qu, Ge Zhang, Yao Fu, Wen-
+  hao Huang, Huan Sun, Yu Su, and Wenhu Chen.
+  2023. Mammoth: Building math generalist models
+  through hybrid instruction tuning. arXiv preprint
+  arXiv:2309.05653.
+Xueliang Zhao, Xinting Huang, Wei Bi, and Lingpeng
+  Kong. 2023. Sego: Sequential subgoal optimization
+  for mathematical problem-solving. arXiv preprint
+  arXiv:2310.12960.
+Kunhao Zheng, Jesse Michael Han, and Stanislas Polu.
+  2021. minif2f: a cross-system benchmark for for-
+  mal olympiad-level mathematics. In International
+  Conference on Learning Representations.
+Aojun Zhou, Ke Wang, Zimu Lu, Weikang Shi, Sichun
+  Luo, Zipeng Qin, Shaoqing Lu, Anya Jia, Linqi Song,
+  Mingjie Zhan, et al. 2023a. Solving challenging
+  math word problems using gpt-4 code interpreter
+  with code-based self-verification. arXiv preprint
+  arXiv:2308.07921.
+Denny Zhou, Nathanael Schärli, Le Hou, Jason Wei,
+  Nathan Scales, Xuezhi Wang, Dale Schuurmans,
+  Claire Cui, Olivier Bousquet, Quoc Le, et al. 2022.
+  Least-to-most prompting enables complex reason-
+  ing in large language models. arXiv preprint
+  arXiv:2205.10625.
+                                                     2972
+A     Perturbation Types                                               Example B.2: Generating Answers
+                                                                       Your task is to solve a series of math word problems by
+Mathematical problem-solving is a complex cog-                         providing the final answer. Use the format #### [value]
+nitive process that humans have developed (Ba-                         to highlight your answer. For example, if the answer is
+roody, 1987; Verschaffel et al., 1999, i.a.). Polya’s                  560, you should write #### 560. Make sure to carefully
+principles (Polya, 2004) suggest that humans solve                     read and understand each problem before providing your
+mathematical problems generally in four stages: (1)                    answer.
+identifying variables and relevant context, (2) rep-                   {A Question Variant}
+resenting the problem’s structure and discovering a
+potential pattern, (3) calculating an answer, and (4)              B.2      Human Annotation
+verifying the correctness, which are widely used in                Before participating in the evaluation of question
+mathematics education (Baroody, 1987; Carpenter                    variations and answers generated by GPT-4, evalu-
+et al., 1989; Verschaffel et al., 1999, i.a.).                     ators are required to complete a qualifying exam:
+   Motivated by Polya’s principles, we design eight
+perturbation types for testing LLM’s mathemati-                         1. They are first pre-screened with a qualification
+cal reasoning capabilities. The definition of eight                        study, which involves reading an evaluation
+perturbations is shown in Table 6.                                         guideline and annotating 24 variations for 3
+                                                                           GSM8K questions.
+
+B     Dataset Construction                                              2. We individually review the submitted evalua-
+                                                                           tions from the qualification study and provide
+B.1    Generating Initial Variations with GPT-4                            feedback to clarify any misconceptions about
+Prompt for Generating Question Variations                                  the task.
+When provided with a specified perturbation and                         3. Evaluators who performed well on the qual-
+a seed question-answer pair, GPT-4 is directed to                          ification study and demonstrated a thorough
+generate a question variation based on the given                           understanding of the evaluation guidelines are
+perturbation description.                                                  selected to participate in the main round eval-
+                                                                           uation.
+ Example B.1: Generating Question Variation
+ You are a helpful assistant and good at following                    Ultimately, we selected 5 evaluators with at least
+ instructions.                                                     bachelor’s degrees to participate in dataset qual-
+                                                                   ity evaluation. Throughout the whole process, the
+ Your objective is to rewrite a given math question using the      annotators are assigned workloads in batches with
+ specified perturbation strategy ({Perturbation Name}). The
+                                                                   the batch size being 50 seed questions. For every
+ rewritten question should be reasonable, understandable,
+ and able to be responded to by humans.
+                                                                   batch, two seed questions are chosen at random,
+                                                                   and the authors verify the annotations for question
+ Perturbation strategy: {Perturbation Description}                 variations and their corresponding answers using
+                                                                   a side-by-side annotation approach. We maintain
+ The given question: {The Seed Question}                           constant communication with evaluators to answer
+                                                                   any questions.
+ Answer of the given question: {Answer Rationale}
+                                                                      Qualified human evaluators are involved to en-
+                                                                   sure that the questions generated by GPT-4 are free
+ Please rewrite the question using the specified perturbation
+ strategies while minimizing edits to avoid significant            from the errors specified in §3.2. If there are any
+ deviation in the question content. It is important to ensure      errors in the question variations generated by GPT-
+ that the rewritten question has only one required numerical       4, the annotators will compose a qualified one with
+ answer.                                                           minimal modifications. They then proceed to verify
+                                                                   the correctness and format of GPT-4’s answers.
+ The rewritten question:                                              Taking into consideration the experiment costs,
+                                                                   we randomly selected 1000 question variations, en-
+Prompt for Generating Answers of Question                          suring that each question was evaluated by at least
+Variations Then GPT-4 is required to answer the                    3 annotators. For question variations that are as-
+question variation generated by itself.                            sessed by multiple evaluators, the authors manually
+                                                                2973
+    Perturbation                            Description
+    Numerical Substitution                  It involves changing some numerical data while minimizing alterations to the
+                                            textual aspects, ensuring the question’s validity remains intact.
+    Digit Expansion                         It refers to the process of increasing the number of digits of some numerical
+                                            values while minimizing alterations to the textual aspects, ensuring the ques-
+                                            tion’s validity remains intact.
+    Integer-decimal-fraction Conversion     It refers to the process of converting some integer numbers into decimal or
+                                            fractional representations while trying to keep the textual aspects unchanged,
+                                            ensuring that the validity of the question is maintained.
+    Adding Operation                        It involves adding extra statements to the original problems, thereby increas-
+                                            ing the number of reasoning steps or operations required to solve the rewritten
+                                            question. The allowed operations are limited to addition, subtraction, multi-
+                                            plication, and division.
+    Reversing Operation                     It refers to converting the required answer of the original question into a
+                                            known condition and transforming one known variable into the newly desired
+                                            answer while avoiding the introduction of additional constraints. As a result,
+                                            the rewritten question yields a distinct required answer compared to the
+                                            original solution.
+    Problem Understanding                   It refers to transforming the original problem into a new problem that uses
+                                            different wording or different sentence structures but does not change the
+                                            solution of the original problem.
+    Distractor Insertion                    involves introducing distracting conditions that have no impact on the final
+                                            answer. These introduced conditions should be relevant to the topic of the
+                                            original question and preferably include numerical values. However, the
+                                            rewritten problem must maintain an identical solution to that of the original
+                                            problem.
+    Critical Thinking                       refers to eliminating a condition from the original question that is crucial for
+                                            solving it while keeping the rest of the content unchanged. The rewritten
+                                            problem should no longer have a valid answer, as it lacks the constraint that
+                                            was removed.
+
+          Table 6: Definitions of eight perturbation categories in GSM-P LUS for robustness evaluation.
+
+
+review the rewrites in instances of evaluator dis-               substitution, digit expansion, and problem under-
+agreement. The inter-annotator agreements (IAA)                  standing with high pass rates. For “reversing opera-
+measured by Krippendorff’s α show a relatively                   tion” perturbation, human involvement is necessary
+reliable value of 0.567.                                         to ensure variation validity. As the generation of
+                                                                 question variations relies on the question rewrit-
+   Category        Subcategory              Pass Rate
+                                                                 ing capabilities of GPT-4, it is important to note
+                   Numerical Substitution   91.51                that this process is not directly related to its math
+   Numerical
+   Variation       Digit Expansion          92.60                reasoning abilities. During manual checking, we
+                   Integer-decimal-         84.24                found that generating qualified variations does not
+                   fraction Conversion                           necessarily guarantee correct answers.
+   Arithmetic      Adding Operation         75.75
+   Reasoning
+                   Reversing Operation      29.76
+                                                                 C       Experiments
+   Problem Understanding                    97.49                C.1       Human Performance
+   Distractor Insertion                     88.25                We randomly selected 50 seed questions from
+   Critical Thinking                        87.77                GSM8K and combined them with their correspond-
+                                                                 ing variations from GSM-P LUS to create a subset
+Table 7: The pass rate of human annotators for the               of 450 questions. This suggests that the randomly
+question variations generated by GPT4.                           selected subset is close to the distribution of the
+                                                                 whole test set.
+Effectiveness of GPT-4 Rewriting Table 7
+                                                                    We utilized the Tencent crowdsource platform1
+presents the percentages of questions generated
+                                                                 for selecting three qualified human annotators to
+by GPT-4 that satisfy all criteria. GPT-4 excels in
+generating question variations involving numerical                   1
+                                                                         https://aidata.tencent.com/
+
+                                                            2974
+           Model              GSM8K   GSM-P LUS8       ∆ PDR (%)8 ↓    ASP (%)8 ↑     GSM-P LUS7    ∆ PDR (%)7 ↓   ASP (%)7 ↑
+           Human              96.77      98.75              -2.05           92.11          97.65         -0.91        92.11
+                                                          closed-source models
+           GPT-4              93.25      85.58              8.23            81.54          88.16         5.46         84.12
+           GPT-3.5-Turbo      73.62      61.19             16.88            51.36          63.18        14.18         53.60
+                                                   open-source general models (7-70B)
+           Mistral-7B‡        39.58      26.18             33.86            18.66          29.12        26.43         21.08
+           LLaMA-2-7B‡        13.42       8.12             39.49            3.97            9.28        30.85          4.54
+           CodeLlama-7B‡      25.32      15.05             40.56             10.0          17.20        31.66         11.43
+           LLaMA-2-13B‡       25.40      16.57             34.76             9.96          18.89        25.63         11.37
+           CodeLlama-13B‡     35.94      21.67             39.71            15.22          24.14        32.83         17.26
+           CodeLlama-34B‡     45.64      30.00             34.27            22.42          29.97        47.11         17.86
+           LLaMA-2-70B‡       56.71      40.04             29.40            32.31          45.72        19.38         36.90
+                                                 open-source models in mathematics (7B)
+           MetaMath-Mistral   78.01      56.25             27.69            50.56          61.22        21.52         56.55
+           MetaMath           66.79      44.35             33.53            37.91          48.95        26.71         62.79
+           Abel               59.51      37.09             37.67            29.64          42.25        29.00         33.81
+           ToRA               67.48      43.60             35.39            37.89          49.83        26.16         43.14
+           MAmmoTH            52.84      32.14             39.17            25.63          36.73        30.49         29.30
+           MAmmoTH-Coder      59.89      38.73             35.33            32.02          44.27        26.08         36.60
+           SEGO               68.69      44.71             34.91            40.68          51.10        25.61         46.50
+                                                 open-source models in mathematics (13B)
+           MetaMath           70.81      48.58             31.39            41.06          53.70        24.32         46.77
+           Abel               66.72      45.39             31.97            37.45          51.62        22.63         42.63
+           ToRA               71.80      47.88             33.31            42.43          54.72        23.79         48.29
+           MAmmoTH            62.40      40.82             34.58            34.05          46.65        25.24         38.91
+           MAmmoTH-Coder      64.90      43.97             32.25            36.93          50.25        22.57         42.20
+           SEGO               72.50      49.30             32.00            44.79          56.34        22.29         51.19
+                                                 open-source models in mathematics (70B)
+           MetaMath           82.41      59.37             27.69            52.30          64.23        22.07         59.53
+           Abel               83.85      59.94             28.52            55.31          68.08        18.81         62.86
+           MAmmoTH            75.89      53.41             29.62            47.96          61.04        19.57         54.81
+
+
+Table 8: Accuracy of current LLMs on GSM8K and GSM-P LUS, with (GSM-P LUS8 ) and without (GSM-P LUS7 )
+“critical thinking” variation.
+
+
+evaluate human performance on math reasoning.                              Example C.1: Critical Thinking (GPT-4)
+To ensure the quality of the results, each human                           GSM8K Question: Mike plays ping pong for 40 minutes.
+annotator is required to have a track record of com-                       In the first 20 minutes, he scores 4 points. In the second
+pleting over 1,000 HIT tasks and must successfully                         20 minutes, he scores 25% more points. How many total
+pass a qualification exam consisting of 9 questions                        points did he score?
+before commencing the problem-solving annota-                              Correct Answer: In the second 20 minutes, Mike scores
+tion. Their annotation time for each answer is                             4*0.25=1 more points in the second 20 minutes. Thus, in
+                                                                           the second 20 minutes, he scores 4+1=5 points. In total,
+recorded for reference.
+                                                                           Mike scores 4+5=9 points.
+                                                                           GSM-P LUS Question: Mike plays ping pong for 40 min-
+                                                                           utes. In the first 20 minutes, he scores 4 points. In the
+C.2 Model Performance on GSM8K and                                         second 20 minutes, he scores more points. How many
+    GSM-P LUS                                                              total points did he score?
+                                                                           Correct Answer: The problem does not provide the num-
+Table 8 presents the model performance on GSM-                             ber of points Mike scored in the second 20 minutes. There-
+P LUS and their overall robustness. We can see that                        fore, it is impossible to determine the total points he scored.
+the most challenging perturbation, critical thinking,
+significantly contributes to the substantial decrease
+in model performance.
+
+
+C.3 Cases on Diverse Question Variations
+
+Critical Thinking. We present two examples
+where one model (GPT-4) successfully detects the
+absence of a statement issue (Example C.1), while
+another model (ToRA-13B) fails to do so (Exam-
+ple C.2).
+                                                                    2975
+ Example C.2: Critical Thinking (ToRA-13B)                             Example C.3: Adding Operation
+ GSM8K Question: Mike plays ping pong for 40 minutes.                  GSM8K Question: A raspberry bush has 6 clusters of 20
+ In the first 20 minutes, he scores 4 points. In the second            fruit each and 67 individual fruit scattered across the
+ 20 minutes, he scores 25% more points. How many total                 bush. How many raspberries are there in total?
+ points did he score?                                                  Correct Answer: The number of fruit in the clusters is 6 *
+ Correct Answer:                                                       20 = 120 fruit. [1] Adding the number of individual fruit,
+ def total_points():                                                   we have 120 + 67 = 187 fruit. [2] (simplification)
+       """Mike plays ping pong for 60 minutes. In the first            GSM-P LUS Question: A raspberry bush has 6 clusters of
+ 30 minutes, he scores 6 points. In the second 30 minutes,             20 fruit each and 67 individual fruit scattered across the
+ he scores 50% more points. How many total points did he               bush. If a bird eats 15 raspberries from one of the clusters
+ score?"""                                                             and a squirrel takes away 3 clusters, how many raspberries
+       total_minutes = 60                                              are left on the bush?
+       first_half_minutes = total_minutes / 2                          Wrong Answer: The total number of raspberries in the
+       second_half_minutes = total_minutes / 2                         clusters is 6 * 20 = 120. [1] Next, we subtract the 15
+       first_half_points = 6                                           raspberries that the bird ate from one of the clusters: 120 -
+       second_half_points = first_half_points * 1.5                    15 = 105. [2] Finally, we need to subtract the 3 clusters that
+       total_points = first_half_points + second_half_points           the squirrel took away. Each cluster has 20 raspberries, so
+       return total_points                                             the total number of raspberries in the 3 clusters is 3 * 20 =
+ total_points = total_points()                                         60. [3] Therefore, there are 105 - 60 = 45 raspberries left in
+ “‘output 15.0 ”’                                                      the bush. [4] (simplification) Correct answer: 112. The
+ GSM-P LUS Question: Mike plays ping pong for 40                       condition highlighted in green, which was overlooked
+ minutes. In the first 20 minutes, he scores 4 points. In the          by the model, should be considered after step [1] and
+ second 20 minutes, he scores more points. How many                    before step [2].
+ total points did he score?
+ Wrong Answer:
+ def total_points():
+       """Mike plays ping pong for 40 minutes. In the first
+ 20 minutes, he scores 4 points. In the second 20 minutes,
+ he scores more points. How many total points did he
+ score?"""
+       total_time = 40
+       first_half_time = 20
+       second_half_time           =       total_time        -
+ first_half_time                                                      The given example highlights the concern regard-
+       first_half_points = 4                                       ing the performance robustness of current LLMs,
+       second_half_points = first_half_points * 2                  as they struggle to maintain consistent performance
+       total_points         =     first_half_points         +
+                                                                   across questions with varied conditions.
+ second_half_points
+       return total_points
+       total_points = total_points()
+       print(total_points)
+ “‘output 12 ”’
+ Correct answer: None. The question does not provide
+ information about the specific increase in points
+ during the second 20 minutes. The model generates
+ a fabricated response, “first_half_points * 2” without
+ any factual basis.
+
+
+
+
+Adding Operation. Example C.3 shows an ex-                         Distractor Insertion. Example C.4 showcases a
+ample of failure for GPT-3.5-Turbo, where it fails                 failure of MAmmoTH-13B, where the interference
+to consider one condition (text in green) in the                   condition (a book for $30) is incorporated into the
+GSM-P LUS question.                                                solution, leading to the wrong answer:
+                                                                2976
+ Example C.4: Distractor Insertion                                    Example C.5: Reversing Operation
+ GSM8K Question:Jack had $100. Sophia gave him 1/5 of                 GSM8K Question: Two cups of flour are needed to make
+ her $100. How many dollars does Jack have now?                       a dozen cookies. Carla is making 36 cookies today and
+ Correct Answer:                                                      30 cookies tomorrow. How many cups of flour will Carla
+ jack_initial_amount = 100                                            need to bake the cookies today and tomorrow?
+ sophia_initial_amount = 100                                          Correct Answer: Since 2 cups of flour are needed for 12
+ sophia_gave_jack = sophia_initial_amount/5                           cookies, then 2/12 = 1/6 cup of flour is needed for one
+ jack_final_amount                                        =           cookie. The total number of cookies Carla is 36 + 30 = 66
+ jack_initial_amount+sophia_gave_jack                                 cookies. So, 66 * 1/6 = 11 cups of flour. So, Carla will
+ print(jack_final_amount)                                             need 11 cups of flour. (simplification)
+ # 120                                                                GSM-P LUS Question: Two cups of flour are needed to
+ GSM-P LUS Question: Jack had $100. Sophia, who gave                  make a dozen cookies. Carla has 11 cups of flour. If she
+ Jack 1/5 of her $100 and just bought a book for $30 from             bakes 36 cookies today, how many cookies can she bake
+ her remaining money (Interference). How many dollars                 tomorrow without needing more flour? (The question
+ does Jack have now?                                                  corresponds to the known condition of GSM8K ques-
+ Wrong Answer:                                                        tion.)
+ initial_amount = 100                                                 Wrong Answer: 2 cups of flour makes a dozen cookies.
+ given_amount = 1/5                                                   For 36 cookies (which is 3 dozen), Carla used 2*3 = 6 cups
+ book_cost = 30                                                       of flour. So, 11 - 6 = 5 cups of flour are left for tomorrow.
+ remaining_amount = initial_amount-given_amount                       Since 2 cups of flour are needed for a dozen cookies, with
+ final_amount = remaining_amount-book_cost                            5 cups of flour, Carla can bake 5/2 = 2.5 dozen cookies.
+ print(final_amount)                                                  Since we can’t have half a dozen cookies, we round
+ # 69.8                                                               down to 2 dozen. So, Carla can bake 2 dozen of cookies
+ Correct answer: 120. The program erroneously in-                     tomorrow: 2*12 = 24 cookies. (simplification) Correct
+ cludes irrelevant inference conditions in its calculations,          answer: 30. Instead of inferring 2.5 dozen as an equal
+ which impacts the accuracy of the final answer.                      value of 30, the model approximates it as 2 dozen.
+
+
+
+
+                                                                  Integer-decimal-fraction Conversion. Below
+                                                                  are two examples from program-based SEGO-13B
+                                                                  and NL-based Abel-13B:
+   The generated program indiscriminately treats
+all the conditions mentioned in the GSM-P LUS
+question as program variables, without making any
+distinction among them.                                               Example C.6: IDC Conversion
+                                                                      GSM8K Question: Paul has 52 marbles. His friend gave
+                                                                      him 28 marbles. Then, he lost 1/4 of his marbles. How
+                                                                      many marbles does Paul have left?
+                                                                      Correct Answer:
+                                                                      marbles = 52
+                                                                      marbles += 28
+                                                                      marbles -= marbles * (1/4)
+                                                                      return marbles
+                                                                      GSM-P LUS Question: Paul has 52.0 marbles. His friend
+                                                                      gave him 28.0 more. Then, he lost 0.25 of his total marbles.
+                                                                      How many marbles does Paul have left?
+                                                                      Wrong Answer:
+                                                                      marbles = 52.0
+Reversing Operation. Example C.5 illustrates                          marbles += 28.0
+the performance of GPT-4 on GSM8K and GSM-                            marbles -= 0.25
+P LUS. While it successfully answers the total flour                  return marbles
+needed for a two-day cookie bakery, it fails to cal-                  Correct answer: 60. The program statement becomes
+                                                                      incorrect when the fraction 1/4 is changed to its decimal
+culate the cookie requirement for a single day when
+                                                                      representation, 0.25.
+the problem is reversed.
+                                                               2977
+ Example C.7: IDC Conversion                                         Example C.8: Problem Understanding
+ GSM8K Question: Betsy and Donovan made a meal to-                   GSM8K Question: Duncan’s age eight years ago was two
+ gether. Betsy’s part took 18 minutes longer than Dono-              times Adam’s age four years ago. If Duncan’s age is 60
+ van’s part. The meal was made in 98 minutes. How many               now, how old will Adam be in 8 years?
+ minutes long was Betsy’s part?                                      Wrong Answer: If Duncan’s age is 60 now, then 8 years
+ Correct Answer (SEGO):                                              ago his age was 60 - 8 = 52. Let’s represent Adam’s age 4
+ total_time = 98                                                     years ago as A. Duncan’s age 8 years ago was two times
+ x = (total_time - 18) / 2                                           Adam’s age 4 years ago, so we can write the equation:
+ betsy_part = x + 18                                                 52 = 2(A + 4). We get: 52 = 2A + 8, 44 = 2A, A = 22. If
+ return betsy_part                                                   Adam’s age 4 years ago was 22, then his current age is 22
+ Correct Answer (Abel): Let’s assume Donovan’s part                  + 4 = 26. In 8 years, Adam will be 26 + 8 = 34 years old.
+ took x minutes, so Betsy’s part took x + 18 minutes. The            Correct answer is 38. The model makes a reasoning
+ total time for the meal was 98 minutes: x + (x + 18) = 98.          error by considering “4 years ago” as A, which conflicts
+ Then we get 2x + 18 = 98, 2x = 80, x = 40. Betsy’s part             with the equation 52 = 2(A + 4).
+ took x + 18 = 40 + 18 = 58 minutes.                                 GSM-P LUS Question: Eight years prior, Duncan was
+ GSM-P LUS Question: Betsy and Donovan made a meal                   twice as old as Adam was four years in the past. Given
+ together. Betsy’s part took 1.8 times longer than Dono-             that Duncan is currently 60 years old, what will be Adam’s
+ van’s part. The meal was made in 9.8 hours. How many                age eight years from now? (the rephrased version of the
+ hours long was Betsy’s part?                                        GSM8K question)
+ Wrong Answer (SEGO):                                                Correct Answer: If Duncan is currently 60 years old, then
+ x = 4.5                                                             eight years ago he was 60 - 8 = 52 years old. Eight years
+ betsy_time = 1.8 * x                                                ago, Duncan was twice as old as Adam was four years in
+ return betsy_time                                                   the past, so Adam was 52 / 2 = 26 years old four years ago.
+ Wrong Answer (Abel): Let’s say Donovan’s part took x                If Adam was 26 years old four years ago, currently he is
+ hours. Betsy’s part took 1.8 times longer, so it took 1.8x          26 + 4 = 30 years old. Eight years from now, Adam will
+ hours. The total time for the meal was 9.8 hours. So, x +           be 30 + 8 = 38 years old.
+ 1.8x = 9.8. We get 2.8x = 9.8, x = 3.5 Therefore, Betsy’s
+ part took 1.8x = 1.8 * 3.5 = 6 hours.
+ Correct answer: 6.3. The reasoning chain of SEGO be-
+                                                                 C.4       Prompt for C OMP Method
+ comes meaningless, and Abel’s calculation is incorrect.         Prompt for Key Premise Extraction The fol-
+                                                                 lowing is the exact prompt used to distill the essen-
+                                                                 tial premises from a given math problem, specifi-
+                                                                 cally focusing on numerical-related conditions, re-
+                                                                 ferred to as P ROMPT 1 in Figure 5.
+
+  When we modified the numerical values of                           Example C.9: Generating Key Premises from a
+the original GSM8K question, the program-based                                    Math Problem
+model exhibited a complete shift in reasoning be-                    Question:
+haviors and produced hallucinatory results. On the                   James gets 10 new CDs. Each CD cost $15. He gets them
+other hand, the NL-based models faltered due to                      for 40% off. He decides he doesn’t like 5 of them and sells
+                                                                     them for 40. How much money was he out?
+calculation errors.
+                                                                     Answer:
+                                                                     First, let us rewrite the question with labels.
+                                                                     #1. James gets 10 new CDs.
+                                                                     #2. Each CD cost $15, and he gets them for 40% off.
+                                                                     #3. He sells 5 of them for 40.
+                                                                     #4. How much money was he out?
+
+                                                                     Question:
+                                                                     {A Math Problem}
+Problem Understanding Example C.8 illus-
+trates a scenario involving MetaMath-Mistral,                        Answer:
+which provides an incorrect answer to the GSM8K                      First, let us rewrite the question with labels.
+question but correctly responds to the rephrased
+version of the same question on GSM-P LUS, gen-                  Generating the Reasoning Goal of Each
+erated by GPT-4.                                                 Thought The below prompt corresponds to
+                                                              2978
+P ROMPT 2 in Figure 5 for generating the subgoal                        Example C.11: Generating the Subgoal of the
+of the initial thought.                                                               Secondary or Subsequent Rea-
+                                                                                      soning Thought
+                                                                        Solve the math question step by step. Please start each step
+                                                                        with “Step :” and split steps with “\n”. There are a few
+                                                                        things you should be aware of:
+
+ Example C.10: Generating the Subgoal of the                            - Opt for the most straightforward approach to perform
+               First Reasoning Thought                                  each reasoning step.
+ Solve the math question step by step. Please start each step           - Carefully process the numerical variables in the question
+ with “Step :” and split steps with “\n”. There are a few               and perform each calculation sequentially.
+ things you should be aware of:                                         - Carefully consider each key information provided and
+                                                                        incorporate them systematically into your solution.
+ - Opt for the most straightforward approach to perform                 - Discern any distractions that are irrelevant to the queried
+ each reasoning step.                                                   answer.
+ - Carefully process the numerical variables in the question            - If there is no valid answer, please conclude with "So the
+ and perform each calculation sequentially.                             answer is None" at the end of the output.
+ - Carefully consider each key information provided and
+ incorporate them systematically into your solution.                    This is a math question:
+ - Discern any distractions that are irrelevant to the queried          Question: {A Math Problem}
+ answer.
+ - If there is no valid answer, please conclude with "So the            The following is key information extracted from
+ answer is None" at the end of the output.                              the question:
+                                                                        {Key Premise}
+ This is a math question:
+ Question: James gets 10 new CDs. Each CD cost $15. He                  The following are the first few steps in a solution to the
+ gets them for 40% off. He decides he doesn’t like 5 of                 problem:
+ them and sells them for 40. How much money was he out?                 {Previous Thoughts, including Subgoals and Calculations}
+
+
+ The following is key information extracted from the
+ question:
+ #1. James gets 10 new CDs.
+ #2. Each CD cost $15, and he gets them for 40% off.
+ #3. He sells 5 of them for 40.
+ #4. How much money was he out?
+
+  Step 1: Calculate the price of each CD after the 40%                 After generating the subgoal of the initial
+  discount.                                                         thought, GPT-3.5-Turbo proceeds to generate the
+ - Since the original price per CD is $15 and the discount is       remaining calculations, which serve as a reference
+ 40% off, the price per CD after discount is $15 * (1 - 0.40)       for conducting the calculation for this subgoal.
+  = $15 * 0.60 = $9
+ - Result: $9
+
+ This is a math question:
+ Question: {A Math Problem}
+
+The following is key information extracted from
+the question:
+{Key Premise}
+
+
+
+
+                                                                    Prompt for Performing Calculation of a Speci-
+                                                                    fied Goal Prompt C.12 is used to guide the LLM
+   The following prompt corresponds to P ROMPT 2                    in performing calculations for a given subgoal of
+of Figure 5 for generating the subgoal of the second                thought 1, which corresponds to P ROMPT 3 in Fig-
+and subsequent thoughts (Prompt C.11).                              ure 5.
+                                                                 2979
+ Example C.12: Calculating the Subgoal for the                         Example C.13: Calculating Subgoals for Sec-
+               Initial Reasoning Thought                                             ondary or Subsequent Reason-
+ Solve the math question step by step. Please start each step                        ing Steps
+ with “Step :” and split steps with “\n”. There are a few              Solve the math question step by step. Please start each step
+ things you should be aware of:                                        with “Step :” and split steps with “\n”. There are a few
+                                                                       things you should be aware of:
+- Opt for the most straightforward approach to perform
+each reasoning step.                                                   - Opt for the most straightforward approach to perform
+- Carefully process the numerical variables in the question            each reasoning step.
+and perform each calculation sequentially.                             - Carefully process the numerical variables in the question
+- Carefully consider each key information provided and                 and perform each calculation sequentially.
+incorporate them systematically into your solution.                    - Carefully consider each key information provided and
+- Discern any distractions that are irrelevant to the queried          incorporate them systematically into your solution.
+answer.                                                                - Discern any distractions that are irrelevant to the queried
+- If there is no valid answer, please conclude with "So the            answer.
+answer is None" at the end of the output.                              - If there is no valid answer, please conclude with "So the
+                                                                       answer is None" at the end of the output.
+ This is a math question:
+ Question: {A Math Problem}                                            This is a math question:
+                                                                       Question: {A Math Problem}
+The following is key information extracted from the
+question:                                                              The following is key information extracted from the
+{Key Premise}                                                          question:
+                                                                       {Key Premise}
+The following is the first reasoning step. Carefully review
+each item in the first reasoning step.                                 The following are the first few steps in a solution to the
+{Subgoal of Thought 1}                                                 question:
+{A Reference for Calculation}                                          {Previous Thoughts, including Subgoals and Calculations}
+
+ If you have a strong belief that errors exist in the above            The next step is as follows. Carefully review each item in
+ reasoning step, explain why and regenerate this step. Oth-            the next reasoning step.
+ erwise, output “Pass”.                                                {Subgoal of the Current Thought}
+                                                                       {A Reference for Calculation}
+
+                                                                       If you have a strong belief that errors exist in the above
+                                                                       reasoning step, explain why and regenerate this step. Oth-
+                                                                       erwise, output “Pass”.
+
+
+
+
+                                                                   Verifying the Completion Status of the Final An-
+                                                                   swer Once each thought is completed, we merge
+                                                                   the subgoals and calculations of the current thought
+  We utilize Prompt C.13 to guide the LLM in                       and previous thoughts (P ROMPT 4). Then we query
+performing calculations for a specific subgoal in                  the LLM to determine if we have achieved the de-
+the second thought or subsequent thoughts.                         sired answer for the question.
+                                                                2980
+                                                                                                                  Pro            Cr
+ Example C.14: Verifying the Model’s Acquisi-                                     G Num Digi IDF Add Re b. Und Dis it. Thi
+                                                                             HumSM8K. Sub.t Exp. Conv. . Op.v. Op. erst.t. Ins. nking
+               tion of the Final Answer                                              an        92.9 100.0 100.0 87.5 100.0 100.0 100.0 100.0
+                                                                                         96.8 (4.0)  (-3.3) (-3.3) (9.6) (-3.3) (-3.3) (-3.3) (-3.3)
+ This is a math question:                                            GPT        G PT-4
+ Question: {A Math Problem}                                              -3.5                  89.8   90.5 89.0 79.5 83.7 93.9 90.8 67.5
+                                                                                         93.2 (3.7) (3.0)    (4.5) (14.7) (10.2) (-0.7) (2.7) (27.6)
+                                                                               -Tur
+                                                                         Mis         b o       69.5   70.4   62.3 48.5 55.2 74.2 62.2 47.3
+                                                                                         73.6 (5.6) (4.4) (15.3)
+                                                                             tral                                  (34.2) (25.0) (-0.8) (15.6) (35.7)
+ The following is key information extracted from the                   LLa         - 7B        35.2 35.9 29.9 14.4 21.8 38.7 28.1 5.5
+ question:                                                                 MA            39.6 (11.1)  (9.2) (24.5) (63.6) (45.0) (2.3) (29.1) (86.0)
+                                                                     Cod -2-7B
+ {Key Premise}                                                           eLla                  13.0 10.0 10.4 3.0
+                                                                                         13.4 (3.4)                        7.0 13.9 7.6          0.0
+                                                                              m                      (25.4) (22.6) (77.4) (47.5) (-4.0) (43.5) (100.0)
+                                                                      LLa a-7B
+                                                                          MA                   22.3 23.8 19.1 8.6
+                                                                                         25.3 (12.0)                       9.3 25.9 11.4 1.4
+                                                                   Cod -2-13
+                                                                                                      (6.0) (24.5) (66.2) (63.1) (-2.4) (55.1) (94.3)
+ {Previous Thoughts, including Subgoals and Calculations}
+                                                                       eLla           B 25.4 25.9 22.9 17.7 9.5 13.4 27.4 15.4 0.3
+                                                                   Cod ma-13
+                                                                                              (-2.1) (9.8) (30.2) (62.7) (47.2) (-7.8) (39.4) (98.8)
+ Does the goal of last step “{Last Subgoal}” meets up the              eLla           B 35.9 29.6 29.9 28.2 14.6 15.4 34.6 16.7 4.4
+                                                                             ma               (17.7) (16.7) (21.5) (59.5) (57.2) (3.6) (53.6) (87.8)
+ target of the math question “{Queried Answer}”? If yes,              LLa -34B
+                                                                  Met MA-2-
+                                                                                               41.2 42.6 34.5 23.7 19.6 48.1 28.8 1.4
+                                                                                         45.6 (9.6)
+ please output “So the answer is [VALUE]”. Otherwise,                                                 (6.6) (24.4) (48.0) (57.1) (-5.5) (36.9) (96.8)
+                                                                     aMa          70B
+ please output “No” and explain why.                                      th-M                 53.3 53.1 42.1 31.5 36.6 56.6 46.9 0.3
+                                                                                         56.7 (6.0)   (6.4) (25.8) (44.4) (35.4) (0.3) (17.4) (99.5)
+                                                                      Met istral
+                                                                          aMa                  71.0   70.0 61.9 45.1 58.1 77.5 55.6 10.6
+                                                                                         77.8 (8.7) (10.0)  (20.4) (42.0) (25.2) (0.4) (28.5) (86.4)
+   We consider the final sentence of the math prob-                             th-7
+                                                                                      B 66.7 59.1 58.8 49.7 30.9 49.7 64.9 36.7 5.2
+lem as the “queried answer”. If the model’s self-                           Abe
+                                                                                  l-7B
+                                                                                              (11.4) (11.9) (25.6) (53.8) (25.6) (2.7) (45.0) (92.3)
+
+verification process yields a response of “No”,                             To                 56.1 51.0 38.6 24.6 33.5 58.7 33.3 1.0
+                                                                                         59.5 (5.7)  (14.4) (35.1) (58.6) (43.7) (1.4) (44.1) (98.3)
+C OMP proceeds with subgoal generation for the                       MA RA-7B
+                                                                MA      m
+                                                                  mm moTH
+                                                                                               62.0 64.8 54.1 32.2 41.4 68.2 26.0 0.0
+                                                                                         67.5 (8.1)   (3.9) (19.8) (52.2) (38.7) (-1.1) (61.5) (100.0)
+subsequent thoughts (Prompt C.11). However, if                       oTH           -7B
+                                                                         -Co                   45.2 49.3 38.2 21.5 26.8 51.8 24.4 0.0
+                                                                                         52.8 (14.5)
+the responses include the phrase “So the answer                               der                     (6.7) (27.7) (59.4) (49.4) (2.0) (53.8) (100.0)
+                                                                                   -7B
+                                                                           SE                  54.8   56.6 45.8 29.0 31.5 58.5 33.7 0.0
+                                                                                         59.9 (8.5) (5.4)
+is”, C OMP terminates the iteration and arrives at                  Met GO-7B
+                                                                                                            (23.5) (51.5) (47.5) (2.4) (43.8) (100.0)
+
+the final answer.                                                       aMa                    60.4   64.3   51.7 35.9 41.0 67.2 37.2 0.0
+                                                                              th-1 68.7 (12.1) (6.4) (24.7) (47.8) (40.3) (2.1) (45.8) (100.0)
+                                                                                     3B        61.5 64.3 53.1 36.3 53.9 71.7 42.9 4.9
+                                                                           Abe           70.8 (13.2)  (9.2) (24.9) (48.7) (23.9) (-1.2) (39.4) (93.0)
+C.5 Accuracy of LLMs Across Various                                             l-13
+    Perturbation                                                          ToR B 66.7 (6.5)     62.4 59.7 50.0 34.8 41.6 67.3 45.5 1.8
+                                                                                                     (10.5) (25.1) (47.8) (37.6) (-0.9) (31.8) (97.3)
+                                                                    M          A-1
+                                                               MA Ammo 3B 71.8 (9.0)           65.3 67.8 56.7 39.9 45.8 72.7 34.7 0.0
+                                                                 mm
+                                                                    oTH TH-13B
+                                                                                                      (5.5) (21.0) (44.5) (36.2) (-1.3) (51.6) (100.0)
+We present the model’s performance on eight dis-
+                                                                        -Co                    54.9   58.5 48.7 31.4 34.1 61.9 37.1 0.0
+tinct mathematical perturbations in Figure 6.                               der
+                                                                                 -13
+                                                                                         62.4 (12.0) (6.2)  (22.0) (49.7) (45.3) (0.8) (40.6) (100.0)
+
+                                                                         SEG          B        59.4   62.0   50.3 36.9 36.2 63.8 43.2 0.0
+                                                                                         64.9 (8.5) (4.4) (22.5)   (43.1) (44.3) (1.6) (33.4) (100.0)
+C.6 Answer Extraction for Questions                                 Met O-13B
+                                                                        aMa                    65.5   68.5   58.6   43.6 45.9 71.6 40.6 0.0
+    Rewritten with the Rule of Removed                                        th-7 72.5 (9.7) (5.5) (19.2) (39.9) (36.6) (1.3) (43.9) (100.0)
+                                                                                     0B        74.9 74.5 65.0 51.0 58.0 79.6 61.9 10.0
+    Necessary Constraints                                                  Abe           82.1 (8.8)   (9.2) (20.9) (37.9) (29.4) (3.0) (24.6) (87.8)
+                                                                    MA          l-70
+                                                                       mm             B 83.8 76.7 76.9 63.6 53.1 60.0 81.4 64.8 3.0
+Question variations that are rewritten using the                           oTH                 (8.6) (8.3) (24.1) (36.6) (28.4) (2.9) (22.7) (96.5)
+                                                                                 -70
+                                                                                      B 75.9 67.4 71.7 59.2 47.8 49.1 75.5 56.6 0.0
+“critical thinking” perturbation lack certain contexts                                          (11.2) (5.6) (22.0) (37.1) (35.3) (0.5) (25.4) (100.0)
+
+and therefore do not have valid answers. In such
+cases, we have observed that the LLM tends to                  Figure 6: LLMs’s performance across various types of
+decline providing answers in various expressions.              question variations. Darker cell colors indicate larger
+                                                               performance decay rates under corresponding question
+   To extract the expressions, we regard the model’s
+                                                               variations. The value in parentheses represents PDR
+solution as correct if it contains any of the follow-          values in performance compared to the performance on
+ing expressions: does not provide enough infor-                GSM8K. The cell in purple indicates a slight increase
+mation, does not specify, does not provide, can’t              in performance for the corresponding question variation
+provide, can not provide, don’t know, do not know,             compared to the original GSM8K test set. The majority
+doesn’t specify, not specify, not mention, doesn’t             of models struggle to indicate the absence of statements
+mention, don’t have enough information, do not                 when confronted with critical thinking variations.
+have enough, not provide, doesn’t provide, cannot
+calculate, can’t calculate, can’t determine, cannot
+determine, missing necessary information, none.                ations in GSM-P LUS. The results suggest that
+                                                               C OMP is significantly effective in variations regard-
+C.7 Accuracy of Compositional Prompting                        ing general numerical substitution, problem under-
+    for Various Question Variations                            standing, adding operation, and critical thinking.
+Table 9 reports the accuracy scores for both the               C OMP serves as a valuable method for iteratively
+GSM8K questions and their corresponding vari-                  inferring the subgoal of each reasoning thought and
+                                                            2981
+                                               Numerical Variation             Arithmetic Variation
+        Method       GSM8K   GSM-P LUS   Num. Sub. / Digit Exp. / IDF Conv.    Add. Op. / Rev. Op.    Prob. Underst.   Dist. Ins.   Crit. Thinking
+        C OT         74.17     62.92            70.00 / 75.83 / 66.67              50.83 / 63.33          72.50          63.33          40.83
+        LT M ‡       74.17     62.60            68.33 / 75.00 / 71.67              45.83 / 63.33          72.50          65.52          39.17
+        C OMP        76.67     65.52            75.00 / 75.00 / 62.50              52.50 / 64.17          78.33          62.50          54.17
+        C OT + SC    76.67     66.88            80.00 / 80.00 / 67.50              59.17 / 65.83          80.83          61.67          40.00
+        C OMP + SC   80.00     69.47            75.83 / 82.50 / 71.67              60.83 / 71.67          78.33          70.83          55.83
+
+
+Table 9: Fine-grained performance of GPT-3.5-Turbo on GSM8K and GSM-P LUS with different prompting
+techniques. The methods listed in the upper half of the table evaluate the pass@1 accuracy, whereas the methods
+presented in the lower half of the table employ ensemble-based decoding to determine a result from multiple
+candidates.
+
+
+performing the corresponding calculations.
+   The C OMP method benefits from repeated at-
+tempts, leading to improved performance on ques-
+tions with inserted distractors. We have not ob-
+served a substantial improvement in questions re-
+lated to “numerical variation” as C OMP + SC pri-
+marily emphasizes subgoal optimization and may
+encounter similar calculation errors without the use
+of external tools or ensemble-based approaches.
+
+C.8 Sample Predictions on GSM8K and
+    GSM-P LUS
+We show example questions and predictions by
+different techniques (Tables 10 and Tables 11).
+
+
+
+
+                                                                        2982
+ Method     Original GSM8K Question                                        GSM-P LUS (Reversing Operation)
+            Adam wants to eat some sliced apples. A large apple can        Adam wants to eat some sliced apples. A large
+            be sliced into 5 pieces, and a small apple can be sliced       apple can be sliced into 5 pieces, and a small apple
+            into 3 pieces. Adam decides to slice 3 large and 5 small       can be sliced into 3 pieces. Adam decides to slice 3
+            apples and then eats 15 slices. How many apple slices are      large and some small apples and then eats 15 slices.
+            left?                                                          After eating 15 slices, he counts and finds that he
+                                                                           has 15 slices left. How many small apples did he
+                                                                           originally have?
+   C OT     Adam slices 3 large apples into 3 * 5 = 15 slices. Adam        First, let’s calculate the total number of slices from
+            slices 5 small apples into 5 * 3 = 15 slices. In total, Adam   the large apples. Since each large apple can be
+            slices 15 + 15 = 30 apple slices. Adam eats 15 slices, so      sliced into 5 pieces, and Adam sliced 3 large apples,
+            there are 30 - 15 = 15 apple slices left. #### 15 ✓            the total number of slices from the large apples is 5
+                                                                           * 3 = 15 slices.
+                                                                           Next, let’s calculate the total number of slices from
+                                                                           the small apples. Since each small apple can be
+                                                                           sliced into 3 pieces, and Adam has 15 slices left
+                                                                           after eating, the total number of slices from the
+                                                                           small apples is 15 - 15 = 0 slices. (reasoning error)
+                                                                           Since Adam originally sliced some small apples,
+                                                                           the total number of slices from the small apples
+                                                                           must be greater than 0. Therefore, Adam did not
+                                                                           slice any small apples. So, the answer is #### 0. ✗
+   LT M     1. How many slices can be made from the large apples? 2. 1. How many slices did Adam have before eating?
+            How many slices can be made from the small apples? 3. 2. How many slices did Adam have after eating?
+            How many slices were made in total? 4. How many slices 3. How many slices did Adam eat? 4. How many
+            are left?                                                     small apples did Adam originally slice?
+            1. A large apple can be sliced into 5 pieces, so 3 large 1. Adam had 15 slices left after eating, so before
+            apples can be sliced into 3 x 5 = 15 slices.                  eating he had 15 + 15 = 30 slices.
+            2. A small apple can be sliced into 3 pieces, so 5 small 2. Adam ate 15 slices, so after eating he had 30 - 15
+            apples can be sliced into 5 x 3 = 15 slices.                  = 15 slices.
+            3. In total, 15 slices were made from the large apples and 3. Adam had 15 slices left after eating, so he ate 30
+            15 slices were made from the small apples, so there were - 15 = 15 slices.
+            15 + 15 = 30 slices in total.                                 4. A large apple can be sliced into 5 pieces, so
+            4. Adam ate 15 slices, so there are 30 - 15 = 15 slices left. Adam sliced 3 large apples into 3 x 5 = 15 slices.
+            The answer is: 15. ✓                                          Since Adam had 15 slices left after eating, he must
+                                                                          have originally sliced 15 - 15 = 0 small apples. The
+                                                                          answer is: 0. ✗ (reasoning error)
+  C OMP     Step 1: Calculate the total number of slices from the large Step 1: Calculate the total number of slices from
+            apples.                                                     the large apples.
+           - Since each large apple can be sliced into 5 pieces, the - Since each large apple can be sliced into 5 pieces,
+            total number of slices from the 3 large apples is 3 * 5 = the total number of slices from the 3 large apples is
+           15 slices. Result: 15 slices                                 3 * 5 = 15 slices. Result: 15 slices.
+            Step 2: Calculate the total number of slices from the small Step 2: Calculate the total number of slices from
+            apples.                                                     the small apples.
+           - Adam slices 5 small apples, each sliced into 3 pieces. - Let’s assume the number of small apples Adam
+           The total number of slices from the small apples is 5 * 3 = sliced is “x”. Since each small apple can be sliced
+           15 slices. Result: 15 slices.                                into 3 pieces, the total number of slices from the
+            Step 3: Calculate the total number of slices Adam left.     small apples is x * 3 = 3x slices. Result: 3x slices.
+           - Adam has 15 slices from the large apples. Adam also has Step 3: Calculate the total number of slices Adam
+           15 slices from the small apples. Adam has a total of 15 had before eating.
+           + 15 = 30 slices. Adam eats 15 slices, so the number of - The total number of slices is the sum of the slices
+            slices left is 30 - 15 = 15 slices. Result: 15 slices.      from the large apples and the slices from the small
+            So the answer is 15 slices. ✓                               apples. So, the equation is 15 slices (from the large
+                                                                        apples) + 3x slices (from the small apples) = 30
+                                                                        slices. Result: 15 + 3x = 30
+                                                                        Step 4: Solve the equation to find the value of x.
+                                                                        - Subtract 15 from both sides of the equation: 15 +
+                                                                        3x - 15 = 30 - 15. Simplify: 3x = 15. Divide both
+                                                                        sides of the equation by 3: 3x/3 = 15/3. Simplify: x
+                                                                        = 5. So the answer is 5. ✓
+
+Table 10: Prediction example for different prompting techniques, on a GSM8K question and a corresponding
+question variation based on “reversing operation” rewriting. While all techniques provide accurate answers to the
+original GSM8K question, it is only our proposed method, C OMP, that consistently produces the correct answer for
+the modified question in GSM-P LUS.
+
+
+                                                             2983
+ Method    Original GSM8K Question                                        GSM-P LUS (Adding Operation)
+           Anne purchased a box of sweets that contains 15 packs,         Anne purchased a box of sweets that contains 15
+           and each pack has 60 pieces. She kept two packs and gave       packs, and each pack has 60 pieces. She kept
+           the rest to her 10 friends equally. How many pieces of         two packs for herself and gave one pack to her
+           sweets did each of her friends receive?                        brother. She then divided the remaining packs
+                                                                          equally among her 10 friends. After a day, each
+                                                                          of her friends gave back 10 pieces of sweets to her.
+                                                                          How many pieces of sweets did each of her friends
+                                                                          end up with after returning some to Anne?
+   C OT    Anne kept 2 packs of sweets, so she gave away 15 - 2 =         First, Anne purchased a box of sweets that contains
+           13 packs of sweets to her friends. Each pack contains 60       15 packs, and each pack has 60 pieces. So, the
+           pieces of sweets, so Anne gave away a total of 13 * 60 =       total number of sweets in the box is 15 * 60 = 900
+           780 pieces of sweets to her friends. Anne has 10 friends,      pieces. Anne kept two packs for herself, so she has
+           so each of her friends received 780 / 10 = 78 pieces of        2 * 60 = 120 pieces. Anne gave one pack to her
+           sweets. Therefore, each of Anne’s friends received ####        brother, so her brother has 1 * 60 = 60 pieces. The
+           78 pieces of sweets. ✓                                         remaining packs are 15 - 2 - 1 = 12 packs. Anne
+                                                                          divided the remaining packs equally among her 10
+                                                                          friends, so each friend received 12 / 10 = 1.2 packs.
+                                                                          Since we can’t have a fraction of a pack, we need
+                                                                          to round down to the nearest whole number. Each
+                                                                          friend received 1 pack. (missing reasoning step:
+                                                                          conversion from “1.2 pack” to “72 piece”)
+                                                                          Each of her friends gave back 10 pieces of sweets.
+                                                                          So, each friend has 60 - 10 = 50 pieces. #### 50. ✗
+   LT M    1. How many packs of sweets did Anne give to her               1. How many packs of sweets did Anne keep for
+           friends? 2. How many pieces of sweets are in each pack?        herself? 2. How many packs of sweets did Anne
+           3. How many pieces of sweets did each friend receive?          give to her brother? 3. How many packs of sweets
+           1. Anne purchased a box of sweets that contains 15 packs.      did Anne divide among her friends? 4. How many
+           She kept two packs, so she gave 15 - 2 = 13 packs to her       pieces of sweets did each friend receive? 5. How
+           friends.                                                       many pieces of sweets did each friend return to
+           2. Each pack has 60 pieces of sweets.                          Anne? 6. How many pieces of sweets did each
+           3. Each friend received 60 pieces of sweets per pack, so       friend end up with after returning some to Anne?
+           each friend received a total of 60 x 13 / 10 = 78 pieces of    1. Anne kept 2 packs of sweets for herself.
+           sweets.                                                        2. Anne gave 1 pack of sweets to her brother.
+           Each of Anne’s friends received 78 pieces of sweets. ✓         3. Anne divided the 15 - 2 - 1 = 12 packs of sweets.
+                                                                          4. Each friend received 12 / 10 = 1.2 packs of
+                                                                          sweets.
+                                                                          5. Each friend returned 10 pieces of sweets to Anne.
+                                                                          6. Each friend ended up with 60 pieces - 10 pieces
+                                                                          = 50 pieces of sweets after returning some to Anne.
+                                                                          The answer is: 50 pieces of sweets. ✗ (omission of
+                                                                          the 4th reasoning result)
+  C OMP     Step 1: Calculate the total number of packs Anne gave to       Step 1: Calculate the total number of pieces of
+            her friends.                                                   sweets in the box.
+           - Anne purchased 15 packs of sweets. She kept 2 packs          - Since each pack has 60 pieces and there are 15
+            for herself. So, she gave 15 - 2 = 13 packs to her friends.    packs, the total number of pieces of sweets in the
+            Result: 13 packs                                               box is 60 * 15 = 900 pieces.
+            Step 2: Calculate the total number of pieces of sweets in      Step 2: Calculate the number of packs Anne kept
+            the packs Anne gave to her friends.                            for herself and gave to her brother.
+           - Each pack has 60 pieces of sweets. Anne gave 13 packs        - Anne kept two packs for herself and gave one pack
+            to her friends. So, the total number of pieces of sweets       to her brother, so she kept a total of 2 + 1 = 3 packs.
+            in the packs Anne gave to her friends is 60 * 13 = 780         Step 3: Calculate the number of packs Anne had
+            pieces.                                                        left after keeping some for herself and giving one
+            Step 3: Calculate the number of pieces of sweets each of       to her brother.
+           Anne’s friends received.                                       - Anne divided the remaining 12 packs equally
+           - Anne gave 780 pieces of sweets to her 10 friends equally.     among her 10 friends, so each friend received 12 /
+           To find out how many pieces each friend received, divide       10 = 1.2 packs.
+            the total number of pieces by the number of friends. 780       Step 4: Calculate the total number of pieces of
+            pieces / 10 friends = 78 pieces.                               sweets each friend received.
+            Step 4: Calculate the total number of pieces of sweets        - Since each pack has 60 pieces, each friend received
+            each friend received. So the answer is 78. ✓                  1.2 * 60 = 72 pieces.
+                                                                           Step 5: Calculate the number of pieces of sweets
+                                                                           each friend had after returning some to Anne.
+                                                                          - Each friend returned 10 pieces of sweets. So the
+                                                                           answer is 72 - 10 = 62 pieces of sweets. ✓
+
+Table 11: Prediction example for different prompting techniques, on a GSM8K question and a corresponding
+question variation based on “adding operation” rewriting. While all techniques provide accurate answers to the
+original GSM8K question, it is only our proposed method, C OMP, that consistently produces the correct answer for
+the modified question in GSM-P LUS.                  2984
+

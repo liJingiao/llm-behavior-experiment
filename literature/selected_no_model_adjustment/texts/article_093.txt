@@ -1,0 +1,982 @@
+    Do language models have coherent mental models of everyday things?
+
+                       Yuling Gu and Bhavana Dalvi Mishra and Peter Clark
+                                  Allen Institute for AI, Seattle, WA
+                             {yulingg,bhavanad,peterc}@allenai.org
+
+
+
+
+                       Abstract
+    When people think of everyday things like an
+    egg, they typically have a mental image asso-
+    ciated with it. This allows them to correctly
+    judge, for example, that “the yolk surrounds the
+    shell” is a false statement. Do language models
+    similarly have a coherent picture of such ev-
+    eryday things? To investigate this, we propose
+    a benchmark dataset consisting of 100 every-
+    day things, their parts, and the relationships
+    between these parts, expressed as 11,720 “X
+    relation Y?” true/false questions. Using these
+    questions as probes, we observe that state-of-
+    the-art pre-trained language models (LMs) like
+    GPT-3 and Macaw have fragments of knowl-
+    edge about these everyday things, but do not
+    have fully coherent “parts mental models” (54-
+    59% accurate, 19-43% conditional constraint
+    violation). We propose an extension where we
+    add a constraint satisfaction layer on top of
+    the LM’s raw predictions to apply common-
+    sense constraints. As well as removing incon-
+    sistencies, we find that this also significantly
+    improves accuracy (by 16-20%), suggesting
+    how the incoherence of the LM’s pictures of               Figure 1: While humans appear to have coherent men-
+    everyday things can be significantly reduced.1            tal pictures of everyday things (e.g., an egg, A), our
+                                                              question-asking probes suggest that LMs do not (e.g.,
+                                                              one LM answered that the egg white both surrounds and
+1   Introduction                                              is surrounded by the shell, B). This model incoherence
+                                                              can be reduced by applying commonsense constraints
+Psychologists and cognitive scientists hypothesize            (e.g., surrounds is asymmetric), resulting in a more co-
+that humans develop mental models of the world,               herent parts model (C).
+namely internal, conceptual representations of the
+environment which we base our decisions and ac-
+tions on (Ha and Schmidhuber, 2018; Jonassen                  2022; Andreas, 2022), we investigate if pre-trained
+and Henning, 1996). Hespos and Spelke (2004)                  language models show evidence of coherent inter-
+observed that 5-month-old human infants exhibit               nal representations of everyday things, analogous
+understanding of mechanical properties of objects             to human mental models, via probing. We focus
+in terms of arrangements and motions of surfaces,             on mental models in the context of ordinary ob-
+well before they can understand language. Draw-               jects that we encounter in our everyday lives. Such
+ing loosely on this idea, but without making any              commonsense knowledge helps us understand how
+claims about how LMs reason internally (Shanahan,             these everyday things work and how to interact
+   1
+     We make our data and code publicly available at https:   with them. For example, when someone tries to
+//github.com/allenai/everyday-things.                         make a fried egg, they know that it has a shell and
+                                                          1892
+                 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics
+                                        Volume 1: Long Papers, pages 1892–1913
+                           July 9-14, 2023 ©2023 Association for Computational Linguistics
+that it can be cracked open to reveal the egg white      world. Craik (1943) described mental models as
+and yolk inside. However, if a system does not           a ‘small-scale model’ of external reality and of its
+have a coherent picture of such everyday things,         own possible actions within someone’s head. Such
+thinking that the egg yolk surrounds the shell, then     a mental model is useful in many ways, including
+it might have to resort to ridiculous approaches         allowing one to try out various alternatives, make
+such as trying to scrape the egg yolk off the shell      conclusions, react to future situations, learn from
+into the pan.                                            past events, and in general, improve competency.
+   We explore a first version of this, in which we       Years later, when Johnson-Laird (2006) outlined
+consider only knowledge about an object’s parts          the mental processes that underlie human reason-
+and their relationships. We refer to this knowl-         ing, he based his discussion on the fundamental
+edge as a parts mental model. We first create a          assumption that human beings can construct inter-
+benchmark dataset of 100 everyday things, by ask-        nal representations of spatial layouts, and specified
+ing human annotators to draw a graph representing        mental models to be iconic. In his words, a mental
+their parts mental model (e.g., Figure 2) depicting      model’s “parts and the relations among them cor-
+the parts of an everyday thing, spatial relationships,   respond to the parts of the layout and the relations
+connections between its parts and functional depen-      among them.” While coherent internal representa-
+dencies (if any). Then we probe two representative       tions of spatial layouts are crucial for human rea-
+state-of-the-art LMs with questions about these          soning, their role, coherence, and even existence
+everyday things. We find that the LMs’ parts men-        in LMs have not been systematically explored. In
+tal models are generally of poor quality. Further,       this work, we try to bridge this gap by proposing
+model predictions can violate basic consistency          a benchmark dataset and methodology to compare
+constraints e.g. transitivity. To alleviate this, we     human internal representations of spatial layouts of
+apply constraint reasoning to derive more accurate       everyday things with those of LMs.
+and consistent mental models of everyday things,         Prior datasets: Prior works on reasoning about
+correcting some of the LMs’ original inconsisten-        object/body parts include Li et al. (2019b) which
+cies. This is illustrated in Figure 1.                   focused on human body parts and human inter-
+   Our contributions are:                                action with other objects. The PTR benchmark
+   1. We present a benchmark dataset of parts men-       (Hong et al., 2021) is a QA dataset about objects
+      tal models consisting of 100 everyday things,      and their parts, combining 5 everyday things: chair,
+      2.2K parts and 11.7K relationships.                table, bed, refrigerator, and cart, to create ques-
+   2. We show that SOTA LMs like GPT-3 and               tions across 70K different scenes. Ji et al. (2022)
+      Macaw are poor at answering relationship           used tangram puzzles to analyze shape naming, part
+      queries between parts of everyday things. The      naming and segmentation divergence across partic-
+      parts mental models derived using their pre-       ipants when they see a certain shape. Contributing
+      dictions are only 54-59% accurate, and sig-        to this existing body of datasets, the dataset we
+      nificantly inconsistent (19-43% conditional        introduce serves as a resource for researchers to
+      violation τ ).                                     study canonical parts mental models for a wide va-
+   3. We propose a neuro-symbolic method that ap-        riety of everyday things, focusing on relationships
+      plies constraint reasoning on top of raw LM        between parts of objects, which is fundamental to
+      predictions as a way of obtaining more consis-     how humans think and interact with these things.
+      tent (0% conditional violation τ ) and more ac-
+      curate mental models (16-20% improvement).         Large language models: Despite recent advances
+      This suggests a broader cognitive architecture     in LMs, studies suggest that they still struggle at
+      (LM + reasoner) for future systems, to better      reasoning with real-world entities and concepts.
+      construct mental models than the LM alone.         Bisk et al. (2020) found that when LMs answer
+                                                         questions involving physical commonsense rea-
+2   Related work                                         soning, their performance at that time was near
+                                                         chance level for questions involving spatial rela-
+Mental models: The idea of mental models                 tions like “top” and “bottom.” Sahu et al. (2022)
+(Johnson-Laird, 1983) is not new. Many years             demonstrated the lack of conceptual consistency in
+ago, Craik (1943) proposed that thinking itself is       LMs by correlating models’ answers on common-
+the manipulation of internal representations of the      sense reasoning questions (CSQA dataset) and their
+                                                     1893
+                              Tree                                                     Flashlight
+
+Figure 2: Our everyday things dataset, ParRoT, covers different entities, both natural (e.g. tree) and man-made (e.g.
+flashlight). Above are two examples of such everyday things. In each case, we show a (a) diagram of the entity, and
+(b) parts graph of the everyday thing drawn by crowdworkers. The parts graphs illustrate how our dataset contains a
+variety of relations between parts.
+
+
+answers on associated conceptual questions from             strained (e.g., which parts to pick? what version
+ConceptNet knowledge base. To improve existing              of the entity are we talking about?). To make this
+systems, progress has been made such as by im-              task more well-defined, we also provide a prede-
+posing constraints with neuro-symbolic approaches           fined list of parts as a guide (details in Section 4.1),
+(Nye et al., 2021; Mitchell et al., 2022) and incor-        and the task for annotators or a model is to specify
+porating both textual and visual information (Dan           relationships between them as they see appropriate,
+et al., 2020). Inspired by recent progress, we pro-         using our ontology of relationships. This is im-
+pose a constraint reasoning method that applies             portant so that we can do meaningful comparisons
+hard commonsense constraints (e.g., if ‘A above B’          between language models and humans’ notion of
+is True then ‘A below B’ cannot be True) on top of          parts mental models of everyday things.
+raw LM predictions to produce more accurate and                Figure 2 shows two examples of parts mental
+consistent mental models of everyday things.                models in our dataset, where edges encode rela-
+                                                            tionships between parts. E.g., in a tree, “trunk is
+3   Parts mental models and Task                            above the roots”; in a flashlight, “bulb requires
+                                                            the batteries,” etc. Inspired by previous literature,
+We define “parts mental model” for everyday things          we envision that such parts mental models would
+in this section. Then in the rest of the paper, we          play a key role when one carries out daily activities
+describe how we collect a dataset for them, measure         involving these everyday things.
+LMs’ coherence on them, and finally apply external
+reasoning to improve the accuracy and consistency           Task
+of LMs’ parts mental model.                                 Here we define our task: “Construct a parts men-
+   Here, we use parts mental model to mean a parts-         tal model for everyday things” with the following
+focused subset of a complete mental model of an             input/output specifications:
+entity. We represent a parts mental model as a
+directed graph where parts of the everyday thing               • Input: Everyday thing, Parts list, Relation vo-
+form the nodes of this graph and these nodes are                 cabulary (14 relations).
+connected with edges indicating how these parts                • Output: List of tuples (x, r, y) where relation
+are related to each other. Based on prior works                  r holds between parts x and y.
+such as Renz (2002) and Gunning et al. (2010), we
+selected 11 spatial orientation relations to focus            In Section 4 we describe how we acquire a bench-
+on. In addition, we augmented these with relations          mark dataset by asking human annotators to carry
+describing connectivity and functional dependency.          out this task. Once we have collected gold-standard
+In total, we consider 14 relationships (across these        parts mental models for everyday things based on
+3 categories) between parts, listed in Table 2.             the human annotations, we prompt LMs for their
+   Note that the notion of a single “parts mental               2
+                                                                  A requires B denotes A cannot perform its primary func-
+model” for an everyday thing is somewhat uncon-             tion without B.
+
+                                                       1894
+                                                                                                           Total avg. per
+                                 Given as seed  Annotated     Avg. annotated Annotated + enriched (*)      mental model
+                                   (unique)    mental models per mental model        (Total)                  (Total /
+                                                                                                         # mental models)
+    # everyday things                100           100                -                  100                      -
+    # mental models                   -            300                -                  300                      -
+    # parts                          716           2191             7.30                2191                    7.30
+    # relations (p1, rln, p2)         8            2752             9.17                11720                  39.07
+    # spatial relations               6            1858             6.19                9956                   33.19
+    # connectivity relation(s)        1            818              2.73                1612                    5.37
+    # functional relation(s)          1             76              0.25                 152                    0.51
+
+Table 1: Statistics of ParRoT, our Everyday Things Dataset. *Enriched refers to implied relations, see Section 4.3
+
+
+       Type  Relations                                           4.1       Everyday entities
+             part of, has part, inside, contains,
+   Spatial                                                       We first compiled a list of entities from children’s
+             in front of, behind, above, below,
+ orientation                                                     books, vocabulary lists (Grades 1-8), and online
+             surrounds, surrounded by, next to∗
+                                                                 web search.3 For the unique entities in this list, the
+Connectivity directly connected to∗
+                                                                 authors manually filtered out those entities that are
+ Functional
+             requires2 , required by                             not common in everyday setting or have too few
+dependency
+                                                                 (i.e. only 1 or 2 parts) or too many parts (composite
+Table 2: Relationships encoded in “parts mental models”          scenes). Specifically, we kept 100 entities that are
+of everyday things. Among these relations, ‘next to’             common everyday things that a child would be
+and ‘directly connected to’ relations are bi-directional,        familiar with, with a mix of natural and man-made
+whereas the other 12 relations are uni-directional.              things. This annotation task involves answering the
+                                                                 following question for each item in the list: “Do
+                                                                 you imagine this is something that most people
+parts mental models and evaluate how well they do                would have seen in their everyday lives?”
+on this task. Our proposed method to measure this                   We recognize there could be many variants of a
+is described in Section 5. In particular, we are inter-          single everyday entity e.g. different types of coffee
+ested in (1) how accurate are LM-generated parts                 makers. To narrow down the possibilities, the au-
+mental models when compared to gold-standard                     thors picked a diagram for each everyday thing via
+models in our dataset and (2) ignoring accuracy,                 web search and carefully annotated a parts list for
+how consistent are these generated parts mental                  each of them to guide the level of granularity we
+models with respect to basic commonsense con-                    are looking for. In some cases, the entity name was
+straints? I.e., Do they at least conform to the 4                qualified to disambiguate further e.g. “digital clini-
+types of commonsense constraints laid out in Sec-                cal thermometer” instead of just “thermometer.”
+tion 5.2 e.g., ‘above’ and ‘below’ are inverse rela-
+tions, so if the LM predicts that in a tree, (trunk is           4.2       Mental model annotations
+above the roots) then it should also predict (roots
+are below the trunk).                                            We ask crowdworkers to draw sketches of every-
+                                                                 day things covering spatial relations, connectivity,
+                                                                 and functional dependencies between parts (Table
+4      Everyday Things Dataset: ParRoT
+                                                                 2). To encourage the format of the mental model
+       (Parts and Relations of Things)
+                                                                 graphs to be more standardized across annotators,
+                                                                 we ask that the nodes (in circles) mainly contain
+We created a dataset of common entities that one
+                                                                 labels from the “Parts list” provided. However, to
+would encounter in their daily life. For each every-
+                                                                 collect mental models that are most natural to the
+day thing, our dataset (ParRoT) contains a “parts
+                                                                 workers, they were also told that they can ignore
+mental model” in the form of a graph, which de-
+                                                                 parts in the “Parts list” if they seem unimportant,
+picts parts of the entity and relational information
+                                                                 or add extra parts that seem important. We also
+about the parts. Such a graph encodes a parts-
+                                                                 specified for edges to be labeled with the relations
+focused mental model of that everyday thing, po-
+tentially useful for reasoning about how the entity                   3
+                                                                        Appendix A provides more details on the source of the
+works and how to interact with it.                               list of everyday things.
+
+                                                             1895
+shown in Table 2.4                                                  5       Measuring and Improving Parts Mental
+   Given the name of an everyday thing, list of parts,                      Models
+and example diagram, 3 crowdworkers were re-                        Our proposed approach, ParRoT-Con,7 comprises
+cruited to sketch mental models for each everyday                   two main components.8 The first component “Prob-
+thing.5 Figure 2 shows examples of such sketches.                   ing a Pre-trained Language Model” sends an ex-
+According to Norman (2013), mapping that takes                      haustive list of relation queries to a LM querying
+advantage of spatial analogies leads to immediate                   for every relation between each pair of parts (e.g.
+understanding and is more natural. Sketching out                    all relationships between egg white, yolk, shell,
+such a graph allows workers more flexibility in                     shell membrane and air cell). This gives us a
+taking advantage of spatial analogies between the                   large set of candidate relation tuples along with
+actual entity and the sketch (see flashlight exam-                  the model’s confidence in each of them. Incorrect
+ple in Figure 2). Therefore, we hypothesize that                    relation predictions can result in inconsistencies in
+drawing a graph would be easier or more natural                     the mental model. E.g, “egg white both surrounds
+for crowdworkers than typing a list of relations.6                  and is surrounded by the egg shell.” The second
+                                                                    component “constraint reasoning” then applies a
+4.3 Statistics                                                      constraint satisfaction layer on top of these raw
+                                                                    predictions to choose a subset of these relation tu-
+ParRoT consists of 100 everyday things ranging                      ples that are maximally probable and minimally
+from devices like coffee maker, space heater to                     conflicting with each other. Note that ParRoT-Con
+natural entities like tree and butterfly with number                is a zero-shot approach, where both probing LMs
+of parts (provided as a seed list to crowdworkers)                  and constraint reasoning steps do not require any
+ranging from 3-14. We collected 3 mental mod-                       task-specific fine-tuning or re-training.
+els per everyday thing. We take the parts mental
+models annotated by crowdworkers to be correct                      5.1      Probing a Pre-trained Language Model
+but not complete. I.e., they may include only those                 We use the following pre-trained language models
+relations that they think are salient for the every-                for our study: GPT-3 (Brown et al., 2020) and
+day thing, and also omit the ones that can be easily                Macaw9 (Tafjord and Clark, 2021). We probe them
+inferred from what they have annotated e.g., when                   using True/False questions of type: “Judge whether
+(trunk is above the roots) is annotated, (roots are                 this statement is true or false: In an <everyday
+below the trunk) can be omitted (Figure 2, tree ex-                 thing>, <part1 relation part2>.” For each query q,
+ample). For each everyday thing’s mental model                      we record an answer a ∈ {T rue, F alse}, and the
+annotation, with the relation tuples annotated, we                  model’s beliefs about the likelihood of the relation
+automatically add relations that are implied via                    being “True” as
+enrichment based on 4 types of constraints (sym-
+metric, asymmetric, inverse, and transitive). The                                        p(T rue|q)
+                                                                                                           .
+inferred relations include both relations that are la-                            p(T rue|q) + p(F alse|q)
+beled True (e.g. A above B being True implies that
+B below A is True) and relations that are labeled                   5.2      Constraint Reasoning
+False (e.g. A above B being True implies B above                    We observed a significant amount of inconsistency
+A is False). This gives a total of 11.7K gold rela-                 in raw predictions from these LMs by considering
+tion tuples (6894 with “True” as gold labels and                    the following constraints:
+4826 with “False” as gold labels). Table 1 provides
+additional dataset statistics. Appendix C discusses                     • Symmetric relations: This constraint ensures
+the unanimity and diversity of mental models for                          symmetric relations like “directly connected
+these everyday things.                                                    to” and “next to” hold both ways.
+                                                                          i.e. x rln y ↔ y rln x
+   4                                                                    7
+      For ease of annotation, they do not need to repeat anno-            First obtain the output of “stochastic parrots,” (Bender
+tations that mean the same thing. e.g. if they annotated (x,        et al., 2021) then apply constraints to reason on top of the
+above, y), they do not need to annotate (y, below, x) again.        output.
+We automatically generate these in our data post-processing.            8
+                                                                          See Appendix D Figure 8 for an illustration.
+    5                                                                   9
+      More details can be found in Appendix B.                            A SOTA T5-11B based question-answering system that
+    6
+      Later these sketches are transcribed into (x, r, y) tuples.   outperforms GPT-3 on some QA tasks.
+
+                                                                1896
+    • Asymmetric relations: For asymmetric re-            we calculate conditional violation as:
+      lations like part of, has part, inside, contains,                   "                      #
+                                                                      P      W
+      in front of, behind, above, below, surrounds,                             ¬(L(x) → R(x))
+      surrounded by, requires, required by, this con-            τ=
+                                                                      x∈D    (L,R)
+                                                                                     "              #   .
+      straint makes sure that both “x rln y” and “y                           P           W
+      rln x” cannot be true at the same time.                                                    L(x)
+                                                                             x∈D         (L,R)
+      i.e. ¬(x rln y) ∨ ¬(y rln x)
+                                                          6.2   Results
+    • Inverse relations: For a set of inverse re-         Q1: How consistent are LMs when they answer
+      lations e.g. above vs below, this constraint        questions about everyday things?
+      makes sure that (x above y) and (y below x)         We measure the consistency of parts mental mod-
+      have the same truth value.                          els constructed by LMs based on 4 types of con-
+      i.e. x rln y ↔ y inverse(rln) x                     straints described in Section 5.2. This measurement
+                                                          is purely based on LMs’ predictions and is inde-
+    • Transitive relations: For relations like inside,    pendent of relations in the gold mental models ac-
+      contains, in front of, behind, above, below,        quired for the everyday things. Table 3 shows that
+      surrounds, surrounded by, this constraint will      LMs contradict themselves (19-43% conditional
+      impose transitivity.                                violation) when we ask them multiple questions
+      i.e. x rln y ∧ y rln z → x rln z                    about parts of the same everyday thing to probe
+                                                          for their parts mental model. E.g., in Appendix D,
+                                                          the LM believes that in an egg, “yolk surrounds
+   In this step, we try to resolve inconsistencies        the shell” and “shell surrounds the yolk” are both
+in LMs’ raw predictions by solving a MaxSAT               True. Table 3 also breaks down the LMs’ inconsis-
+constraint satisfaction problem where each (x, re-        tency across 4 types of constraints. We observe that
+lation, y) tuple is represented as a variable with        GPT-3 struggles with maintaining consistency for
+confidence value from the LM used as its weight           symmetric and inverse relations, whereas Macaw-
+(soft clause). We introduce 4 types of hard con-          11B finds it most challenging to satisfy constraints
+straints (listed above) between these variables as        for asymmetric relations.
+hard clauses and any constraint violation results in
+an extremely high penalty. Given a WCNF formula
+with these, a weighted MaxSAT solver tries to find        Q2: Do language models have accurate mental
+an optimal assignment of truth values to relation         models of everyday things?
+tuples that maximizes the sum of weights of satis-        Next, we investigate how accurate are these parts
+fied soft clauses and satisfies all the formula’s hard    mental models when compared to gold mental mod-
+clauses. We use the RC2 MaxSAT solver (Ignatiev           els in our ParRoT dataset. Table 4 shows that such
+et al., 2018b) in PySAT (Ignatiev et al., 2018a).         queries pertaining to parts of everyday things are
+                                                          challenging for even SOTA models, with an av-
+6    Results and Analysis                                 erage accuracy of 54-59%. This is barely better
+                                                          than the majority class baseline at 59% and random
+6.1 Evaluation Metrics                                    chance at 50%.
+                                                             The LMs’ low performance shows that ParRoT
+We evaluate the parts mental models produced by           is a challenging dataset, which is expected given
+the two LMs in terms of accuracy and consistency:         the fact that this dataset queries for commonsense
+Accuracy: We compute the True/False accuracy              knowledge about everyday things (e.g. spatial rela-
+of parts mental models based on the 11.7K gold            tionship between parts of a device) that are often
+relation tuples present in ParRoT.                        omitted in text, and hence less likely seen during
+Consistency: Following Kassner et al. (2021);             pre-training. Further, by construction, our queries
+Mitchell et al. (2022), we adapt the Conditional          minimally differ e.g. for relations between parts of
+Violation (τ ) (Li et al., 2019a) metric to measure       a tree, the edit distance between a statement with
+inconsistency across the 4 types of constraints de-       true relation “the leaves are above the roots” and
+fined in Section 5.2. For constraints L(x) → R(x)         false relation “the leaves are below the roots” is just
+imposed on samples x ∈ D, where D is the dataset,         1 word. This makes our task even more challenging
+                                                      1897
+                                        %Conditional Violation (lower is better)
+                %True    Symmetric      Asymmetric        Inverse         Transitive    Avg.         Avg.
+                tuples    relations      relations       relations         relations   (macro)      (micro)
+      GPT-3
+                            66.37          23.01           71.14            32.18                  42.84
+   (text-davinci 12.64                                                                 48.17
+                        (1,987/2,994) (4,699/20,422) (13,869/19,495) (6,550/20,354)           (27,105/63,265)
+       -003)
+                            29.98          64.97           33.63            10.08                  19.23
+   Macaw-11B 57.77                                                                     34.66
+                       (3,089/10,305) (42,170/64,910) (21,642/64,361) (44,121/437,746)       (111,022/577,322)
+
+Table 3: Parts mental models constructed by LMs are significantly inconsistent with respect to their own predictions,
+violating basic commonsense constraints. In brackets, we indicate (# violations) / (# constraints fired).
+
+
+                          Base ParRoT-Con Improve            values of s, where s ∈ {50, 60, 70, 80, 90, 100}.
+              # params
+                         LM (%)    (%)      (%)
+ GPT-3 (text-                                                Figure 3 shows that ParRoT-Con not only effec-
+              175B       53.83        70.26     16.42
+ davinci-003)                                                tively increases the percentage of mental models
+ Macaw-11B 11B           59.45        79.28     19.84        that are approximately correct (s = 50, 60) but also
+Table 4: Comparing the accuracy of parts mental models       the percentage of mental models that are (almost)
+before and after constraint reasoning on ParRoT dataset.     totally correct (s = 90, 100). The improvements
+                                                             with constraint reasoning are even more prominent
+                                                             when it comes to increasing the percentage of men-
+                                                             tal models that are at least 60-80% accurate. This
+as the models need to understand the semantics of            is likely attributed to the improvement in mental
+relational phrases to give the correct answer.               models that have enough signals from LMs’ raw
+                                                             predictions and also enough margin to improve.
+Q3: Does ParRoT-Con, our proposed constraint
+                                                              Accuracy of parts mental models per relation
+reasoning approach, help create more accurate
+                                                             Figure 4 shows that the base LMs are more accurate
+mental models?
+                                                             in predictions for queries containing relationships
+Our proposed approach, ParRoT-Con, utilizes the              like ‘part of’ which is more likely to be stated in
+inherent inconsistency in LMs’ raw predictions to            text than spatial relations like ‘above’, ‘below’, and
+self-correct their own parts mental models. It finds         ‘behind’ which are lower-level physical details of-
+an optimal assignment of truth values to relation            ten not mentioned in text. Different models also
+tuples that accounts for both the model’s origi-             differ in which relationships they perform better
+nal beliefs (about the likelihood of each relation           on: e.g. GPT-3 performs poorly on bi-directional
+statement being True or False), and the 4 types of           relations like ‘connects’ and ‘next to’, with accu-
+commonsense constraints imposed. By imposing                 racy way below chance level, while Macaw-11B
+the commonsense constraints as hard constraints,             achieves around 70% accuracy for queries involv-
+our proposed method produces perfectly consis-               ing these relations.
+tent mental models for all LMs with respect to the
+imposed constraints i.e. % conditional violation             Success and failure across models per everyday
+becomes 0 for all columns in Table 3. Using these            thing LMs show both similarities and differ-
+basic commonsense constraints, ParRoT-Con im-                ences in what everyday things they have better men-
+proves parts mental model accuracy significantly             tal models of. For each model, Figure 5 shows the
+by 16-20% on ParRoT (Table 4).                               top 20 everyday things that the models performed
+                                                             best on in terms of base LM accuracy. Both GPT-3
+6.3 Further analysis
+                                                             and Macaw-11B perform well on the following ev-
+Most effective range We analyze what is the                  eryday things: sandwich, kayak, dog, kite, bird, rat,
+quality range of mental models that ParRoT-Con               cat, pencil sharpener, tree, cable car, and butterfly.
+is most effective on. We quantify the quality of             It is interesting to see that both models perform
+parts mental models by defining accuracy@s, a                well on several natural living things like animals
+metric that says a mental model is correct if the            (e.g. dog, bird, rat, cat), insect (e.g. butterfly),
+proportion of correct relations is at least s%. We           and plant (e.g. tree). Figure 6 shows the top 20
+then plot the percentage of mental models (out of            everyday things that the models performed worst
+300) that are correct vs accuracy@s for different            on in terms of base LM accuracy. We observe that
+                                                        1898
+                       (a) GPT-3
+
+
+
+
+                                                                                  (a) GPT-3
+
+
+
+
+                    (b) Macaw-11B
+
+Figure 3: Percentage of correct mental models vs
+accuracy@s shows that for both GPT-3 and Macaw-
+11B, there is a higher percentage of correct mental mod-
+els after constraint reasoning (orange) as compared to
+raw LM predictions (blue), no matter the threshold for
+considering a mental model to be correct is lower or
+higher. For improvements from constraint reasoning
+(black), we observe the highest increase in percentage
+of mental models that are at least 60-80% accurate.                            (b) Macaw-11B
+
+                                                           Figure 4: Accuracy of base LM and improvement
+entities like typewriter, bed, air conditional, and        achieved through constraint reasoning on different rela-
+computer are challenging for both models to form           tions in ParRoT dataset.
+accurate mental models of. Although the models
+share some similarities in what everyday things
+                                                           parts and 11.7K relationships between these parts.
+they have better/worse mental models of, they also
+                                                           Our experiments reveal that even SOTA LMs gen-
+show differences, especially for man-made devices:
+                                                           erally have poor mental models (inaccurate and vio-
+e.g. GPT-3 does well but Macaw-11B performs
+                                                           lating basic commonsense constraints) of everyday
+poorly on forming an accurate parts mental model
+                                                           things, thus providing insight into their apparent
+of piano; Macaw-11B does well, but GPT-3 per-
+                                                           knowledge and behavior not previously explored.
+forms poorly on devices like doorbell, digital clini-
+                                                           We apply constraint reasoning on top of base LM
+cal thermometer, and binoculars.
+                                                           predictions to construct more coherent mental mod-
+7   Conclusion                                             els. Our method, ParRoT-Con, improves both accu-
+                                                           racy (up to 20% improvement) and consistency (up
+Do language models have coherent mental models             to 43% improvement) of such parts mental models.
+of everyday things? To systematically study this           This suggests a broader cognitive architecture (LM
+question, we present a benchmark dataset, ParRoT,          + reasoner) for future systems, to construct more
+consisting of 300 human-constructed mental mod-            coherent mental models than using the LM alone.
+els for 100 everyday objects, including over 2K
+                                                       1899
+                                                                                  (a) GPT-3
+                       (a) GPT-3
+
+
+
+
+                                                                                (b) Macaw-11B
+                     (b) Macaw-11B
+                                                            Figure 6: 20 everyday things that each model achieved
+Figure 5: 20 everyday things that each model achieved
+                                                            worst performance on, based on models’ raw predic-
+best performance on, based on models’ raw predictions
+                                                            tions (i.e. Base LM). In many of these cases, the accu-
+(i.e. Base LM). In almost all cases, constraint reasoning
+                                                            racy of the parts mental models produced by the base
+boosts the accuracy of the parts mental models produced
+                                                            LM is at around or below chance level and constraint
+by the base LM, pushing it even closer to 100%.
+                                                            reasoning boosts accuracy to beyond 50%.
+
+
+
+
+                                                        1900
+Limitations                                              took great care to pay fair wages, and were respon-
+                                                         sive to feedback and questions throughout the data
+Common everyday things change over the years.
+                                                         collection process. This study involves the use of
+While we try to choose ones that are in chil-
+                                                         large-scale language models. We only use them
+dren’s vocabulary, over decades, devices evolve
+                                                         to generate True/False answers to questions about
+and humans change in which things they interact
+                                                         parts of everyday things, therefore we do not fore-
+with more frequently, affecting which relationships
+                                                         see any substantial ethical issues with their use for
+would be more prominent in an average person’s
+                                                         research presented in this submission.
+mental model. So the parts mental models in such a
+dataset may not stay constant over time (e.g. some       Acknowledgements
+entities may be less familiar and certain relations
+may be less salient to annotators of the future). It     We thank the anonymous ACL reviewers, as well
+would be interesting to use our ParRoT dataset as a      as Ernest Davis, Chris Callison-Burch and mem-
+point of comparison when studying mental models          bers of the Aristo team at AI2 for their valuable
+of everyday things in the future to reveal interesting   feedback on an earlier draft.
+insights on how humans’ mental models of every-
+day things evolve over time.
+   Other important future directions include to ex-
+                                                         References
+plore how more coherent mental models can help           Jacob Andreas. 2022. Language models as agent mod-
+in complex reasoning tasks about everyday things,           els. In Findings of the Association for Computational
+                                                            Linguistics: EMNLP 2022, pages 5769–5779, Abu
+combine these parts mental models with mental               Dhabi, United Arab Emirates. Association for Com-
+models along other dimensions e.g. Gu et al.                putational Linguistics.
+(2022a,b), as well as using our dataset of common-
+sense queries about everyday things as a source          Emily M. Bender, Timnit Gebru, Angelina McMillan-
+                                                           Major, and Shmargaret Shmitchell. 2021. On the
+of follow-up questions for existing QA tasks e.g.,         dangers of stochastic parrots: Can language mod-
+PIQA (Bisk et al., 2020) and CSQA (Talmor et al.,          els be too big? In Proceedings of the 2021 ACM
+2019).                                                     Conference on Fairness, Accountability, and Trans-
+   This paper only focuses on relationships (spa-          parency, FAccT ’21, page 610–623, New York, NY,
+                                                           USA. Association for Computing Machinery.
+tial orientation, connectivity, and functional depen-
+dency) between parts of everyday things. However,        Yonatan Bisk, Rowan Zellers, Ronan Le bras, Jianfeng
+our approach ParRoT-Con is easily extensible to            Gao, and Yejin Choi. 2020. Piqa: Reasoning about
+other applications such as:                                physical commonsense in natural language. Proceed-
+                                                           ings of the AAAI Conference on Artificial Intelligence,
+                                                           34(05):7432–7439.
+   • spatial relations in other domains e.g. for geo-
+     graphical distances, we can similarly impose        Wonder House Books. 2018a. My First 100 Things that
+     constraints on inverse relations like closer and      move. Wonder House Books.
+     further
+                                                         Wonder House Books. 2018b. My First Library : Boxset
+                                                           of 10 Board Books for Kids. Wonder House Books.
+   • temporal relations e.g. on a timeline, if event
+     A occurred before event B, then event B can-        Tom Brown, Benjamin Mann, Nick Ryder, Melanie
+     not have occurred before event A (before is           Subbiah, Jared D Kaplan, Prafulla Dhariwal, Arvind
+     asymmetric)                                           Neelakantan, Pranav Shyam, Girish Sastry, Amanda
+                                                           Askell, Sandhini Agarwal, Ariel Herbert-Voss,
+We leave the demonstration of the generalizability         Gretchen Krueger, Tom Henighan, Rewon Child,
+                                                           Aditya Ramesh, Daniel Ziegler, Jeffrey Wu, Clemens
+of our approach to future works.                           Winter, Chris Hesse, Mark Chen, Eric Sigler, Ma-
+                                                           teusz Litwin, Scott Gray, Benjamin Chess, Jack
+Ethics Statement                                           Clark, Christopher Berner, Sam McCandlish, Alec
+                                                           Radford, Ilya Sutskever, and Dario Amodei. 2020.
+All annotators that participated in the data collec-       Language models are few-shot learners. In Ad-
+tion process have been anonymized. The only per-           vances in Neural Information Processing Systems,
+sonal information we collect is the worker IDs from        volume 33, pages 1877–1901. Curran Associates,
+Amazon Mechanical Turk, which we will not re-              Inc.
+lease. No personally identifiable information is         Kenneth James Williams Craik. 1943. The nature of ex-
+contained in our dataset or otherwise released. We         planation, volume 445. Cambridge University Press.
+
+                                                     1901
+Soham Dan, Hangfeng He, and Dan Roth. 2020. Under-          Anya Ji, Noriyuki Kojima, Noah Rush, Alane Suhr,
+  standing spatial relations through multiple modalities.     Wai Keen Vong, Robert Hawkins, and Yoav Artzi.
+  In Proceedings of the Twelfth Language Resources            2022. Abstract visual reasoning with tangram shapes.
+  and Evaluation Conference, pages 2368–2372, Mar-            In Proceedings of the 2022 Conference on Empirical
+  seille, France. European Language Resources Asso-           Methods in Natural Language Processing, pages 582–
+  ciation.                                                    601, Abu Dhabi, United Arab Emirates. Association
+                                                              for Computational Linguistics.
+Valorie Fisher. 2019. Now You Know How It Works.
+  Scholastic.                                               P. Johnson-Laird. 1983. Mental Models : Towards a
+                                                               Cognitive Science of Language, Inference and Con-
+Steve Graham, Karen R. Harris, and Connie Loy-                 sciousness. Harvard University Press.
+   nachan.   The Basic Spelling Vocabulary List.            P. Johnson-Laird. 2006. How we reason. Oxford Uni-
+   https://www.readingrockets.org/article/                     versity Press.
+   basic-spelling-vocabulary-list. Accessed:
+   2022-09-23.                                              David H. Jonassen and Philip Henning. 1996. Mental
+                                                              models: Knowledge in the head and knowledge in the
+Yuling Gu, Bhavana Dalvi, and Peter Clark. 2022a.             world. Educational Technology archive, 39:37–42.
+  DREAM: Improving situational QA by first elab-
+  orating the situation. In Proceedings of the 2022         Nora Kassner, Oyvind Tafjord, Hinrich Schütze, and
+  Conference of the North American Chapter of the             Peter Clark. 2021. BeliefBank: Adding memory to a
+  Association for Computational Linguistics: Human            pre-trained language model for a systematic notion
+  Language Technologies, pages 1115–1127, Seattle,            of belief. In Proceedings of the 2021 Conference
+  United States. Association for Computational Lin-           on Empirical Methods in Natural Language Process-
+  guistics.                                                   ing, pages 8849–8861, Online and Punta Cana, Do-
+                                                              minican Republic. Association for Computational
+Yuling Gu, Yao Fu, Valentina Pyatkin, Ian Magnus-             Linguistics.
+  son, Bhavana Dalvi Mishra, and Peter Clark. 2022b.
+  Just-DREAM-about-it: Figurative language under-           Tao Li, Vivek Gupta, Maitrey Mehta, and Vivek
+  standing with DREAM-FLUTE. In Proceedings of                Srikumar. 2019a. A logic-driven framework for
+  the 3rd Workshop on Figurative Language Process-            consistency of neural models. arXiv preprint
+  ing (FLP), pages 84–93, Abu Dhabi, United Arab              arXiv:1909.00126.
+  Emirates (Hybrid). Association for Computational          Yong-Lu Li, Liang Xu, Xinpeng Liu, Xijie Huang,
+  Linguistics.                                                Yue Xu, Mingyang Chen, Ze Ma, Shiyi Wang,
+                                                              Hao-Shu Fang, and Cewu Lu. 2019b. Hake: Hu-
+David Gunning, Vinay K Chaudhri, Peter E Clark, Ken           man activity knowledge engine. arXiv preprint
+  Barker, Shaw-Yi Chaw, Mark Greaves, Benjamin                arXiv:1904.06539.
+  Grosof, Alice Leung, David D McDonald, Sunil
+  Mishra, et al. 2010. Project halo update—progress         George A. Miller. 1994. WordNet: A lexical database
+  toward digital aristotle. AI Magazine, 31(3):33–58.         for English. In Human Language Technology: Pro-
+                                                              ceedings of a Workshop held at Plainsboro, New
+David R Ha and Jürgen Schmidhuber. 2018. World                Jersey, March 8-11, 1994.
+  models. arXiv preprint, abs/1803.10122.
+                                                            Eric Mitchell, Joseph J. Noh, Siyan Li, William S. Arm-
+Graeme S. Halford. 1993. Children’s Understanding:             strong, Ananth Agarwal, Patrick Liu, Chelsea Finn,
+  The Development of Mental Models. Lawrence Erl-              and Christopher D. Manning. 2022. Enhancing self-
+  baum Associates, Inc.                                        consistency and performance of pretrained language
+                                                               models with nli. In Proceedings of the 2022 Con-
+S. J. Hespos and E. S Spelke. 2004. Conceptual precur-         ference on Empirical Methods in Natural Language
+   sors to language. In Nature. Nature.                        Processing (EMNLP). Association for Computational
+                                                               Linguistics.
+Yining Hong, Li Yi, Josh Tenenbaum, Antonio Tor-
+  ralba, and Chuang Gan. 2021. Ptr: A benchmark             Donald A. Norman. 2013. The Design of Everyday
+  for part-based conceptual, relational, and physical         Things: Revised and Expanded Edition. Basic
+  reasoning. In Advances in Neural Information Pro-           Books.
+  cessing Systems, volume 34, pages 17427–17440.            Maxwell Nye, Michael Tessler, Josh Tenenbaum, and
+  Curran Associates, Inc.                                    Brenden M Lake. 2021. Improving coherence and
+                                                             consistency in neural sequence models with dual-
+Alexey Ignatiev, Antonio Morgado, and Joao Marques-          system, neuro-symbolic reasoning. In Advances in
+  Silva. 2018a. PySAT: A Python toolkit for prototyp-        Neural Information Processing Systems, volume 34,
+  ing with SAT oracles. In SAT, pages 428–437.               pages 25192–25204. Curran Associates, Inc.
+Alexey Ignatiev, Antonio Morgado, and Joao Marques-         Jochen Renz, editor. 2002. The Region Connection
+  Silva. 2018b. Rc2: a python-based maxsat solver.            Calculus, pages 41–50. Springer Berlin Heidelberg,
+  MaxSAT Evaluation, 2018:22.                                 Berlin, Heidelberg.
+
+                                                        1902
+Pritish Sahu, Michael Cogswell, Yunye Gong, and
+   Ajay Divakaran. 2022. Unpacking large language
+   models with conceptual consistency. arXiv preprint
+   arXiv:2209.15093.
+Murray Shanahan. 2022. Talking about large language
+ models. arXiv preprint, abs/2212.03551.
+Oyvind Tafjord and Peter Clark. 2021. General-purpose
+  question-answering with Macaw. arXiv preprint
+  arXiv:2109.02593.
+
+Alon Talmor, Jonathan Herzig, Nicholas Lourie, and
+  Jonathan Berant. 2019. CommonsenseQA: A ques-
+  tion answering challenge targeting commonsense
+  knowledge. In Proceedings of the 2019 Conference
+  of the North American Chapter of the Association for
+  Computational Linguistics: Human Language Tech-
+  nologies, Volume 1 (Long and Short Papers), pages
+  4149–4158, Minneapolis, Minnesota. Association for
+  Computational Linguistics.
+
+
+
+
+                                                     1903
+A     Source of everyday things
+
+We compiled a list of 100 everyday things from:
+
+    1. Children’s books
+
+        (a) My First Library series (Books, 2018b)
+       (b) Now you know how it works (Fisher, 2019)
+        (c) My first 100 things that move (Books, 2018a)
+
+    2. Vocabulary lists
+
+        (a) Grade 1-5 vocabulary list (Graham et al.)
+       (b) Select from all the nouns from an 8th-grade vocabulary list that were also under either “artifact”
+           or “device” in WordNet (Miller, 1994)
+
+    3. Online web search
+
+B     Details on mental model annotation task
+
+Mechanical Turk task instructions:
+
+
+
+
+                                                     1904
+  Our participants were recruited on the Amazon Mechanical Turk platform. The workers met minimum
+qualification in AMT: 95% approval rate. They were from US locations and rated at Amazon’s Masters
+Level. Workers were paid at a rate of ≈$15/hr.
+
+C    Unanimity and diversity in parts mental models
+People vary greatly in how they construct mental models, but the underlying reasoning is often structurally
+similar i.e. in accordance with commonsense constraints (Halford, 1993; Jonassen and Henning, 1996).
+In our ParRoT dataset, similarly, contradictions amongst crowdworkers (e.g., for guitar, one worker
+annotated that the neck is part of the fingerboard, while another annotated that the fingerboard is part
+of the neck) are extremely rare. There are only 80 instances out of 11720 in total in our entire dataset
+(0.68%) – less than 1%.
+   We also looked at relations overlapped across workers in our dataset to analyze if workers pay attention
+to similar or different aspects of everyday things. To do so, we gathered a set of (p1, rln, p2) relations
+that are common across all 3 annotators for each everyday thing. These relationships are ones that
+achieved full agreement across all the 3 assigned annotators for that everyday thing in terms of the
+spatial/connectivity/functional relationship annotated and the parts involved. Together, we refer to this
+set as the ParRoT++ dataset. Table 5 summarizes the number of such high-agreement relationships for
+each everyday thing. Everyday things with few or no high-agreement relationships (refer Figure 7 for
+an example) imply higher diversity among annotators in terms of which spatial/connectivity/functional
+relationship and what parts they decided to include in their annotations. There are a total of 508 overlapped
+relations in ParRoT++, out of the 11720 in ParRoT, suggesting that attention is often paid to different
+aspects of everyday things.
+   In Table 6, we present accuracy on ParRoT++, revealing similar results for relationships that achieved
+full agreement across all assigned annotators. Using basic commonsense constraints, ParRoT-Con
+improves parts mental model accuracy significantly by 16-22% on ParRoT++. These trends are similar
+to that obtained for ParRoT, illustrating that the results hold across all gold-standard parts relations,
+regardless of whether they are more unanimous or diverse across annotators.
+
+
+
+                                                   1905
+          # full-agreem.
+                         Everyday thing(s)
+             relations
+                 36      coffee maker, fish
+                 28      rabbit
+                 18      deer
+                 16      egg, electric stove, tree
+                 14      ink pen
+                 12      laptop, sandwich, rice cooker, airplane, table
+                 10      fire extinguisher, bird
+                         elevator, flashlight, stroller, dishwasher, kayak, ship, teapot, telescope,
+                  8
+                         corn, hot air balloon, microwave
+                  6      wheelchair, barbeque grill, kite, microphone, computer, duck, helicopter
+                         pillow, truck, washing machine, door, hair dryer, rocket, screw, toaster,
+                  4      butterfly, chair, knife, photo frame, shoe, baby bottle, bed, bird cage,
+                         car, chainsaw, electric tea kettle, humidifier, piano
+                         binoculars, digital camera, zipper, apple, digital clinical thermometer, earphone, flower,
+                  2
+                         windmill, backpack, dog, doorbell, lightbulb, bat, cat, umbrella, stethoscope, tent
+                         air conditioner, bicycle, blender, boat, glider, guitar, house, pencil sharpener,
+                         table fan, dryer, pencil, suitcase, telephone, microscope, refrigerator, space
+                  0
+                         heater, typewriter, violin, wall clock, window, bookcase, bus, cable car, calculator,
+                         saucepan, train, cow, rat, table lamp
+
+Table 5: Number of relationships that achieved full agreement across all the 3 assigned annotators for each everyday
+thing. Higher number of such relations indicates more unanimous parts mental model annotations, whereas lower
+number reflects more diversity.
+
+
+                                                           Base ParRoT-Con Improve
+                                               # params
+                                                          LM (%)    (%)      (%)
+                                GPT-3 (text-
+                                             175B           55.51       71.13       15.62
+                                davinci-003)
+                                Macaw-11B 11B               60.04       82.41       22.38
+
+Table 6: Comparing the accuracy of parts mental models before and after constraint reasoning on ParRoT++ dataset.
+
+
+
+
+Figure 7: Example parts mental model annotations from ParRoT: (a) we provide the crowdworkers a diagram of
+cow retrieved from the Web. (b), (c), (d) are parts mental model sketches by 3 different crowdworkers. Note that all
+3 models are accurate but there is some divergence in terms of (1) part names: e.g., ‘head’ vs ‘forehead’ and (2)
+which relation tuples they consider salient. Similar forms of diversity have been reported in Ji et al. (2022), for
+instance, as part naming divergence and segmentation divergence.
+
+
+                                                            1906
+D    Pictorial illustration of ParRoT-Con
+Our proposed approach, ParRoT-Con, is illustrated in Figure 8 with an example everyday entity “egg”.
+
+
+
+
+Figure 8: When asked about relationships between parts of an everyday thing, LMs can produce inconsistent
+relations. E.g., GPT-3 believes that in an egg, “yolk surrounds the shell” and “shell surrounds the yolk” are both
+True. Our proposed neuro-symbolic method, ParRoT-Con, applies constraint reasoning over raw LM predictions to
+produce more accurate and consistent mental models of everyday things.
+
+
+E    Accuracy on different everyday things
+Table 7 gives example prompts and GPT-3’s responses (includes both correct and incorrect) for entity
+“tree”. Top 20 and bottom 20 everyday things that each model achieved best and worst performance on are
+shown in Figures 5 and 6 respectively. Further, Figure 11 demonstrates everyday things with 21st to 80th
+ranking in terms of the base LM accuracy.
+                      Model                          Prompt                       Model’s Answer
+                               Judge whether this statement is true or false:
+                     GPT-3                                                        True (correct)
+                           In a tree, twig is directly connected to the branches.
+                               Judge whether this statement is true or false:
+                     GPT-3                                                        False (incorrect)
+                                      In a tree, trunk is above the roots.
+                               Judge whether this statement is true or false:
+                     GPT-3                                                        True (incorrect)
+                                In a tree, roots are surrounded by the trunk.
+                               Judge whether this statement is true or false:
+                     GPT-3                                                        False (correct)
+                                      In a tree, trunk is below the roots.
+
+                Table 7: Example prompts and GPT-3’s responses for an everyday entity “tree”.
+
+
+F   Use of models for inference
+For all experiments in this paper we used existing models/toolkits without any re-training or fine-tuning.
+We used GPT-3 text-davinci-003 and Macaw (T5-11B based) as representative LMs for our experiments.
+To probe GPT-3 text-davinci-003, we used their web API which took around 30 to 60 msec per relation
+tuple (one T/F question). To probe Macaw, we used two 48GB GPUs and it takes around 10.4 msec
+per relation tuple. We also run a MaxSAT solver for each everyday entity’s parts mental model. To
+solve a constraint satisfaction problem per parts mental model takes a few msec up to around 3 minutes
+depending on the WCNF formula involved.
+
+
+G    On the use of our dataset and code
+We have made all data and code used in this paper publicly available. Our dataset and code are released
+for research purposes only.
+                                                         1907
+H   FAQs
+Q: Does ChatGPT do better?
+
+    From informal tests, we find that ChatGPT is not devoid of mistakes either. We provide some
+    examples to illustrate how the lack of coherent mental models of everyday things may also appear
+    for other models of the GPT-3.5 family, like ChatGPT in Figure 9. Others have also found ChatGPT
+    responses that convey ridiculous interactions with everyday things e.g. it generates that “When you
+    fry an egg, the white and the yolk are both held together by the eggshell.” (See Figure 10)
+
+Q: GPT-3 and ChatGPT models are often updated, when were the models accessed for your
+   experiments?
+
+    In our experiments with GPT-3, we used the text-davinci-003 model and queried the API on Decem-
+    ber 16, 2022 (during the period of time between 12 PM to 3.30 PM PST). ChatGPT as in Figure 9 was
+    accessed on December 17, 2022 (at around 9.30 PM PST). It would be interesting for researchers to in-
+    vestigate if future versions of the systems can construct better parts mental models of everyday things.
+
+
+Q: How do you ensure high-quality mental models are acquired via crowdsourcing?
+
+    We enforced a set of manual and automated checks during data acquisition which includes collecting
+    mental model sketches and transcribing them into relation tuples.
+    Manual checks: We randomly sampled 15 mental model sketches and made sure that the tran-
+    scription of relation tuples was accurate i.e. all the relations tuples in mental model sketches drawn
+    by crowdworkers were precisely added to our dataset. We also checked the quality and format of
+    sketches (‘.png’ files) which will be released with our dataset.
+    Automated checks: After enriching with implied relations, we also programatically checked that all
+    individual mental models (total of 11.7K relations) in ParRoT are fully consistent (based on the 4
+    commonsense constraints described in Section 5.2).
+
+Q: Do similar trends apply to smaller models?
+
+    Experiments on Macaw-3B, Macaw-large, UnifiedQA-large pointed towards the same trends. We
+    also make our code and data fully accessible at https://github.com/allenai/everyday-things
+    for interested researchers to experiment with other models of interest to them.
+
+Q: Can ParRoT-Con be applied to other languages?
+
+    While our dataset is in English, relationships between parts of everyday things could indeed be
+    authored for/ translated into other languages. We made our code and data publicly available, so
+    others could use the infrastructure to apply the technique to other languages.
+
+
+
+
+                                                  1908
+                                                   ChatGPT
+Figure 9: Like GPT-3 (text-davinci-003), ChatGPT also seems to have incoherent mental pictures of everyday things.
+
+
+
+
+                                                      1909
+                                                    ChatGPT
+Figure 10: ChatGPT provides ridiculous responses regarding daily life activities such as frying an egg, illustrating
+poor mental models of everyday things and interactions with them. (Example by @bio_bootloader, posted on
+Twitter https://twitter.com/bio_bootloader/status/1599131249553330176/photo/1 at 11:59 AM Dec 3,
+2022.)
+
+
+
+
+                                                       1910
+                     (a) GPT-3                                      (b) Macaw-11B
+
+Figure 11: Performance on other everyday things. Accuracy of base LM and improvement achieved through
+constraint reasoning on different everyday things in our dataset.
+
+
+
+
+                                                1911
+  ACL 2023 Responsible NLP Checklist
+A For every submission:
+  3 A1. Did you describe the limitations of your work?
+  
+    Yes, we discussed the limitations of our work in the "Limitations" section.
+  3 A2. Did you discuss any potential risks of your work?
+  
+    Yes, we discussed the potential risks of our work in the "Ethics Statement" section.
+  3 A3. Do the abstract and introduction summarize the paper’s main claims?
+  
+    Yes, the abstract at the start and section 1 introduction.
+
+  
+  7 A4. Have you used AI writing assistants when working on this paper?
+    No.
+  3 Did you use or create scientific artifacts?
+B 
+  Section 4 provides details on the dataset we created. Section 5 discusses how we use existing language
+models.
+  3 B1. Did you cite the creators of artifacts you used?
+  
+    Yes, we cited the models used in Section 5.1. We explained who helped with the creation of the dataset
+    (Section 4 and Appendix B on crowdworkers and instructions given to them).
+  3 B2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+  
+    Appendix G.
+  3 B3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+  
+    that it was specified? For the artifacts you create, do you specify intended use and whether that is
+    compatible with the original access conditions (in particular, derivatives of data accessed for research
+    purposes should not be used outside of research contexts)?
+    Appendix G. "Our dataset and code are released for research purposes only. "
+  3 B4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+  
+    information that names or uniquely identifies individual people or offensive content, and the steps
+    taken to protect / anonymize it?
+    "Ethics Statement" section discusses that we removed any personally identifiable information.
+  3 B5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+  
+    linguistic phenomena, demographic groups represented, etc.?
+    We provide details on domain of our data (Section 4), crowdworker demographics (Appendix B on
+    crowdworkers)
+  3 B6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+  
+    etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+    number of examples in train / validation / test splits, as these provide necessary context for a reader
+    to understand experimental results. For example, small differences in accuracy on large test sets may
+    be significant, while on small test sets they may not be.
+    Section 4.3
+The Responsible NLP Checklist used at ACL 2023 is adopted from NAACL 2022, with the addition of a question on AI writing
+assistance.
+
+
+
+
+                                                         1912
+C     3 Did you run computational experiments?
+      
+    Section 5
+    3 C1. Did you report the number of parameters in the models used, the total computational budget
+    
+      (e.g., GPU hours), and computing infrastructure used?
+      Results table in Section 6. Appendix F.
+    3 C2. Did you discuss the experimental setup, including hyperparameter search and best-found
+    
+      hyperparameter values?
+      Section 5 discusses the experimental setup in detail. But no hyperparameter search is needed for our
+      purposes.
+    3 C3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+    
+      statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+      etc. or just a single run?
+      Section 4 dataset statistics and Section 6 results.
+
+     C4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+      you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+      etc.)?
+      Not applicable. Left blank.
+
+D     3 Did you use human annotators (e.g., crowdworkers) or research with human participants?
+      
+    Section 4 and Appendix B on crowdworkers and instructions given to them.
+    3 D1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+    
+      disclaimers of any risks to participants or annotators, etc.?
+      Appendix B on crowdworkers and instructions given to them.
+    3 D2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+    
+      and paid participants, and discuss if such payment is adequate given the participants’ demographic
+      (e.g., country of residence)?
+      Appendix B on crowdworkers.
+    3 D3. Did you discuss whether and how consent was obtained from people whose data you’re
+    
+      using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+      crowdworkers explain how the data would be used?
+      Appendix B. We explained why are we collecting this data and how the data would be used.
+
+     D4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+      Not applicable. Left blank.
+    3 D5. Did you report the basic demographic and geographic characteristics of the annotator population
+    
+      that is the source of the data?
+      Appendix B on crowdworkers.
+
+
+
+
+                                                    1913
+

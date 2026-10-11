@@ -1,0 +1,1435 @@
+Language model acceptability judgements are not always robust to context
+                              Koustuv Sinha ∗,∞ Jon Gauthier ∗,1
+                    Aaron Mueller †,3 Kanishka Misra †,2 Keren Fuentes ∞
+                               Roger Levy 1 Adina Williams ∞
+                        ∞
+                          Meta AI; 1 MIT 2 Purdue University 3 Johns Hopkins
+                                      ∗
+                                        , † Equal contributions
+                           koustuvs@meta.com, jon@gauthiers.net
+
+
+                      Abstract                                                 Test Suite: Subject Verb Agreement
+
+                                                                         acceptable                         unacceptable
+    Targeted syntactic evaluations of language mod-
+    els ask whether models show stable prefer-
+    ences for syntactically acceptable content over
+    minimal-pair unacceptable inputs. Our best                                                              sample
+    syntactic evaluation datasets, however, provide
+    substantially less linguistic context than mod-                                 Space of Candidate Prefixes
+
+    els receive during pretraining. This mismatch                        Matched                        Mismatched
+
+    raises an important question: how robust are                   Subj. Verb. Agreement                             = Island Effects
+
+    models’ syntactic judgements across different                             ...
+                                                                                                      ...            = Filler-gaps
+
+    contexts? In this paper, we vary the input con-                                                   ...
+                                                                                                                     = Binding
+                                                                              ...
+    texts based on: length, the types of syntac-                                                                     = Wikipedia
+                                                                                                                 ... = ...
+    tic phenomena it contains, and whether or not
+    there are grammatical violations. We find that
+    model judgements are generally robust when                Figure 1: We measure the impact of different contexts
+    placed in randomly sampled linguistic contexts,           on the performance of an LM on linguistic acceptability
+    but are unstable when contexts match the test             tasks by prefixing sentences (here, sourced from subject-
+    stimuli in syntactic structure. Among all tested          verb agreement challenge sets) from a diverse sources.
+    models (GPT-2 and five variants of OPT), we               Each block represents a sentence: Red striped blocks
+    find that model performance is affected when              are unacceptable sentences within a given task, while
+    we provided contexts with matching syntactic              green solid ones are acceptable. We also vary the diver-
+    structure: performance significantly improves             sity of prefixes by sampling them from tasks/datasets
+    when contexts are acceptable, and it signifi-             different from the test suite (indicated by shape).
+    cantly declines when they are unacceptable.
+    This effect is amplified by the length of the con-        which is methodologically standard in linguistics,
+    text, except for unrelated inputs. We show that
+                                                              has emerged as a popular approach to evaluate mod-
+    these changes in model performance are not ex-
+    plainable by acceptability-preserving syntactic           els’ knowledge of linguistic phenomena in an unsu-
+    perturbations. This sensitivity to highly spe-            pervised manner (Marvin and Linzen, 2018; Kann
+    cific syntactic features of the context can only          et al., 2019; Warstadt et al., 2019, 2020a; Misra
+    be explained by the models’ implicit in-context           et al., 2023). Under the MPP, models are presented
+    learning abilities.                                       with datasets containing pairs of minimally differ-
+                                                              ing text sequences—usually differing in word order
+1   Introduction                                              or in a few tokens—one of which is deemed by hu-
+The unprecedented progress in the development                 mans to be acceptable and the other unacceptable.
+of neural large language models (LLMs; Devlin                 Drawing on the LLMs’ trained ability to produce
+et al., 2019; Radford et al., 2019; Brown et al.,             probabilities over token sequences, we can evalu-
+2020; Zhang et al., 2022) has been accompanied by             ate them according to the MPP by testing whether
+a comparable proliferation of methods that aim to             models assign relatively greater probability to the
+better understand and characterize models’ linguis-           acceptable sequence.
+tic capacities (Linzen et al., 2016; Ettinger et al.,            Studies that employ MPP datasets generally com-
+2016; Alishahi et al., 2019; Hu et al., 2020; Jeretic         pare the probability of two stand-alone text se-
+et al., 2020; Mueller et al., 2020, i.a.). Of the many        quences without any explicit linguistic context.
+methods for this, the minimal-pair paradigm (MPP),            However, this is not a naturalistic or realistic ap-
+                                                         6043
+                 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics
+                                        Volume 1: Long Papers, pages 6043–6063
+                           July 9-14, 2023 ©2023 Association for Computational Linguistics
+proach: utterances usually occur in some linguistic       posing the model to longer and longer prefixes
+context, where the context itself could affect lin-       containing acceptability violations: models’ judge-
+guistic preferences. The syntactic priming litera-        ments degrade drastically, performing far below
+ture investigates the effect of linguistic contexts to    chance. This sensitivity is specific to the partic-
+some extent, but mostly in a constrained setting          ular type of syntactic structural similarity of the
+with only one or a small number of context sen-           context: we do not see the same degree of improve-
+tences (van Schijndel and Linzen, 2018; Prasad            ment/degradation in prediction behavior for con-
+et al., 2019). The interaction of context with min-       texts consisting of mismatched sentences of valid
+imal pair accuracies remains underexplored for            or violated syntactic structures.
+multi-sentence contexts, despite the fact that multi-        To better understand our results, we performed
+sentence inputs are more likely for many NLP              several exploratory analyses. To determine whether
+tasks—especially with the rise of prompting and           the results are an effect of the acceptability judge-
+in-context learning (Brown et al., 2020; Schick and       ment task, we replicated our experiments for an-
+Schütze, 2021b). Furthermore, Transformer-based           other task, that of stereotypicality judgements (Nan-
+language models are typically trained on large se-        gia et al., 2020), and found largely concurring re-
+quences, where masked tokens are predicted given          sults. We also investigated the syntactic overlap be-
+a completely full context window, consisting of           tween the context and the test pair, and observe only
+many sentences. It is unclear how to evaluate MPP         minor effects on the judgements with phenomena-
+by utilizing this context window, given recent re-        preserving syntactic perturbations. Our results,
+search that has raised questions about the sentence       therefore, can only be explained by the model
+representations acquired in long-form input (Sinha        displaying some kind of implicit, instruction-free,
+et al., 2022; Haviv et al., 2022).                        in-context learning ability, and they invite further
+   We evaluate the sensitivity of LLMs’ acceptabil-       scrutiny of and investigation into long-form sen-
+ity preferences in a more realistic evaluation setting,   tence understanding capabilities of LLMs.
+with one or more additional sentences in the input
+context. We focus on LLM sensitivity to three par-        2   Background
+ticular features of the context: (1) the length of
+the input sequence, (2) the similarity of the context
+                                                          Sequence Length and Out-of-domain General-
+to the minimal pair being judged, and (3) whether
+                                                          ization. When evaluating language models’ lin-
+the context itself contains acceptability violations.
+                                                          guistic abilities in particular, one ought to addition-
+Figure 1 illustrates our method at a high level: For
+                                                          ally consider the domain of the test data fed into the
+a given MPP dataset (BLiMP, Warstadt et al. 2020a
+                                                          model, as it can have large consequences for model
+and SyntaxGym, Hu et al. 2020), we generate new
+                                                          performance if it mismatches from the model train-
+minimal pair test examples for a given syntactic
+                                                          ing data. Length mismatches are quite common in
+phenomenon by artificially simulating a long con-
+                                                          NLP datasets. For example, MPP test sequences are
+text window. Specifically, we prepend the given
+                                                          considerably shorter than that of the inputs LLMs
+test example pair with sentences drawn by the axis
+                                                          typically receive during pre-training (≈ 512–1024
+of similarity, from unrelated (Wikipedia), minimal-
+                                                          tokens)—the test pairs in standard MPP datasets for
+pair sentences from different (mismatched) or the
+                                                          the linguistic acceptability task, for example, are
+same (matched) syntactic phenomena in the MPP
+                                                          ≈ 4–30 tokens in the case of BLiMP. It is also rela-
+dataset. We also introduce violations in the context
+                                                          tively well established that mismatching sequence
+by drawing unacceptable counterparts of the above
+                                                          lengths between (pre-)training and testing scenar-
+similarity scale from the MPP dataset.
+                                                          ios can affect performance (Hupkes et al., 2020;
+   We find that the model’s judgements are highly         Newman et al., 2020; Varis and Bojar, 2021; Hup-
+robust to the presence of unrelated Wikipedia sen-        kes et al., 2022), raising the question: how much
+tences in the context, regardless of the size of the      does test sequence length impact our measurements
+prefix. However, we observe strong sensitivity to         of model performance on MPP datasets? We contex-
+matched context manipulations. As the context             tualize LLMs’ performance on acceptability judge-
+length increases, acceptable matched contexts im-         ments against work in length extrapolation, and an-
+prove the models’ judgements significantly. Con-          alyze generalization during test time to both shorter
+versely, we observe a strong opposite effect of ex-       and longer sequences.
+                                                      6044
+Priming Language Models. Recent work has                          3   Approach
+explored the effects of providing additional linguis-
+                                                                  Terminology. We follow standard practice in
+tic context to LLMs by “priming” or prepending
+                                                                  MPP , where we evaluate the preference (P) of a
+their inputs with words/sentences.1 For instance,
+                                                                  language model M towards acceptable sentence
+Misra et al. (2020) and Kassner and Schütze (2020)
+                                                                  (x) over its unacceptable counterpart (x′ ), with re-
+show LLMs’ behave in ways that are reminiscent
+                                                                  spect to log-likelihood, and compute the value over
+of semantic priming, assigning greater probabili-
+                                                                  the full evaluation dataset D. D typically consists
+ties to words that were semantically related to their
+                                                                  of several test suites, each of which instantiates
+words/sentence prefixes. More recently, Sinclair
+                                                                  a particular linguistic phenomenon. We denote
+et al. (2022) used a priming paradigm to measure
+                                                                  the particular test suite under evaluation as the tar-
+the probability assigned by LLMs to sentences pre-
+                                                                  get suite: S ⊂ D. Each target suite consists of
+fixed with well-formed but structurally different
+                                                                  k pairs of acceptable and unacceptable sentences,
+sentences. They found that several autoregressive
+                                                                  (x, x′ )ki=1 ∈ S, and may have multiple conditions.
+LLMs assign greater probability to sentences that
+                                                                  Within each target suite, we compute the accept-
+are similar in structure to their prefixes across a
+                                                                  ability judgements on one or more experimental
+number of diverse constructions, thereby demon-
+                                                                  conditions, comparing a given LM’s log-likelihood
+strating a pattern analogous to what is known
+                                                                  preference P for the acceptable and unacceptable
+in psycholinguistics as structural priming (Bock,
+                                                                  sentence in each condition. The accuracy (A) over
+1986; Pickering and Ferreira, 2008). Together with
+                                                                  a test pair from a single condition is defined as:
+the findings of van Schijndel and Linzen (2018);
+Prasad et al. (2019), these works suggests that
+                                                                           A(xi , x′i ) = 1[P(xi ) > P(x′i )],      (1)
+LLMs may represent at least some of the relevant
+structural similarities between sentences, and that               where 1 is the indicator function which returns 1
+their word predictions could reflect an expectation               if the inequality is satisfied and 0 otherwise. De-
+of repeating structures. While these methods do                   pending on the dataset, it can have either one or
+not focus on length per se, their manipulation of                 multiple conditions evaluated for each test item.
+the input context is necessarily accompanied by an                   To simulate increasing length of input, we
+increase in length. This leaves open the question                 prepend a prefix sequence c to both x and x′ , and
+as to how structural properties of the context may                compute the preferences over the concatenated se-
+interact with varying levels of input lengths.                    quence, P([c, xi ]) and P([c, x′i ]), where c can be
+                                                                  arbitrarily long.
+In-context Learning. A practical application of                   Datasets. We focus on the standard targeted syn-
+the priming paradigm is that it can be used to elicit             tactic evaluation datasets of BLiMP (Warstadt et al.,
+learning behavior in LLMs. That is, LLMs can be                   2020a, licensed CC-BY) and SyntaxGym (Hu et al.,
+primed using labelled task demonstrations (Brown                  2020, MIT license). BLiMP is a large-scale MPP
+et al., 2020), instructions/explanations (Lampinen                dataset consisting of 67 different subsets of 1000
+et al., 2022, though see Webson and Pavlick., 2022),              English sentence pairs each. Each BLiMP subset
+or a combination of the two (Wei et al., 2022; Ko-                targets a particular linguistic paradigm that belongs
+jima et al., 2022) as supervision for tasks such as               to 12 different overarching linguistic phenomena—
+sentiment analysis or reasoning. This suggests that               for instance, subject-verb agreement, argument
+LLMs seem to be able to extract higher-level infor-               structure, etc. SyntaxGym is a syntactic evaluation
+mation from their context when processing a new                   benchmark designed with more stringent evalua-
+test example from a supervised task. Our approach                 tion criteria. For 34 different linguistic phenom-
+contributes to this body of work by testing whether               ena, the SyntaxGym benchmark defines test items
+LLMs can also extract more abstract features, such                with two to four different conditions, consisting
+as grammaticality or stereotypicality, given enough               of minimal structural variations on the same sen-
+priming examples.                                                 tence which render the sentence either grammati-
+                                                                  cal or ungrammatical. Model log-likelihoods are
+   1
+                                                                  measured at a critical region within each sentence,
+     This is related to but differs from the operationalization
+of priming as finetuning/adaptation as developed by van Schi-     rather than across the whole sentence, and models
+jndel and Linzen (2018); Prasad et al. (2019).                    are expected to produce log-likelihoods that satisfy
+                                                              6045
+multiple inequalities across all conditions. Syntax-              ple from several possible sources (acceptable sen-
+Gym is smaller than BLiMP (with about 20 items                    tences, unacceptable sentences, and control sen-
+per phenomenon on average) and all of the exam-                   tences) discussed below. We also gradually in-
+ples are hand-written. We adapt 23 of the 34 test                 crease the length of the context c by sampling multi-
+paradigms in SyntaxGym whose structure was com-                   ple sentences from a known set, and concatenating
+patible with the prefixing analyses of this paper.2               them with periods and spaces as delimiters.
+These two datasets offer complementary value to                      Next, we recompute the log-likelihood over
+the analyses in this paper: BLiMP’s large scale                   the stimuli (x or x′ ) by conditioning on c, i.e.,
+allows us to make general conclusions about the                   P([c, xi ]) = log p(xi | c).5 For each item pair
+average effect of prefix interventions, while Syn-                (xi , x′i ) in target suite S ∈ D, we first sample ac-
+taxGym’s stringent evaluation allows us to verify                 ceptable sentences to construct context c as fol-
+that the effects are sustained under more rigorous                lows:
+experimental conditions.
+                                                                     • Matched: Contexts are sampled from the same
+   To better understand whether our results are spe-
+                                                                       test suite (or bias type) as the target suite S:
+cific to syntactic evaluation MPP datasets, we also
+                                                                       x, c ∈ S | x ̸= c.
+replicate a portion of our experiments using the
+                                                                     • Mismatched: Contexts are sampled outside
+CrowS-Pairs dataset for stereotype evaluation (Nan-
+                                                                       the target suite (or bias type) S: x ∈ S, c ∈
+gia et al., 2020, licensed CC-BY-SA). CrowS-Pairs
+                                                                       D|c∈   / S.
+examples fall into 9 bias types (e.g., race, gen-
+der, age) and consist of minimal pairs with one                   For each x ∈ S, we construct the context c by
+stereotypical sentence and one less stereotypical                 sampling N sentences (without replacement) from
+sentence about a historically disadvantaged group.                each group, concatenating them, until the input
+We view the bias types in CrowS-Pairs as analo-                   reaches 1000 tokens.6
+gous to particular linguistic test suites in BLiMP                   Traditionally, most work on priming has only
+or SyntaxGym for the purposes of our replication:                 considered grammatically acceptable sentences as
+we re-code “less-stereotypical” as “acceptable” and               the context. While there has been some work on
+“more-stereotypical” as “unacceptable”.3 More dis-                syntactic priming in humans showing they can
+cussion of the dataset and further methodological                 be primed with ungrammatical sentences to pro-
+information is provided in Appendix A.                            duce other ungrammatical sentences (Kaschak and
+                                                                  Glenberg, 2004; Pickering and Garrod, 2017; Yang
+Method. We compute the log-likelihood of the                      and Stocco, 2019), there is little evidence in the
+given input using the minicons library (Misra,                    NLP literature about how a model would react to
+2022),4 which is based on huggingface (Wolf                       grammatically unacceptable sentences in the in-
+et al., 2020). For each dataset D, we first compute               put. Therefore, we perform our evaluation on both
+the baseline acceptability accuracy according to                  acceptable prefixes (c ∈ x) and unacceptable pre-
+Equation 1. Next, we re-evaluate the acceptability                fixes (c ∈ x′ ), drawn from the same phenomena
+accuracy as we steadily increase the token length                 (matched, c ∈ S) or from a different phenomena
+of the input. Following prior work on priming (§2),               (mismatched, c ∈ / S).
+we analyze how prepending the test examples with
+                                                                     For evaluation, we compute the ∆ accuracy of
+additional context affects a given model’s accept-
+                                                                  acceptability judgements for each model:
+ability judgements.
+   To increase the token length while maintaining                         |D|                              |D|
+the MPP formulation, we introduce a context c by                     1 X                              1 X
+                                                                            A([c, xi ], [c, x̂i ]) −       A(xi , x̂i ),
+prepending the same sequence to each target x                       |D| i                            |D| i
+and x′ in S. To construct a context c, we sam-                                                                         (2)
+   2
+                                                                  where |D| is the total number of samples in a given
+     See Appendix F for more technical details on the Syntax-
+Gym analysis.                                                     dataset (D). Taking this difference allows us to
+   3
+     Our definition of “unacceptable” for the CrowS-Pairs         quantify the precise contribution (in terms of the
+does not imply grammatically ill-formed, but instead it implies
+                                                                     5
+socially inappropriate. We are aware that recoding in this way          Since c is held constant for every item, the difference
+does some terminological violence to the well established         in the conditional measure is equivalent to that in the full
+psycholinguistic term (un-)acceptable (c.f. Chomsky 1965;         sequence log-likelihood.
+Schütze 1996), which we chose to do for reasons of space.             6
+                                                                        Since GPT and OPT models have a context window of
+   4
+     https://github.com/kanishkamisra/minicons                    1024 tokens, we investigate 1000 tokens as an approximate.
+
+                                                              6046
+                                                     Acc. (Matched)       Unacc. (Matched)            Wiki (Mismatched)
+                               Prefix Strategy
+                                                     Acc. (Mismatched)    Unacc. (Mismatched)
+
+
+                                         BLiMP                       SyntaxGym                    CrowS-Pairs
+
+                        0.2
+                        0.0
+
+                                                                                                                          GPT2
+                        -0.2
+                        -0.4
+                        -0.6
+
+
+
+           Δ Accuracy
+                        -0.8
+                               0   200   400   600   800   0   50 100 150 200 250       0       200     400     600   800
+
+                        0.2
+                        0.0
+
+
+                                                                                                                          OPT (6.7B)
+                        -0.2
+                        -0.4
+                        -0.6
+                        -0.8
+                               0   200   400   600   800   0   50 100 150 200 250       0       200     400     600   800
+                                                                   Input Length
+
+Figure 2: Prefixing type affects model performance (∆ Accuracy) for GPT2 and OPT (6.7B) on BLiMP, SyntaxGym
+and CrowS-Pairs datasets. Longer prefixes tend to elicit performance enhancement, an effect which is modulated by
+whether the prefixes are acceptable, and whether the prefixes match the test suite/bias.
+
+
+gain or loss in accuracy of the LM on the accept-                         with a mixed-effects logistic regression for each
+ability task) of the priming contexts (c), which are                      combination of model and dataset. The regression
+held constant for a given pair of test samples. It                        predicts a model’s acceptability judgement accu-
+further allows us to report a unified measure across                      racy for a given phenomenon as a function of the
+our systematic manipulations of the context.                              three previously introduced properties of the prefix
+                                                                          c: its length, whether it is matched or mismatched,
+Models. We study autoregressive language mod-
+                                                                          and its acceptability. The model includes a three-
+els at varying sizes—we consider GPT2 (small,
+                                                                          way interaction term and all lower-order terms for
+124M parameters) (Radford et al., 2018), and a sub-
+                                                                          these variables, with sum-coded categorical vari-
+set of the OPT family (125M, 350M, 1.3B, 2.7B
+                                                                          ables and log-transformed prefix lengths, along
+and 6.7B parameters; Zhang et al. 2022).
+                                                                          with a random intercept term for the phenomenon
+Control. While we define matched and mis-                                 (controlling for variation in baseline accuracies per
+matched with respect to the phenomena or bias                             phenomenon).
+type provided by the dataset (target suite, S), we
+are still in the regime of in-distribution prefix sen-                    4      Main Results
+tences, as the context is drawn from the same MPP
+                                                                          Figure 2 presents the summary results of our prefix-
+dataset. By design, these sentences are lexically
+                                                                          ing manipulation, charting models’ accuracy on
+constrained, and constructed to be as simple as pos-
+                                                                          MPP evaluations as a function of the prefix (1)
+sible while still testing for the relevant phenomena.
+                                                                          length (x-axis), (2) acceptability (teal and orange vs.
+To simulate an out-of-distribution context relative
+                                                                          red and purple), and (3) whether it is drawn from
+to the BLiMP/SyntaxGym test examples, we sam-
+                                                                          a domain that is matched (teal and purple), mis-
+ple prefix sentences from a completely unrelated
+                                                                          matched (orange and red), or unrelated Wikipedia
+Wikipedia domain, the WikiText-103 test set (Mer-
+                                                                          (light green). We further explore the main qualita-
+ity et al., 2017).
+                                                                          tive findings in the following paragraphs, plotting
+Regression Analysis. We define and test our                               results on the BLiMP dataset for simplicity. De-
+claims about the effect of length on acceptability                        tailed results on SyntaxGym and CrowS-Pairs are
+                                                                     6047
+available in Appendix F and A, respectively.                             0.1
+                                                                                                               Model
+                                                                                                                  GPT2
+
+Model acceptability judgements are largely robust                        0.0                                      OPT (125M)
+                                                                                                                  OPT (350M)
+across lengths—for unrelated, control prefixes.                                                                   OPT (1.3B)
+
+
+                                                            Δ Accuracy
+                                                                         -0.1
+We first investigate the impact of increasing con-                                                                OPT (2.7B)
+                                                                                                                  OPT (6.7B)
+text length on model acceptability judgement per-                        -0.2
+
+
+formance. We start with the control case defined                         -0.3                                  Prefix Type
+in §3, simulating lengthy context windows with no                        -0.4
+                                                                                                                  Acceptable
+                                                                                                                  Unacceptable
+other notable grammatical properties by drawing                                                                   Wiki
+
+sentences from Wikipedia, an out-of-distribution                                0   200     400    600   800
+                                                                                          Input Length
+text domain for the target MPP datasets. As we in-
+crease the context length, acceptability judgement       Figure 3: Interaction of length and prefix type on
+results do not significantly change (Figure 3, long      BLiMP (collapsed across match/mismatch). Across
+dashed lines), suggesting that LMs, in general, are      all tested models, accuracy improves for acceptable pre-
+very robust to unrelated changes in their context        fixes and worsens for unacceptable ones, as length in-
+window. Quantitatively, no main effect of prefix         creases (p < 10−11 for all models). Shaded regions are
+length is significant (p > 0.2 for all models) for       the 95% confidence interval.
+Wikipedia sentences.
+
+The length of the context matters when the prefix        so when the contexts contain acceptability viola-
+is related to the acceptability task. We next inves-     tions. One possible driver for these results could
+tigate the effect of long context on acceptability by    be that longer contexts are more conducive to large
+drawing prefixes that are in-distribution (from the      LMs’ in-context learning abilities, and mimic their
+same MPP dataset). As prefix length grows, model         k-shot learning scenario. This would mean that the
+performance on average changes monotonically             length of preceding context matters only insofar as
+from baseline accuracy (Figure 2: rising for ac-         length is a proxy for the number of acceptable (or
+ceptable sentences, falling for unacceptable ones).      unacceptable, with an opposite effect) matched pre-
+When the prefix consists of acceptable sentences         fixes in the context (see §5 for a related analysis).
+(teal, orange) for example, ∆ accuracy increases
+up to 10–20 percentage points for all datasets, and      Matched context impacts acceptability judge-
+mostly uniformly across all model sizes. However,        ments more than mismatched contexts. We now
+unacceptable prefixes (purple, red) elicit the op-       dig into the interaction between length and accept-
+posite effect: ∆ accuracy falls as context context       ability, investigating whether the magnitude of the
+length grows (Figure 2, dashed lines).                   effect is modulated by whether the phenomena are
+   Scale amplifies this effect only for unacceptable     matched or not. In case of BLiMP, the average
+sentences (Figure 3). For example, OPT 6.7B suf-         effect of acceptable prefixes is ≤ 12 ∆ accuracy
+fers the largest degradation of acceptability task       points (Figure 3). However, matched prefixes drive
+accuracy with increasing length of ungrammatical         this improvement more (∆ ≥ 15) than mismatched
+context, compared to GPT2. Surprisingly, GPT2 re-        ones (∆ ≤ 5) (Figure 4, left subfigure). Con-
+covers some percentage of the degradation on very        versely, while the average effect of unacceptable
+long sequences, while also showing attenuated the        prefixes is between 30–40 ∆ accuracy points (Fig-
+matched gains. We speculate that this effect de-         ure 3), this too is more heavily impacted by the
+rives from a relative weakness of GPT2 to learn          effect of matched prefixes (50 ≤ ∆ ≤ 80) than by
+in-context, as it is trained on markedly less data       mismatched ones (∆ ≤ 20) (Figure 4, right sub-
+(8B tokens, as estimated by Warstadt et al.) than        figure). These effects manifest quantitatively in a
+models from the OPT family (180B tokens).                three-way interaction between prefix (un-)accept-
+   Quantitatively, this interaction between prefix       ability, (mis-)match, and length (p < 0.007 for all
+length and acceptability is highly significant for all   models on BLiMP and SyntaxGym).
+models and evaluations (p < 0.002 for all models            The effects of unacceptable prefixes are ampli-
+on BLiMP and SyntaxGym). Overall, we observe             fied substantially when they are consistent—i.e.,
+length can influence LM’s acceptability judgement        when they violate the grammatical rules (of En-
+performance for in-distribution contexts, and more       glish) in the same way (matched), as opposed to
+                                                     6048
+                                    Acceptable                                            Unacceptable
+                                                                                                                                               0.50
+                                                                   0.0                                                                                                                        Perturbation
+             0.25
+                                                                                                                                                                                                  None
+             0.20                                                 -0.2                                                                         0.25                                               Prefix/suffix adv
+
+Δ Accuracy
+             0.15                                                                                                                                                                                 Long prefix adv
+
+
+
+                                                                                                                                 Δ Accuracy
+                                                                  -0.4
+             0.10                                                                                                                              0.00                                               Add clause
+             0.05                                                 -0.6                                                                                                                            Quote
+                                                                                                                                                                                                  All
+             0.00
+                                                                  -0.8                                                                        -0.25
+                    0       200     400        600      800              0        200      400         600      800
+                                                              Input Length                                                                                                                    Prefix Type
+                                                                                                                                              -0.50
+                                                                                                                                                                                                  Acceptable
+                                  GPT2               OPT (350M)      OPT (2.7B)                              Matched
+                        Model                                                           Prefix Suite                                                                                              Unacceptable
+                                  OPT (125M)         OPT (1.3B)      OPT (6.7B)                              Mismatched
+                                                                                                                                              -0.75
+                                                                                                                                                      0   100   200   300   400   500   600
+Figure 4: Interaction of length and prefix suite (matched                                                                                                        Input Length
+versus mismatched) in two separate prefix types (accept-
+able/unacceptable) in BLiMP.                                                                                                 Figure 5: Perturbation analysis on OPT 6.7B, using
+                                                                                                                             BLiMP prefixes.
+
+in more diverse ways (mismatched).7 These re-
+sults could explain why in-context learning ability                                                                          BLiMP phenomena which responded most strongly
+works: perhaps prepending contexts that are syntac-                                                                          to matched prefixing in our previous analyses.8 We
+tic similarity can help the model learn or unlearn                                                                           perform controlled perturbations on each prefix
+acceptability at a higher rate.                                                                                              sentence c that preserve the presence of the origi-
+                                                                                                                             nal syntactic structure, but incorporate mild struc-
+5                   Prefix Similarity Analysis                                                                               tural variations or additions. These perturbations
+                                                                                                                             increase prefix length and shift the position of cer-
+We have observed that length effects on accept-                                                                              tain tokens (e.g., the main verb) in c relative to their
+ability judgements are conditional on the similar-                                                                           counterparts in the test sentence. This enables us
+ity between the prefix phenomenon and the test                                                                               to test whether the models are merely learning to
+phenomenon. However, we have only analyzed                                                                                   associate fragile token-position pairings between
+prefixes that are either very similar (i.e. contain                                                                          the prefix and test sentences, or whether they are
+predominantly the same abstract syntactic struc-                                                                             relying on relevant abstract syntactic information.
+ture as the test sentence, matched prefixing), or                                                                            We leave the test sentence x unchanged.
+are almost entirely unrelated (mismatched prefix-                                                                               Our perturbations include the following, all of
+ing, or unrelated prefixing such as Wikipedia). This                                                                         which preserve both the grammaticality and the rel-
+leads us to wonder about the nature of the similarity                                                                        evant overarching syntactic structure of the BLiMP
+driving our results thus far: are the models respond-                                                                        phenomena:
+ing to the presence of shared syntactic structure in
+the prefix? Or are they responding to something                                                                                               • Prefix/suffix adverbs: add a single-word sen-
+more shallow and brittle, such as the exact match                                                                                               tential adverb to the start or end of the sen-
+in sentence templates between the prefix content                                                                                                tence (e.g., “However, c.”).
+and the test? If the former is true, we should see a                                                                                          • Long prefix adverb: add an adverbial phrase
+smooth relationship between prefix syntactic simi-                                                                                              to the start of the sentence (e.g., “First and
+larity and length effects, such that slight changes in                                                                                          foremost, c.”).
+the syntactic structure of the prefix content results                                                                                         • Add clause: Add a dependent clause to the
+in similarly slight modulations of length effects.                                                                                              start or end of the sentence (e.g., “Regardless
+If models are using more shallow template-based                                                                                                 of what {NAME} thinks about it, c.”)
+comparisons between the prefix content and the                                                                                                • Quote: Embed the sentence in a quotation
+test content, we might see a more discontinuous                                                                                                 (e.g., “Yesterday, {NAME} said, ‘c.”’).
+response, in which even small changes to prefix                                                                              We also combine all of these strategies into a single
+content result in large changes in length effects.                                                                           large perturbation, referred to as All.9
+   To test this, we narrow our focus to the top 20
+                                                                                                                                 8
+                                                                                                                                   We selected the phenomena which showed the greatest
+               7                                                                                                             change in accuracy (averaged across models) between their
+     Note, however, (i) we assumed that all Wikipedia sen-
+tences are acceptable, and (ii) we found that acceptable pre-                                                                baseline accuracy and their accuracy after matched prefixing at
+fixes have a generally weaker effect on the acceptability task.                                                              the greatest lengths tested in the analysis (Appendix Table 1).
+                                                                                                                                 9
+Were we to test unacceptable Wikipedia sentences as well, we                                                                       We exclude short prefix adverbs from the All perturbation
+might expect a small priming effect.                                                                                         in favor of long prefix adverbs. Combining these sometimes
+
+                                                                                                                          6049
+   Our findings (Figure 5) show that minor per-         mance (Hupkes et al., 2020; Newman et al., 2020;
+turbation of the prefixes results in only very mi-      Varis and Bojar, 2021; Chada and Natarajan, 2021).
+nor reductions to length effects, suggesting that          More broadly, our work adds to the literature on
+matched prefixing effects do not require identically    prompt sensitivity in pre-trained language models,
+structured prefixes. Increasingly aggressive pertur-    which found that LMs are sensitive to individual
+bations result in increasing (if small) reductions      prompts (Kojima et al., 2022), and that the ordering
+to ∆ accuracy magnitudes, especially when using         of in-context examples (Lu et al., 2022) can greatly
+fewer prefixes. We correlate ∆ accuracies with the      affect model performance. Smaller LMs are also
+mean similarity of prefix sentences before and after    sensitive to the choice of prompt and output verbal-
+a perturbation, where similarity is an ordinal vari-    izer (Schick and Schütze, 2021a; Gao et al., 2021),
+able assigned to each perturbation based on how         and we indeed observe that a variety of model sizes
+many tokens it adds to the sentence; see App. B         and prefixing strategies elicit prefix sensitivity. To
+for details. The Spearman rank-order correlation        our knowledge, our study is the first to consider
+(ρs = 0.93, p < .001) is significantly positive for     structural priming in concert with in-context learn-
+acceptable prefixes; it is weaker but still signifi-    ing; we have found quantitative, graded effects of
+cantly negative (ρs = −0.7, p < .05) for unaccept-      structural priming on string probabilities, subject
+able prefixes. Thus, there is a smooth relationship     to the length of the context.
+between prefix similarity and length effects.
+   This perturbation analysis shows that model          Language models are sensitive to latent syntactic
+judgments are mostly robust to syntactic variations     features, as well as syntactic similarities across
+in the prefix content, with a smooth relationship       multiple sentences. Our analyses add to a lit-
+between degrees of syntactic variation and model        erature that has found that language models are
+performance. Appendix D investigates whether            sensitive to more than just lexical or surface-level
+these similarity effects can be described in terms      syntactic features (Warstadt et al., 2020b; Mueller
+of lexical overlap or matches in low-level syntactic    et al., 2022). Indeed, LMs are capable of lever-
+features between the prefix and test content; we        aging abstract syntactic features, and are sensitive
+find no clear relationship between these low-level      to latent syntactic similarities between the context
+features and models’ acceptability judgment perfor-     and test examples. Strengthening this finding, we
+mance. Taken together, these results suggest that       also observe that models are capable of adapting
+the changes we observe in models’ acceptability         to the structures of both acceptable and unaccept-
+judgments are likely due to an abstract comparison      able examples: LMs show marked improvements
+between structural features of the prefix content       on acceptability tasks when prefixed by matched
+and test content. In other words, language mod-         acceptable sentences, and they also (more substan-
+els are sensitive to latent syntactic features, and     tially) show the opposite behavior—preferring un-
+the syntactic similarity of the context to the test     acceptable sentences—when prefixed by matched
+examples.                                               unacceptable sentences (§4). This shows that LMs
+                                                        are sensitive enough to sentence acceptability to be
+6    Discussion                                         able to produce not just systematically grammati-
+                                                        cal outputs, but also systematically ungrammatical
+Short and single-sentence inputs may not be             outputs. While this is not a practical application,
+representative of language models’ true abili-          it does demonstrate how well LMs capture this
+ties. Our results have implications for interpret-      important linguistic feature. Furthermore, our per-
+ing results from MPP benchmark datasets, as these       turbation analysis demonstrated that this two-way
+datasets often consist of shorter inputs that are not   adaptation was robust to irrelevant syntactic vari-
+what many pre-trained language models expect,           ations in the context (§5). The present work bol-
+given that their pre-training procedures often entail   sters the findings of other recent work that only
+packing many sentences into a single training ex-       explores this behavior in the grammatical direction
+ample (Brown et al., 2020; Liu et al., 2019). This      (Lampinen, 2022; Sinclair et al., 2022).
+strengthens prior findings showing that reformat-
+                                                           Our finding of models’ reliance on abstract struc-
+ting train and test inputs in a way that more closely
+                                                        tural features that are made available in their con-
+resembles the pre-training setup can boost perfor-
+                                                        text can be further strengthened by controlling for
+results in unacceptable sentences.                      lexical exposure (Kim et al., 2022). That is, fu-
+                                                    6050
+ture work can augment our contexts by replacing          thank Marten van Schijndel, Allyson Ettinger, Ti-
+real lexical items—especially content words—with         walayo Eisape, Jennifer Hu, Peng Qian and Alex
+nonsense words (e.g., wug, dax, etc.), following         Warstadt for their feedback and comments on draft
+recent works (Dasgupta et al., 2022; Misra et al.,       versions of this paper.
+2023, i.a.). Doing so would maintain the struc-
+tural features of the context while also more strictly
+controlling for superficial cues such as lexical over-   References
+lap or similarity, and would make our conclusions        Afra Alishahi, Grzegorz Chrupała, and Tal Linzen. 2019.
+stronger.                                                  Analyzing and interpreting neural networks for NLP:
+                                                           A report on the first BlackboxNLP workshop. Natu-
+                                                           ral Language Engineering, 25(4):543–557.
+7   Conclusion
+                                                         Su Lin Blodgett, Gilsinia Lopez, Alexandra Olteanu,
+In this work, we study how robust the acceptabil-          Robert Sim, and Hanna Wallach. 2021. Stereotyping
+ity judgements of autoregressive Transformer lan-          Norwegian salmon: An inventory of pitfalls in fair-
+guage models are to manipulations of the context.          ness benchmark datasets. In Proceedings of the 59th
+We find that acceptability judgements are generally        Annual Meeting of the Association for Computational
+                                                           Linguistics and the 11th International Joint Confer-
+robust when the test sentences are preceded by ran-        ence on Natural Language Processing (Volume 1:
+domly sampled linguistic contexts. However, when           Long Papers), pages 1004–1015, Online. Association
+the contexts contain syntactic structures closely          for Computational Linguistics.
+matching those in the test sentence, that can sig-
+                                                         J. Kathryn Bock. 1986. Syntactic persistence in lan-
+nificantly improve or degrade the models’ perfor-           guage production. Cognitive Psychology, 18(3):355–
+mance. This effect is amplified as we lengthen the          387.
+context provided to the model. Our results demon-
+                                                         Tom Brown, Benjamin Mann, Nick Ryder, Melanie
+strate in-context learning in a highly specific way:       Subbiah, Jared D Kaplan, Prafulla Dhariwal, Arvind
+models are sensitive to granular syntactic proper-         Neelakantan, Pranav Shyam, Girish Sastry, Amanda
+ties of the context when making predictions over           Askell, et al. 2020. Language Models are Few-Shot
+a target sentence, such that they can be driven to         Learners. Advances in Neural Information Process-
+                                                           ing Systems, 33:1877–1901.
+produce both correct and reliably incorrect outputs.
+                                                         Rakesh Chada and Pradeep Natarajan. 2021. Few-
+Limitations                                                shotQA: A simple framework for few-shot learning
+                                                           of question answering tasks using pre-trained text-to-
+The prefixes we use are semantically independent           text models. In Proceedings of the 2021 Conference
+from the test sentences, and also semantically im-         on Empirical Methods in Natural Language Process-
+                                                           ing, pages 6081–6090, Online and Punta Cana, Do-
+plausible when chained together. This is the oppo-
+                                                           minican Republic. Association for Computational
+site of what we typically expect in natural language,      Linguistics.
+where sentences follow from some pragmatically
+licit prior context. While our findings are theo-        Noam Chomsky. 1965. Aspects of the theory of syntax.
+                                                           MIT Press, Cambridge, MA.
+retically relevant to any NLP task that leverages
+natural language inputs, we may see qualitatively        Ishita Dasgupta, Andrew K Lampinen, Stephanie CY
+different trends in more naturalistic settings.             Chan, Antonia Creswell, Dharshan Kumaran,
+   Our results are currently limited to English. Cer-       James L McClelland, and Felix Hill. 2022. Lan-
+                                                            guage models show human-like content effects on
+tain languages have grammatical features (such as           reasoning. arXiv preprint arXiv:2207.07051.
+case marking) that could strongly impact on lan-
+guage models’ acceptability judgments, and this          Jacob Devlin, Ming-Wei Chang, Kenton Lee, and
+                                                            Kristina Toutanova. 2019. BERT: Pre-training of
+could affect the trends we have observed. Future
+                                                            deep bidirectional transformers for language under-
+work should investigate similar phenomena across            standing. In Proceedings of the 2019 Conference of
+languages to ensure that these findings suitably            the North American Chapter of the Association for
+general.                                                   Computational Linguistics: Human Language Tech-
+                                                            nologies, Volume 1 (Long and Short Papers), pages
+                                                           4171–4186, Minneapolis, Minnesota. Association for
+Acknowledgments                                             Computational Linguistics.
+We thank the ACL reviewers for their insightful          Allyson Ettinger, Ahmed Elgohary, and Philip Resnik.
+questions and comments. We would also like to              2016. Probing for semantic evidence of composition
+
+                                                     6051
+  by means of simple classification tasks. In Proceed-      Najoung Kim, Tal Linzen, and Paul Smolensky. 2022.
+  ings of the 1st Workshop on Evaluating Vector-Space         Uncontrolled lexical exposure leads to overestima-
+  Representations for NLP, pages 134–139, Berlin, Ger-        tion of compositional generalization in pretrained
+  many. Association for Computational Linguistics.            models. arXiv preprint arXiv:2212.10769.
+Tianyu Gao, Adam Fisch, and Danqi Chen. 2021.               Takeshi Kojima, Shixiang Shane Gu, Machel Reid, Yu-
+  Making pre-trained language models better few-shot          taka Matsuo, and Yusuke Iwasawa. 2022. Large Lan-
+  learners. In Proceedings of the 59th Annual Meet-           guage Models are Zero-Shot Reasoners. In Advances
+  ing of the Association for Computational Linguistics        in Neural Information Processing Systems.
+  and the 11th International Joint Conference on Natu-
+  ral Language Processing (Volume 1: Long Papers),          Andrew Lampinen. 2022. Can language models han-
+  pages 3816–3830, Online. Association for Computa-           dle recursively nested grammatical structures? a
+  tional Linguistics.                                         case study on comparing models and humans. arXiv
+                                                              preprint arXiv:2210.15303.
+Adi Haviv, Ori Ram, Ofir Press, Peter Izsak, and Omer
+                                                            Andrew Lampinen, Ishita Dasgupta, Stephanie Chan,
+  Levy. 2022. Transformer Language Models without
+                                                              Kory Mathewson, Mh Tessler, Antonia Creswell,
+  Positional Encodings Still Learn Positional Informa-
+                                                              James McClelland, Jane Wang, and Felix Hill. 2022.
+  tion. ArXiv preprint, abs/2203.16634.
+                                                              Can language models learn from explanations in con-
+Jennifer Hu, Jon Gauthier, Peng Qian, Ethan Wilcox,           text? In Findings of the Association for Computa-
+  and Roger Levy. 2020. A systematic assessment               tional Linguistics: EMNLP 2022, pages 537–563,
+  of syntactic generalization in neural language mod-         Abu Dhabi, United Arab Emirates. Association for
+  els. In Proceedings of the 58th Annual Meeting of           Computational Linguistics.
+  the Association for Computational Linguistics, pages
+                                                            Tal Linzen, Emmanuel Dupoux, and Yoav Goldberg.
+  1725–1744, Online. Association for Computational
+                                                              2016. Assessing the ability of LSTMs to learn syntax-
+  Linguistics.
+                                                              sensitive dependencies. Transactions of the Associa-
+Dieuwke Hupkes, Verna Dankers, Mathijs Mul, and Elia          tion for Computational Linguistics, 4:521–535.
+  Bruni. 2020. Compositionality decomposed: How             Yinhan Liu, Myle Ott, Naman Goyal, Jingfei Du, Man-
+  do neural networks generalise? Journal of Artificial        dar Joshi, Danqi Chen, Omer Levy, Mike Lewis,
+  Intelligence Research, 67:757–795.                          Luke Zettlemoyer, and Veselin Stoyanov. 2019.
+Dieuwke Hupkes, Mario Giulianelli, Verna Dankers,             RoBERTa: A robustly optimized BERT pretrain-
+  Mikel Artetxe, Yanai Elazar, Tiago Pimentel, Chris-         ing approach. Computing Research Repository,
+  tos Christodoulopoulos, Karim Lasri, Naomi Saphra,          arXiv:1907.11692.
+  Arabella Sinclair, Denis Ulmer, Florian Schottmann,       Yao Lu, Max Bartolo, Alastair Moore, Sebastian Riedel,
+  Khuyagbaatar Batsuren, Kaiser Sun, Koustuv Sinha,           and Pontus Stenetorp. 2022. Fantastically ordered
+  Leila Khalatbari, Maria Ryskina, Rita Frieske, Ryan         prompts and where to find them: Overcoming few-
+  Cotterell, and Zhijing Jin. 2022. State-of-the-art gen-     shot prompt order sensitivity. In Proceedings of the
+  eralisation research in nlp: a taxonomy and review.         60th Annual Meeting of the Association for Compu-
+  arXiv preprint arXiv:2210.03050.                            tational Linguistics (Volume 1: Long Papers), pages
+                                                              8086–8098, Dublin, Ireland. Association for Compu-
+Paloma Jeretic, Alex Warstadt, Suvrat Bhooshan, and
+                                                              tational Linguistics.
+  Adina Williams. 2020. Are natural language infer-
+  ence models IMPPRESsive? Learning IMPlicature             Rebecca Marvin and Tal Linzen. 2018. Targeted syn-
+  and PRESupposition. In Proceedings of the 58th An-          tactic evaluation of language models. In Proceed-
+  nual Meeting of the Association for Computational           ings of the 2018 Conference on Empirical Methods
+  Linguistics, pages 8690–8705, Online. Association           in Natural Language Processing, pages 1192–1202,
+  for Computational Linguistics.                              Brussels, Belgium. Association for Computational
+                                                              Linguistics.
+Katharina Kann, Alex Warstadt, Adina Williams, and
+  Samuel R. Bowman. 2019. Verb argument structure           Stephen Merity, Caiming Xiong, James Bradbury, and
+  alternations in word and sentence embeddings. In             Richard Socher. 2017. Pointer sentinel mixture mod-
+  Proceedings of the Society for Computation in Lin-           els. In International Conference on Learning Repre-
+  guistics (SCiL) 2019, pages 287–297.                         sentations.
+Michael P. Kaschak and Arthur M. Glenberg. 2004.            Kanishka Misra. 2022. minicons: Enabling flexible be-
+  This construction needs learned. Journal of Experi-         havioral and representational analyses of transformer
+  mental Psychology: General, 133(3):450.                     language models.
+Nora Kassner and Hinrich Schütze. 2020. Negated and         Kanishka Misra, Allyson Ettinger, and Julia Rayz. 2020.
+  misprimed probes for pretrained language models:            Exploring BERT’s sensitivity to lexical cues using
+  Birds can talk, but cannot fly. In Proceedings of the       tests from semantic priming. In Findings of the Asso-
+  58th Annual Meeting of the Association for Compu-           ciation for Computational Linguistics: EMNLP 2020,
+  tational Linguistics, pages 7811–7818, Online. Asso-        pages 4625–4635, Online. Association for Computa-
+  ciation for Computational Linguistics.                      tional Linguistics.
+
+                                                        6052
+Kanishka Misra, Julia Rayz, and Allyson Ettinger. 2023.    Timo Schick and Hinrich Schütze. 2021a. Exploiting
+  COMPS: Conceptual minimal pair sentences for test-         cloze-questions for few-shot text classification and
+  ing robust property knowledge and its inheritance in       natural language inference. In Proceedings of the
+  pre-trained language models. In Proceedings of the         16th Conference of the European Chapter of the Asso-
+  17th Conference of the European Chapter of the As-         ciation for Computational Linguistics: Main Volume,
+  sociation for Computational Linguistics, pages 2928–       pages 255–269, Online. Association for Computa-
+  2949, Dubrovnik, Croatia. Association for Computa-         tional Linguistics.
+  tional Linguistics.
+                                                           Timo Schick and Hinrich Schütze. 2021b. It’s not just
+Aaron Mueller, Robert Frank, Tal Linzen, Luheng Wang,        size that matters: Small language models are also few-
+  and Sebastian Schuster. 2022. Coloring the blank           shot learners. In Proceedings of the 2021 Conference
+  slate: Pre-training imparts a hierarchical inductive       of the North American Chapter of the Association
+  bias to sequence-to-sequence models. In Findings of        for Computational Linguistics: Human Language
+  the Association for Computational Linguistics: ACL         Technologies, pages 2339–2352, Online. Association
+  2022, pages 1352–1368, Dublin, Ireland. Association        for Computational Linguistics.
+  for Computational Linguistics.
+                                                           Carson T. Schütze. 1996. The empirical base of lin-
+Aaron Mueller, Garrett Nicolai, Panayiota Petrou-            guistics: Grammaticality judgments and linguistic
+  Zeniou, Natalia Talmina, and Tal Linzen. 2020.             methodology. University of Chicago Press, Chicago,
+  Cross-linguistic syntactic evaluation of word predic-      IL.
+  tion models. In Proceedings of the 58th Annual Meet-
+  ing of the Association for Computational Linguistics,    Arabella Sinclair, Jaap Jumelet, Willem Zuidema, and
+  pages 5523–5539, Online. Association for Computa-          Raquel Fernández. 2022. Structural persistence in
+  tional Linguistics.                                        language models: Priming as a window into abstract
+                                                             language representations. Transactions of the Associ-
+Nikita Nangia, Clara Vania, Rasika Bhalerao, and             ation for Computational Linguistics, 10:1031–1050.
+  Samuel R. Bowman. 2020. CrowS-pairs: A chal-
+                                                           Koustuv Sinha, Amirhossein Kazemnejad, Siva Reddy,
+  lenge dataset for measuring social biases in masked
+                                                             Joelle Pineau, Dieuwke Hupkes, and Adina Williams.
+  language models. In Proceedings of the 2020 Con-
+                                                             2022. The curious case of absolute position embed-
+  ference on Empirical Methods in Natural Language
+                                                             dings. In Findings of the Association for Computa-
+  Processing (EMNLP), pages 1953–1967, Online. As-
+                                                             tional Linguistics: EMNLP 2022, pages 4449–4472,
+  sociation for Computational Linguistics.
+                                                             Abu Dhabi, United Arab Emirates. Association for
+Benjamin Newman, John Hewitt, Percy Liang, and               Computational Linguistics.
+  Christopher D. Manning. 2020. The EOS decision           Marten van Schijndel and Tal Linzen. 2018. A neural
+  and length extrapolation. In Proceedings of the Third     model of adaptation in reading. In Proceedings of the
+  BlackboxNLP Workshop on Analyzing and Interpret-          2018 Conference on Empirical Methods in Natural
+  ing Neural Networks for NLP, pages 276–291, On-           Language Processing, pages 4704–4710, Brussels,
+  line. Association for Computational Linguistics.          Belgium. Association for Computational Linguistics.
+Martin J. Pickering and Victor S. Ferreira. 2008. Struc-   Dusan Varis and Ondřej Bojar. 2021. Sequence length
+ tural priming: A critical review. Psychological Bul-        is a domain: Length-based overfitting in transformer
+ letin, 134(3):427–459.                                      models. In Proceedings of the 2021 Conference on
+                                                             Empirical Methods in Natural Language Processing,
+Martin J Pickering and Simon Garrod. 2017. Priming           pages 8246–8257, Online and Punta Cana, Domini-
+ and Language Change, pages 173–90. Cambridge                can Republic. Association for Computational Lin-
+ University Press.                                           guistics.
+Grusha Prasad, Marten van Schijndel, and Tal Linzen.       Alex Warstadt, Alicia Parrish, Haokun Liu, Anhad Mo-
+  2019. Using priming to uncover the organization of         hananey, Wei Peng, Sheng-Fu Wang, and Samuel R.
+  syntactic representations in neural language models.       Bowman. 2020a. BLiMP: A benchmark of linguis-
+  In Proceedings of the 23rd Conference on Computa-          tic minimal pairs for English. In Proceedings of the
+  tional Natural Language Learning (CoNLL), pages            Society for Computation in Linguistics 2020, pages
+  66–76, Hong Kong, China. Association for Computa-          409–410, New York, New York. Association for Com-
+  tional Linguistics.                                        putational Linguistics.
+Alec Radford, Karthik Narasimhan, Tim Salimans, and        Alex Warstadt, Amanpreet Singh, and Samuel R. Bow-
+  Ilya Sutskever. 2018. Improving Language Under-            man. 2019. Neural network acceptability judgments.
+  standing by Generative Pre-Training. OpenAI.               Transactions of the Association for Computational
+                                                             Linguistics, 7:625–641.
+Alec Radford, Jeff Wu, Rewon Child, David Luan,
+  Dario Amodei, and Ilya Sutskever. 2019. Language         Alex Warstadt, Yian Zhang, Xiaocheng Li, Haokun Liu,
+  Models are Unsupervised Multitask Learners. Ope-           and Samuel R. Bowman. 2020b. Learning which
+  nAI.                                                       features matter: RoBERTa acquires a preference for
+
+                                                       6053
+    linguistic generalizations (eventually). In Proceed-
+    ings of the 2020 Conference on Empirical Methods
+    in Natural Language Processing (EMNLP), pages
+    217–235, Online. Association for Computational Lin-
+    guistics.
+
+Albert Webson and Ellie Pavlick. 2022. Do prompt-
+  based models really understand the meaning of their
+  prompts? In Proceedings of the 2022 Conference of
+  the North American Chapter of the Association for
+  Computational Linguistics: Human Language Tech-
+  nologies, pages 2300–2344, Seattle, United States.
+  Association for Computational Linguistics.
+
+Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten
+   Bosma, brian ichter, Fei Xia, Ed H. Chi, Quoc V Le,
+   and Denny Zhou. 2022. Chain of thought prompt-          Figure 6: Effects of length and stereotypical prefixes
+   ing elicits reasoning in large language models. In      per model. Shaded regions indicate the 95% confidence
+  Advances in Neural Information Processing Systems.       intervals across 9 demographics.
+
+Thomas Wolf, Lysandre Debut, Victor Sanh, Julien
+  Chaumond, Clement Delangue, Anthony Moi, Pier-           more discussion). Thus, we can leverage CrowS-
+  ric Cistac, Tim Rault, Remi Louf, Morgan Funtow-         Pairs in the similar MPP paradigm and test whether
+  icz, Joe Davison, Sam Shleifer, Patrick von Platen,
+  Clara Ma, Yacine Jernite, Julien Plu, Canwen Xu,         our results are specific to syntactic evaluation.
+  Teven Le Scao, Sylvain Gugger, Mariama Drame,               Similar to the approach in SyntaxGym, (Nangia
+  Quentin Lhoest, and Alexander Rush. 2020. Trans-         et al., 2020) propose to measure fairness in masked
+  formers: State-of-the-art natural language processing.   language models by focusing only on the tokens
+  In Proceedings of the 2020 Conference on Empirical
+  Methods in Natural Language Processing: System           which differ, computing the pseudo-log-likelihood
+  Demonstrations, pages 38–45, Online. Association         of the sentences conditioned on those tokens. To
+  for Computational Linguistics.                           maximize the comparability of the CrowS-Pairs
+                                                           results with our results on BLiMP/SyntaxGym,
+Yuxue Cher Yang and Andrea Stocco. 2019. Syntactic
+  priming depends on procedural, reward-based compu-       we compute the conditional log-likelihood, as de-
+  tations: evidence from experimental data and a com-      scribed in §3. We then compute the acceptability of
+  putational model. In Proceedings of the 17th Inter-      each test pair as described in equation 2, where we
+  national Conference on Cognitive Modeling, pages         recode the definitions of unacceptable and accept-
+  307–313.
+                                                           able items to stereotypical and antistereotypical,
+Susan Zhang, Stephen Roller, Naman Goyal, Mikel            in-line with the definitions in this dataset. An ideal,
+  Artetxe, Moya Chen, Shuohui Chen, Christopher De-        fair model would show no special preference to-
+  wan, Mona Diab, Xian Li, Xi Victoria Lin, Todor Mi-      wards stereotypical sentences.
+  haylov, Myle Ott, Sam Shleifer, Kurt Shuster, Daniel
+  Simig, Punit Singh Koura, Anjali Sridhar, Tianlu         Method. We construct contexts using the same
+  Wang, and Luke Zettlemoyer. 2022. OPT: Open pre-
+  trained transformer language models. arXiv preprint      approach described in §3. In lieu of phenomena
+  arXiv:2205.01068.                                        in SyntaxGym/BLiMP, Crows-Pairs dataset pro-
+                                                           vides test pairs over multiple demographies. Thus,
+A     Fairness Analysis                                    for a given test example, we construct matched
+                                                           contexts by sampling from the same demographic
+Datasets. CrowS-Pairs (Nangia et al., 2020) con-
+                                                           cohort the test pair belongs to, and conversely sam-
+tains 1508 sentence pairs denoting stereotypes
+                                                           ple from different demographic subset to construct
+about nine types of demographics, including gen-
+                                                           mismatched context. We re-use the same control
+der, age, nationality, etc. CrowS-Pairs differs from
+                                                           experiment setup, i.e. sampling from Wikipedia for
+BLiMP and SyntaxGym in construction, since it
+                                                           irrelevant contexts.
+was crowdsourced using untrained English speak-
+ers from Amazon Mechanical Turk. Despite this              Analysis. Figure 6 compares stereotypical con-
+difference, the resulting test pair sentences still only   texts from mismatched and matched demographics
+minimally differ from each other (except for some          across models of varying sizes. The results show
+instances where more than a few tokens differ due          that mismatched contexts don’t show any signifi-
+to annotation noise, see Blodgett et al. 2021 for          cant impact on the fairness scores. Across all model
+                                                       6054
+                                                          B   Prefix Similarity Analysis
+                                                          Here, we provide more detail to support the ex-
+                                                          periment in §5. Specifically, we present the exact
+                                                          numbers we use to compute the rank-order correla-
+                                                          tion coefficients, and describe the implications of
+                                                          this finding for future work.
+                                                             To compute the rank-order correlation, we first
+                                                          obtain mean accuracies across the 20 BLiMP phe-
+                                                          nomena that respond most strongly to matched pre-
+                                                          fixing. We do this for each perturbation strategy,
+                                                          as well as the non-perturbed matched prefixes. We
+                                                          then take the mean across all prefixing lengths for
+Figure 7: Effects of length and anti-stereotypical pre-   OPT 6.7B (i.e., we convert each line in Figure 5
+fixes per model. Shaded regions indicate the 95% confi-   into a single number by taking the mean along the
+dence intervals across 9 demographics.                    x-axis). This yields a metric that approximately
+                                                          captures how much of a priming effect a given pre-
+                                                          fixing strategy has for this model; we use this as
+                                                          our dependent variable.
+                                                             The independent variable is the strength of the
+                                                          perturbation prefix. It is difficult to define how
+                                                          strong a given perturbation is, as there are different
+                                                          notions of linguistic similarity that can be contra-
+                                                          dictory; for instance, embedding a sentence c into
+                                                          a quote, as in “Yesterday, Sarah said ‘c”’, does
+                                                          not add many lexical items to the sentence, but it
+                                                          significantly modifies the syntactic structure of the
+                                                          sentence. In our case, we simply measure the token
+                                                          F1 score between the original prefix sentence and
+                                                          a perturbed prefix sentence; this metric captures
+                                                          the token similarity between the original and per-
+Figure 8: Effects of length and antistereotypical         turbed sentences. Future work could consider more
+matched prefixes per model. Shaded regions indicate       sophisticated similarity metrics, such as syntactic
+the 95% confidence intervals across 9 demographics.       or semantic similarities.
+                                                             We summarize these results in Figure 9. Note
+                                                          the highly monotonic relationship when using ac-
+                                                          ceptable prefixes, and the similarly (but slightly
+sizes, we see a score decrease when prefixed with         less) monotonic relationship with unacceptable pre-
+matched stereotypical context. Meanwhile, Fig-            fixes. This visually displays the strong correlations
+ure 7 shows that prefixing with an antistereotypical      we found in §5.
+context improves the fairness scores. This raises            Why are language models being more primeable
+the question, can we prime models with antistereo-        with longer contexts given more similar prefixes?
+typical contexts to reduce stereotypical bias? Fig-       Perhaps models can determine whether tokens are
+ure 8 shows that prefixing with an antistereotypical      meaningfully similar between multiple sentences
+matched context can enable models to reach the            in the same context; this would be expected given
+ideal score of an unbiased model, and even surpass        the implications of the distributional hypothesis.
+it (i.e, making the model biased in the other direc-      Alternatively, the model could be effective at re-
+tion). However, it is worth noting that this does not     lating tokens that are similar in the pre-training
+necessarily indicate that a model is unbiased, as         corpus, as long as their positions are within some
+there is significant variation between demograph-         limited range of each other. Finally, perhaps the
+ics, and more detailed examination is needed to           model is simply effective at ignoring (for exam-
+evaluate the effects per demographic cohort.              ple) adverbs and adjuncts that are semantically or
+                                                      6055
+                                                                                     None
+                         0.29                                       2 Pre-verb adverbs                prefixing results reveal facts about model capaci-
+                         0.28
+                                                                                   Suffix adverb      ties not already present in MPP evaluations, then
+
+
+         Mean Accuracy
+                                                       Long prefix adverb
+                                                                     2 suffix adverbs
+                                                                                                      we should see substantial variance in the y-axis
+                         0.27                          Quote     Prefix adverb
+                                                                                                      not explained by the x-axis on these plots. This
+                         0.26                       Add clause
+                                                                                                      is apparent in most of the plots, especially in the
+                         0.25                                                                         BLiMP evaluations (leftmost plots).
+                         0.24 All                                                                        We also see variation among models: GPT2 has
+                                0.4    0.5   0.6      0.7
+                                                   Token F1
+                                                                 0.8         0.9        1.0           a prefixing response which is relatively predictable
+                                 All                                                                  from its baseline performance (correlation with
+                         0.42
+                                                                                                      acceptable prefixing effect, mean across datasets:
+                                                                                                      r = 0.85; unacceptable: r = 0.79). In contrast,
+
+
+      Mean Accuracy
+                         0.44
+
+
+                         0.46
+                                                                                                      OPT 2.7B is far less predictable in its prefixing
+                                                        Quote
+                                                                       2 suffix adverbs               response (correlation with acceptable prefixing ef-
+                         0.48
+                                                    Add clause                   Suffix adverb        fect, mean across datasets: r = 0.59; unacceptable:
+                                                        Long prefix adverb
+                         0.50
+                                                                 Prefix adverb
+                                                                                     None             r = 0.52).
+                                0.4    0.5   0.6      0.7        0.8
+                                                                    2 Pre-verb adverbs
+                                                                            0.9        1.0
+                                                                                                         Overall, this analysis suggests that there are non-
+                                                   Token F1                                           trivial variations in the way that models respond
+Figure 9: Token similarity before and after perturbing                                                to these prefixing interventions which is not cap-
+the prefixes vs. ∆ accuracy across BLiMP phenomena                                                    tured by models’ baseline performance on matched
+for OPT 6.7B. We show ∆ accuracies using acceptable                                                   stimuli. This suggests that prefixing reveals new
+(top) and unacceptable (bottom) prefixes.                                                             aspects of model capacity not exactly captured by
+                                                                                                      existing MPP evaluations.
+syntactically irrelevant, and thus otherwise views                                                    D        BLiMP Phenomenon Similarities
+the perturbed prefixes and test sentences as more
+or less structurally identical. Our results cannot                                                    Length effects are conditional on the similarity of
+currently disambiguate between these possibilities,                                                   the prefix to the target BLiMP phenomenon. Does
+but future work could investigate perturbed prefix-                                                   some specific kind of similarity (e.g., syntactic or
+ing in significantly more depth to better understand                                                  lexical similarity) explain length effects? Perhaps
+why we observe these effects and correlations.                                                        the prefix is syntactically priming the model for
+                                                                                                      the target sentence (Sinclair et al., 2022), in which
+C    Metric correlation analysis                                                                      case we would expect the syntactic similarity of
+                                                                                                      the sentences to correlate smoothly with accuracy
+To what degree can the priming effects discussed
+                                                                                                      when using grammatical prefixes. Another pos-
+in this paper reveal facts about a model’s capacities
+                                                                                                      sibility is that a more spurious feature—such as
+not already evident from existing MPP evaluations?
+                                                                                                      lexical overlap—is responsible (Misra et al., 2020;
+To test this, we evaluated (for every model and
+                                                                                                      Kassner and Schütze, 2020). To test this, we can
+dataset) the correlation between a model’s baseline
+                                                                                                      correlate syntactic similarity and lexical overlap
+performance and its performance with a maximal
+                                                                                                      with accuracies on each example.
+amount of acceptable or unacceptable matched pre-
+                                                                                                         To measure lexical overlap, we use F1 scores
+fixes. For example, we evaluated the correlation
+                                                                                                      to measure how many tokens10 in the prefix and
+between a model’s accuracy in un-prefixed BLiMP
+                                                                                                      test sentences are shared. To approximate syntactic
+phenomena, and its accuracy on each of the phe-
+                                                                                                      overlap, we can compute the F1 score over depen-
+nomena after prefixing with the maximal amount
+                                                                                                      dency labels in two sentences, rather than across
+of possible unacceptable prefixes (start vs. end of
+                                                                                                      tokens. If multiple prefix sentences are present,
+dashed purple line in Figure 2).
+                                                                                                      we can take the mean similarity with the target
+   Figure 10 and Figure 11 show the results of this
+                                                                                                      sentence across prefixes. Then, we compute the
+analysis. A single point in any of these scatter-
+                                                                                                      point-biserial correlation11 (ρp ) between the sim-
+plots indicates the relationship between a particular
+model’s performance on a particular suite at base-                                                        10
+                                                                                                            We tokenize the inputs using GPT2’s tokenizer before
+line (no prefix, x-axis) and its performance with                                                     computing overlap.
+                                                                                                         11
+                                                                                                            The point-biserial correlation coefficient measures the
+a maximal-length prefix, either acceptable (Fig-                                                      strength of the relationship between a continuous variable
+ure 10) or unacceptable (Figure 11; y-axis). If our                                                   (e.g., our overlap metrics) and a binary variable (accuracy on
+
+                                                                                                   6056
+                                                      Acceptable prefixing effect
+                                                        vs. baseline accuracy
+                               Evaluation = BLiMP     Evaluation = CrowS-Pairs   Evaluation = SyntaxGym
+                       1.0                                                                                Model
+
+Matched acceptable
+                       0.8                                                                                GPT2
+                                                                                                          OPT (1.3B)
+                       0.6                                                                                OPT (125M)
+
+ prefixing accuracy
+                                                                                                          OPT (2.7B)
+                       0.4                                                                                OPT (350M)
+                                                                                                          OPT (6.7B)
+                       0.2
+                             0.25 0.50 0.75 1.00          0.3    0.4     0.5       0.25 0.50 0.75 1.00
+                               Baseline accuracy         Baseline accuracy          Baseline accuracy
+    Figure 10: Correlation between accuracy with maximum-length acceptable prefix and baseline accuracy, for each
+    model and dataset.
+
+
+                                                      Unacceptable prefixing effect
+                                                         vs. baseline accuracy
+                                 Evaluation = BLiMP    Evaluation = CrowS-Pairs Evaluation = SyntaxGym
+                        1.00
+                                                                                                          Model
+
+Matched unacceptable
+                        0.75                                                                              GPT2
+                                                                                                          OPT (1.3B)
+                        0.50                                                                              OPT (125M)
+
+
+ prefixing accuracy
+                                                                                                          OPT (2.7B)
+                        0.25                                                                              OPT (350M)
+                        0.00                                                                              OPT (6.7B)
+                        0.25
+                               0.25 0.50 0.75 1.00         0.3    0.4     0.5      0.25 0.50 0.75 1.00
+                                 Baseline accuracy        Baseline accuracy         Baseline accuracy
+    Figure 11: Correlation between accuracy with maximum-length unacceptable prefix and baseline accuracy, for each
+    model and dataset.
+
+
+
+
+    Figure 12: Token overlap (left) and dependency overlap (right) across BLiMP phenomena. We compute these using
+    a sample of 10,000 sentences from the target phenomenon and from the prefix phenomenon. The phenomena are
+    ordered alphabetically.
+
+
+                                                                       6057
+ilarity metric and accuracy on a given example,                  compute the Spearman correlation (ρs ). We find
+averaging similarities across prefix sentences. We               that correlations here are a bit stronger than when
+compute the correlation separately for each model                we mix mismatched prefixes (ρs = 0.11 for depen-
+size and each prefixing strategy. Note that we only              dency overlap, and ρs = 0.18 for token overlap,
+use grammatical prefixes; thus, we expect positive               p < 0.001 for both). While the magnitude of the
+correlations if priming explains the length effects.             correlations is very low, these are still significant.
+   However, this instance-level analysis could be                Thus, there is some relationship between the simi-
+confounded by the mixture of various phenom-                     larity of the prefix and test sentence with accuracy,
+ena in the prefixes. The model could be sensi-                   but the relationship tends to be weak. Also, lexical
+tive to sentences from certain phenomena more                    overlap seems to be more strongly predictive of
+than others, or the varying lengths of sentences                 accuracies than structural similarities, indicating
+from each phenomenon. To more specifically mea-                  that the model may indeed be more sensitive to spu-
+sure whether priming can explain our findings, we                rious lexical similarities than any deeper abstract
+focused on BLiMP and prefixed sentences from                     notion of syntactic similarity between a prefix and
+one phenomenon at a time with a given test phe-                  the test sentence. Nonetheless, this is still prelimi-
+nomenon; in other words, we sample mismatched                    nary evidence that priming effects do not explain
+prefixes, but controlling which phenomenon we                    much of the accuracy trends we observe with prefix-
+sample from. Using this approach, we can capture                 ing; instead, perhaps length itself makes a stronger
+how structurally similar each BLiMP phenomenon                   difference than any specific notion of similarity
+is with each other BLiMP phenomenon, and how                     between the prefix and test sentence.
+this correlates with accuracies.                                    This is preliminary evidence that lexical overlap
+   Here, we present the lexical and syntactic simi-              and low-level syntactic similarity effects partially
+larity across each pair of BLiMP phenomena (Fig-                 explain accuracy increases with BLiMP prefix-
+ure 12).12 We find very low and non-significant                  ing, but most of the trends we observe cannot
+correlations with dependency overlap and token                   be explained by these effects alone. Perhaps this
+overlap (ρp < 0.05, p > 0.1) regardless of prefix-               is because the model is more sensitive to multiple
+ing strategy or model size. This could be evidence               similarities simultaneously than any one isolated
+that the model is more sensitive to the length of                type of similarity. Or, perhaps models are sensitive
+the prefixes than any notion of syntactic or lexical             to some other latent feature that we did not analyze.
+similarity on this task. These are computed across               Nonetheless, it is difficult to draw strong conclu-
+each prefix and test phenomenon using a sample of                sions from the lack of a strong correlation, and
+10,000 test sentences and 10,000 prefix sentences                correlations alone cannot causally implicate simi-
+for each point in the confusion matrix. We find                  larities in explaining our findings. Perhaps future
+that dependency overlap is generally higher than                 work could disambiguate the relationship between
+token overlap across inputs, perhaps unsurprisingly              these factors using causal methods.
+given that the size of the set of possible dependency
+labels is much smaller than the size of the set of               D.1   Suite-by-suite prefixing performance
+possible tokens in a given sentence.
+   We next try correlating these values with accura-             Figure 14 shows GPT2’s improvement in predic-
+cies on each BLiMP phenomenon as a function of                   tion accuracy on different SyntaxGym test suites
+these phenomenon-level similarity metrics. Accu-                 (rows) after drawing as many acceptable prefix
+racies with prefixes (and changes in accuracies after            sentences as possible from another SyntaxGym
+after prefixing) for GPT2 are presented in Figure 13.            test suite (columns). The values are a percent-
+Essentially, we are now measuring how similar the                age increase in prediction accuracy, relative to
+trends are across a similarity confusion matrix and              GPT2’s baseline performance with no additional
+an accuracy confusion matrix. As we are now mea-                 context. We see a substantial diversity in how dif-
+suring similarity across continuous variables, we                ferent suites respond to prefixing of acceptable
+                                                                 sentences. Some suites, such as an NPI licensing
+an individual example).                                          suite (npi_src_any) and a filler-gap dependency
+   12
+      For visual conciseness across confusion matrices, we use   suite (fgd_subject), show across-the-board im-
+indices rather than individual phenomenon names. For each
+confusion matrix in Figures 12 and 13, all phenomena are         provements in response to any prefixing at all. The
+presented in alphabetical order.                                 suites labeled reflexive_*_fem, which test under-
+                                                             6058
+Figure 13: Accuracies for GPT2 on individual BLiMP phenomena after prefixing 10 sentences from a single BLiMP
+phenomenon (left). Change in accuracy from no prefix to 10 prefixes on each BLiMP phenomenon (right). We
+exclude the diagonal in both cases, as we are interested in mismatched prefixing effects.
+
+
+standing of feminine reflexive anaphor agreement,       cal, ungrammatical and Wikipedia prefixes. For all
+demonstrate interesting unstable behavior: GPT2’s       cases, δ starts from a high value for short sequences,
+predictions degrade when these particular tests are     and approaches zero as the context length increases.
+preceded by grammatical sentences containing mas-       There is a marked difference in δ values compared
+culine reflexive anaphors (see e.g. the blue boxes      to Wikipedia and BLiMP prefixes: Wikipedia pre-
+in the row labeled reflexive_orc_fem, but the           fixes appear to display a high value, suggesting
+same predictions are facilitated when preceded by       high surprisals. The average δ for Wikipedia also
+feminine reflexive anaphors.                            remains higher than the baseline value (without any
+   We also provide a snapshot of the top 10 suites in   priming), while δ is significantly lower for BLiMP
+BLiMP (Warstadt et al., 2020a) which get the best       prefixes. This behavior potentially explains why
+and worst changes in accuracy (∆ Accuracy), when        we observe almost no change in the accuracy of
+primed with acceptable (Table 1) and unacceptable       Wikipedia prefixes, as the margin remains high and
+prefixes (Table 2) respectively.                        stable with increasing length of tokens.
+                                                           Within matched prefixes, we observe the δ to be
+E   Margin Analysis                                     significantly lower for unacceptable prefixes com-
+How confident are LMs as input length increases?        pared to the acceptable contexts, and it reduces with
+The results on length priming indicates that longer     length. This behavior partially explains why we
+matched acceptable prefixes tend to induce bet-         observe the trend of sharp decrease in acceptability
+ter acceptability judgements to the target model.       accuracy for matched unacceptable prefixes, as the
+However, investigating the accuracies as com-           monotonically decreasing δ flips the acceptability
+puted in Equation 2 alone does not fully explain        judgement associations.
+the nuances of the model confidence. To under-
+stand how model confidence values themselves            F    SyntaxGym Results
+differ in acceptable/unacceptable target sentences,
+                                                        We run our prefixing evaluations for 23 of the 34
+we plot and investigate the perplexity margins in
+                                                        SyntaxGym evaluations whose prediction struc-
+Figure 15. Specifically, we compute the differ-
+                                                        tures are compatible with this paper’s evaluation
+ence in the model perplexities δ for each accept-
+                                                        setup – that is, where model success is a function
+able/unacceptable pair:
+                                                        of one or more differences in surprisal measured
+                                                        between two experimental conditions. These ap-
+         δ(xi , x̂i ) = ppl(xi ) − ppl(x̂i ),    (3)
+                                                        plicable suites are shown in the axes of Figure 14.
+  We observe the margins on BLiMP for a candi-          In contrast to BLiMP, model surprisal is measured
+date model, OPT 6.7B in Figure 15, for grammati-        only at a critical region, at which differing content
+                                                    6059
+                                                                                                                        Relative improvement in prediction accuracy after maximum prefixing
+                       fgd_object      4.3         2.6       4.3         4.3     4.3         4.3           4.3            4.3           4.3           4.3        4.3              4.3          4.3             4.3           4.3                 4.3                  4.3                  4.3                   4.3                 2.5                    4.3                    4.3                    4.3                                500
+
+
+                           fgd_pp      4.9         4.9       3.8         14.3    1.2       11.4 14.3                      8.6         14.3 14.3                  3.1            10.1 14.3                      3.9        14.3 12.2                                   8.1                  8.1                   8.1                 6.0                    6.9                  -2.7                     1.8
+
+                      fgd_subject 57.4 41.0 100.0 50.0 41.0 50.0 100.0 75.0 100.0 44.2 51.7 56.4 34.5 74.5 60.0 60.0 52.7 38.2 70.9 78.2 24.7 100.0 71.4
+
+
+                             mvrr 12.7 27.3 11.1 27.3 14.8                                   1.1          -4.5           -2.7           1.1          24.3 22.9 -0.3                           -1.9           -6.5 18.0 20.3 18.0 22.6 20.3 18.0                                                                                                             9.1                 27.3 15.0
+
+                        mvrr_mod 22.4 33.3 20.6 22.2 18.0                                    3.3         13.3             6.7           6.7          33.3 33.3 11.5                            2.8             4.4        28.5 28.5 30.9 28.5 30.9 26.1 17.6 33.3 33.3                                                                                                                                                                       400
+
+
+                      npi_orc_any      2.7         2.7       2.7         2.7     2.7         2.7           2.7            2.7           2.7           2.7        2.7              2.7          2.7             2.7           2.7                 2.7                  2.7                  2.7                   2.7                 2.7                    2.7                    2.7                    2.7
+
+                     npi_orc_ever      0.0         0.0       0.0         0.0     0.0         0.0           0.0            0.0           0.0           0.0        0.0              0.0          0.0             0.0           0.0                 0.0                  0.0                  0.0                   0.0                 0.0                    0.0                    0.0                    0.0
+
+                      npi_src_any 72.7 72.7 72.7 72.7 72.7 72.7 68.4 72.7 72.7 72.7 72.7 72.7 72.7 72.7 72.7 72.7 72.7 72.7 72.7 72.7 72.7 72.7 72.7
+
+
+                     npi_src_ever      8.6         8.6       8.6         8.6     8.6         8.6           8.6            8.6           8.6           8.6        8.6              8.6          8.6             8.6           8.6                 8.6                  8.6                  8.6                   8.6                 8.6                    8.6                    8.6                    8.6                                300
+
+
+                          npz_obj      0.0         0.0       0.0         0.0     0.0         0.0           0.0            0.0           0.0          -2.3        0.0              0.0          0.0             0.0           0.0                 0.0                  0.0                  0.0                   0.0                 0.0                    0.0                    0.0                    0.0
+
+                     npz_obj_mod       0.0         0.0       0.0         0.0     0.0         0.0           0.0            0.0           0.0           0.0        0.0              0.0          0.0             0.0           0.0                 0.0                  0.0                  0.0                   0.0                 0.0                    0.0                    0.0                    0.0
+
+
+Test suite
+                      number_orc 16.8 22.0 18.1 18.8 58.3                                    2.0         58.3 10.8 22.7 25.2 11.9 -10.8 -1.0                                                                 -1.6 -10.1 -3.7 20.9 18.0                                                                           7.0                 7.0 -11.6 7.2                                                        3.9
+
+                     number_prep       3.8        10.1 12.6 26.7 -4.5 23.5 26.7 17.2 17.2 26.7 -6.2 19.8 19.8 19.8                                                                                                           8.2              10.5                    3.6               11.3 12.8 12.8 -6.3                                                                      -6.2                   -5.0                                 200
+
+                      number_src 19.2 26.7 16.6 21.4 14.2 20.3 23.5 23.5 26.7                                                                         6.2      10.2 -2.4 22.1 26.7 15.2 10.5 22.1 15.2                                                                                                           1.3                 1.0                26.7                       6.9                26.7
+
+                reflexive_orc_fem 21.1 14.2 40.7 26.7                           -3.1 42.5                  0.3 -26.1 -60.6 57.1 42.0 -42.9 -31.5 -51.5 95.8 -57.8 111.1 -51.5 72.7 -48.6 23.4 111.1 -20.5
+
+               reflexive_orc_masc 18.8 12.9 18.8 18.8 14.9 18.8 18.8 15.8 15.8 18.8 12.8 14.4 16.6                                                                                                             2.7 -11.5 16.6 18.8 18.8 -2.8 10.1 17.2 18.8 18.8
+
+               reflexive_prep_fem 164.8 177.1 171.4 107.8 94.7 42.5 -16.9                                                 6.9 -40.6 185.0 112.9 -42.2 -42.2 -16.6 288.6 -35.8 271.4 15.5 254.1 -23.0 216.7 33.6 29.5                                                                                                                                                                                                                         100
+
+              reflexive_prep_masc 17.5 20.9 26.7 24.0 16.3 23.5 26.7 20.3 26.7 26.7 13.6 15.2                                                                                                  8.2             5.9         -1.0 17.5 -10.2 1.3                                                                   3.6              19.8 26.7 11.9 26.7
+
+                 reflexive_src_fem 187.9 149.2 201.6 137.5 128.4 90.0 42.5                                               -5.0 -20.8 209.3 183.9 -40.1 2.7 -57.2 326.1 3.6 510.3 38.2 406.7 3.6                                                                                                                                                          56.3 -1.0 -14.2
+
+               reflexive_src_masc 23.1 24.6 13.1 22.0 58.3 34.6 38.5 30.6 58.3 58.3 33.8 26.7 41.1                                                                                                             6.5 -10.8 23.8 55.5 52.2                                                                          9.4              46.8 17.3                                        9.0                    4.9
+
+             subordination_orc-orc     0.0         0.0       0.0         0.0     0.0         0.0           0.0            0.0           0.0           0.0        0.0              0.0          0.0             0.0           0.0                 0.0                  0.0                  0.0                   0.0                 0.0                  -1.3                     0.0                    0.0                                0
+
+              subordination_pp-pp      0.0         0.0       0.0         0.0     0.0         0.0           0.0            0.0           0.0           0.0        0.0              0.0          0.0             0.0           0.0                 0.0                  0.0                  0.0                   0.0                 0.0                    0.0                    0.0                    0.0
+
+             subordination_src-src     0.0         0.0       0.0         0.0     0.0         0.0           0.0            0.0           0.0           0.0        0.0              0.0          0.0             0.0           0.0                 0.0                  0.0                  0.0                   0.0                 0.0                    0.0                    0.0                    0.0
+
+
+
+
+                                                                                                                                                                                                                                                                                                                                                        subordination_orc-orc   subordination_pp-pp   subordination_src-src
+                                                                                           npi_orc_any                  npi_src_any                            npz_obj_mod
+                                                                                                                                                     npz_obj
+                                                                                                                                                                                             number_prep
+                                                  fgd_pp
+                                     fgd_object            fgd_subject                                   npi_orc_ever                 npi_src_ever                              number_orc                   number_src
+                                                                                                                                                                                                                                              reflexive_orc_masc   reflexive_prep_fem   reflexive_prep_masc                       reflexive_src_masc
+                                                                                                                                                                                                                          reflexive_orc_fem                                                                   reflexive_src_fem
+                                                                                mvrr_mod
+                                                                         mvrr
+
+
+
+
+                                                                                                                                                                             Prefix suite
+
+
+Figure 14: Relative improvement (in percentage points) in accuracy on SyntaxGym test suite evaluations (rows)
+after prefixing with sentences from other SyntaxGym test suites (columns) for GPT2.
+
+
+
+      Phenomena                                                                                                              GPT2                         OPT 125M                                         OPT 350M                                                           OPT 1.3B                                                                 OPT 2.7B                                                                 OPT 6.7B           Mean ∆
+      principle_A_reconstruction                                                                         0.528 (0.13)                                     0.62 (0.1)                                        0.699 (0.1)                                            0.599 (0.06)                                                         0.585 (0.05)                                                                          0.585 (0.05)   0.603 (0.05)
+      existential_there_quantifiers_2                                                                    0.322 (0.07)                                  0.827 (0.04)                                        0.528 (0.04)                                            0.683 (0.02)                                                         0.538 (0.03)                                                                          0.538 (0.02)   0.573 (0.15)
+      sentential_subject_island                                                                           0.58 (0.19)                                  0.556 (0.14)                                        0.536 (0.18)                                            0.491 (0.11)                                                          0.402 (0.1)                                                                           0.48 (0.11)   0.507 (0.06)
+      wh_vs_that_with_gap_long_distance                                                                  0.457 (0.13)                                   0.48 (0.12)                                        0.465 (0.14)                                            0.481 (0.17)                                                         0.446 (0.15)                                                                          0.514 (0.21)   0.474 (0.02)
+      matrix_question_npi_licensor_present                                                               0.566 (0.01)                                   0.49 (0.03)                                        0.477 (0.03)                                            0.357 (0.01)                                                         0.307 (0.01)                                                                          0.358 (0.01)   0.426 (0.09)
+      wh_vs_that_with_gap                                                                                0.353 (0.09)                                  0.376 (0.07)                                        0.394 (0.09)                                            0.435 (0.12)                                                         0.447 (0.13)                                                                          0.468 (0.14)   0.412 (0.04)
+      left_branch_island_echo_question                                                                   0.443 (0.21)                                  0.462 (0.17)                                        0.357 (0.17)                                            0.359 (0.14)                                                         0.361 (0.12)                                                                           0.344 (0.1)   0.388 (0.05)
+      only_npi_scope                                                                                      0.38 (0.05)                                  0.511 (0.02)                                        0.198 (0.02)                                            0.321 (0.02)                                                         0.375 (0.02)                                                                          0.347 (0.02)   0.355 (0.09)
+      npi_present_1                                                                                       0.327 (0.1)                                  0.337 (0.11)                                        0.236 (0.09)                                            0.267 (0.07)                                                         0.305 (0.09)                                                                          0.352 (0.08)   0.304 (0.04)
+      complex_NP_island                                                                                  0.316 (0.12)                                  0.271 (0.09)                                         0.264 (0.1)                                             0.241 (0.1)                                                         0.274 (0.09)                                                                           0.356 (0.1)   0.287 (0.04)
+
+Table 1: Top 10 phenomena in BLiMP (Warstadt et al., 2020a) with largest average ∆ increase in acceptability over
+the full context window, when primed with acceptable prefixes. The numbers in parenthesis reflect the standard
+deviation over length of the context.
+
+
+                                                                                                                                                                                             6060
+             Phenomena                                                                     GPT2          OPT 125M       OPT 350M                          OPT 1.3B                 OPT 2.7B               OPT 6.7B                    Mean ∆
+             only_npi_licensor_present                                         -0.693 (0.21)           -0.726 (0.16)   -0.934 (0.19)                  -0.953 (0.14)             -0.945 (0.1)            -0.961 (0.07)       -0.869 (0.11)
+             existential_there_quantifiers_1                                   -0.783 (0.27)           -0.871 (0.21)   -0.869 (0.21)                   -0.856 (0.2)            -0.911 (0.21)            -0.906 (0.21)       -0.866 (0.04)
+             principle_A_case_1                                                -0.782 (0.42)           -0.863 (0.35)   -0.813 (0.33)                  -0.871 (0.34)            -0.867 (0.35)            -0.872 (0.34)       -0.845 (0.03)
+             superlative_quantifiers_2                                          -0.817 (0.1)           -0.822 (0.07)   -0.847 (0.06)                  -0.832 (0.05)            -0.862 (0.05)            -0.845 (0.04)       -0.837 (0.02)
+             sentential_negation_npi_licensor_present                          -0.637 (0.25)           -0.733 (0.23)   -0.882 (0.23)                  -0.907 (0.24)            -0.904 (0.22)            -0.911 (0.22)       -0.829 (0.11)
+             wh_questions_subject_gap                                          -0.731 (0.32)           -0.811 (0.27)   -0.804 (0.29)                  -0.839 (0.28)            -0.837 (0.27)            -0.832 (0.27)       -0.809 (0.04)
+             wh_vs_that_no_gap_long_distance                                   -0.715 (0.33)           -0.806 (0.24)   -0.742 (0.23)                  -0.806 (0.24)            -0.852 (0.25)            -0.889 (0.25)       -0.801 (0.06)
+             wh_questions_subject_gap_long_distance                            -0.782 (0.24)           -0.802 (0.22)   -0.781 (0.22)                  -0.828 (0.22)            -0.784 (0.23)            -0.833 (0.24)       -0.801 (0.02)
+             superlative_quantifiers_1                                         -0.685 (0.15)           -0.746 (0.06)   -0.832 (0.07)                  -0.836 (0.11)            -0.849 (0.11)            -0.806 (0.07)       -0.792 (0.06)
+             irregular_past_participle_adjectives                              -0.671 (0.33)           -0.788 (0.23)   -0.838 (0.24)                  -0.834 (0.23)            -0.786 (0.22)            -0.829 (0.23)       -0.791 (0.06)
+
+
+ Table 2: Top 10 phenomena in BLiMP (Warstadt et al., 2020a) with largest average ∆ decrease in acceptability over
+ the full context window, when primed with unacceptable prefixes. The numbers in parenthesis reflect the standard
+ deviation over length of the context.
+
+
+                                                                                                                                                                Acceptable                                       Unacceptable
+
+
+
+                                                                                                                                                                                              0.0
+                                                                                                                                       0.2
+
+                                                Perplexity Margin Analysis
+                                                                                                                          Δ Accuracy
+                                                                                                                                       0.1                                                   -0.2
+                                     grammatical                    In-Domain
+                    10000            ungrammatical
+                                     wiki                                                 Acceptable                                   0.0                                                   -0.4
+                                                     1500                                 Unacceptable
+                     8000
+                                                     1000                                                                              -0.1
+                                                                                                                                              0      50   100       150      200   250              0     50   100    150       200     250
+
+
+
+
+Perplexity margin
+                                                                                                                                                                                         Input Length
+                     6000                            500
+                                                                                                                                                          GPT2                 OPT (350M)       OPT (2.7B)                        Matched
+                                                          0                                                                                       Model
+                                                                                                                                                          OPT (125M)           OPT (1.3B)       OPT (6.7B)
+                                                                                                                                                                                                               Prefix Suite
+                                                                                                                                                                                                                                  Mismatched
+                     4000
+                                                              0         200         400         600    800
+                     2000                                                                                                Figure 17: Interaction of length and prefix suite
+                                                                                                                         (matched versus mismatched) in two separate prefix
+                       0
+                                                                                                                         types (acceptable/unacceptable) in SyntaxGym. Analo-
+                                0        200         400         600                      800          1000              gous to Figure 4 in the main text.
+                                                     Number of tokens
+
+  Figure 15: Perplexity margins of Grammatical, Ungram-                                                                  between conditions render minimal-pair sentences
+  matical and Wikipedia prefixes on BLiMP for OPT 6.7B
+                                                                                                                         grammatical or ungrammatical. For example, the
+  model. The dashed lines represent the mean margin of
+  the baseline without any context.                                                                                      number_prep suite measures the surprisal differ-
+                                                                                                                         ence at the underlined critical region between the
+                                                                                                                         following four conditions:
+
+                                                                                                                                       1. The farmer near the clerks knows many peo-
+                                                                                                                                          ple.
+                      0.2                                                                        Model
+                                                                                                      GPT2                             2. * The farmer near the clerk know many peo-
+                      0.1                                                                             OPT (125M)
+                                                                                                                                          ple.
+                                                                                                      OPT (350M)
+                                                                                                      OPT (1.3B)
+
+
+        Δ Accuracy
+                      0.0
+                                                                                                      OPT (2.7B)                       3. * The farmers near the clerk knows many peo-
+                     -0.1
+                                                                                                      OPT (6.7B)
+                                                                                                                                          ple.
+
+                     -0.2
+                                                                                                 Prefix Type                           4. The farmers near the clerk know many people.
+                                                                                                      Acceptable
+                                                                                                      Unacceptable
+                     -0.3
+                                                                                                      Wiki                  In this example test suite, model surprisals for
+                            0       50     100      150           200         250                                        the word knows in sentence 3 must be higher than in
+                                               Input Length                                                              sentence 1, and surprisals for the word know must
+                                                                                                                         be higher in sentence 2 than in sentence 4. The
+  Figure 16: Interaction of length and prefix type on Syn-
+  taxGym (collapsed across match/mismatch). Shaded                                                                       full list of included suites is visible in Figure 14.
+  regions are the 95% confidence interval. Analogous to                                                                  Additional plots for SyntaxGym, analogous to Fig-
+  Figure 3 in the main text.                                                                                             ure 3 and Figure 4, are provided at Figure 16 and
+                                                                                                                         Figure 17.
+
+
+                                                                                                                     6061
+    ACL 2023 Responsible NLP Checklist
+A For every submission:
+    3 A1. Did you describe the limitations of your work?
+    
+      Limitations section after the Conclusion.
+
+     A2. Did you discuss any potential risks of your work?
+      Not applicable. Left blank.
+    3 A3. Do the abstract and introduction summarize the paper’s main claims?
+    
+      Section 1
+
+    
+    7 A4. Have you used AI writing assistants when working on this paper?
+      Left blank.
+  3 Did you use or create scientific artifacts?
+B 
+    Used: yes (Section 3) Created: no.
+    3 B1. Did you cite the creators of artifacts you used?
+    
+      3
+
+     B2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+      Not applicable. Left blank.
+    3 B3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+    
+      that it was specified? For the artifacts you create, do you specify intended use and whether that is
+      compatible with the original access conditions (in particular, derivatives of data accessed for research
+      purposes should not be used outside of research contexts)?
+      3
+
+     B4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+      information that names or uniquely identifies individual people or offensive content, and the steps
+      taken to protect / anonymize it?
+      Not applicable. Left blank.
+
+     B5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+      linguistic phenomena, demographic groups represented, etc.?
+      Not applicable. Left blank.
+    3 B6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+    
+      etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+      number of examples in train / validation / test splits, as these provide necessary context for a reader
+      to understand experimental results. For example, small differences in accuracy on large test sets may
+      be significant, while on small test sets they may not be.
+      3
+
+C       3 Did you run computational experiments?
+        
+    3
+    3 C1. Did you report the number of parameters in the models used, the total computational budget
+    
+      (e.g., GPU hours), and computing infrastructure used?
+      3
+The Responsible NLP Checklist used at ACL 2023 is adopted from NAACL 2022, with the addition of a question on AI writing
+assistance.
+
+
+
+                                                         6062
+     C2. Did you discuss the experimental setup, including hyperparameter search and best-found
+      hyperparameter values?
+      Not applicable. Left blank.
+    3 C3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+    
+      statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+      etc. or just a single run?
+      3
+    3 C4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+    
+      you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+      etc.)?
+      3
+
+D     
+      7 Did you use human annotators (e.g., crowdworkers) or research with human participants?
+    Left blank.
+
+     D1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+      disclaimers of any risks to participants or annotators, etc.?
+      Not applicable. Left blank.
+
+     D2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+      and paid participants, and discuss if such payment is adequate given the participants’ demographic
+      (e.g., country of residence)?
+      Not applicable. Left blank.
+
+     D3. Did you discuss whether and how consent was obtained from people whose data you’re
+      using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+      crowdworkers explain how the data would be used?
+      Not applicable. Left blank.
+
+     D4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+      Not applicable. Left blank.
+
+     D5. Did you report the basic demographic and geographic characteristics of the annotator population
+      that is the source of the data?
+      Not applicable. Left blank.
+
+
+
+
+                                                    6063
+

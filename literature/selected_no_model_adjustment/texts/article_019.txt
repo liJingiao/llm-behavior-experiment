@@ -1,0 +1,765 @@
+                                  The Thirty-Ninth AAAI Conference on Artificial Intelligence (AAAI-25)
+
+
+
+
+             RTP-LX: Can LLMs Evaluate Toxicity in Multilingual Scenarios?
+  Adrian de Wynter1 2 , Ishaan Watts1 , Tua Wongsangaroonsri1 , Minghui Zhang1 , Noura Farra1 ,
+    Nektar Ege Altıntoprak1 , Lena Baur1 , Samantha Claudet1 , Pavel Gajdušek1 , Qilong Gu1 ,
+ Anna Kaminska1 , Tomasz Kaminski1 , Ruby Kuo1 , Akiko Kyuba1 , Jongho Lee1 , Kartik Mathur1 ,
+  Petter Merok1 , Ivana Milovanović1 , Nani Paananen, Vesa-Matti Paananen1 , Anna Pavlenko1 ,
+ Bruno Pereira Vidal1 , Luciano Ivan Strika1 , Yueh Tsao1 , Davide Turcato1 , Oleksandr Vakhno1 ,
+  Judit Velcsov1 , Anna Vickers1 , Stéphanie F. Visser1 , Herdyan Widarmanto1 , Andrey Zaikin1 ,
+                                           Si-Qing Chen1
+                                                                    1
+                                                                Microsoft
+                                                         2
+                                                          The University of York
+                                                        adewynter@microsoft.com
+                            Abstract                                                         Human            GPT-4 Turbo        Llama 3, 8B
+                                                                                             Llama 3, 70B     ACS                Mistral-v3, 7B
+  Large language models (LLMs) and small language mod-                                       Mistral-v2, 7B   Llama 2, 70B       Llama 2, 7B
+  els (SLMs) are being adopted at remarkable speed, although                                 Gemma, 7B        Llama Guard        Gemma, 2B
+  their safety still remains a serious concern. With the ad-
+                                                                                                               Bias
+  vent of multilingual S/LLMs, the question now becomes a
+  matter of scale: can we expand multilingual safety evalua-
+  tions of these models with the same velocity at which they                     Microaggression                                 Identity Attack
+  are deployed? To this end, we introduce RTP-LX, a human-
+  transcreated and human-annotated corpus of toxic prompts
+  and outputs in 28 languages. RTP-LX follows participatory
+  design practices, and a portion of the corpus is especially de-
+  signed to detect culturally-specific toxic language. We eval-                   Violence                                                Toxicity
+                                                                                                                0     0.2 0.4 0.6 0.8 1
+  uate 10 S/LLMs on their ability to detect toxic content in a
+  culturally-sensitive, multilingual scenario. We find that, al-
+  though they typically score acceptably in terms of accuracy,
+  they have low agreement with human judges when scor-
+  ing holistically the toxicity of a prompt; and have difficulty
+                                                                                       Self-Harm                                Sexual Content
+  discerning harm in context-dependent scenarios, particularly
+  with subtle-yet-harmful content (e.g. microaggressions, bias).
+  We release this dataset to contribute to further reduce harmful                                             Insult
+  uses of these models and improve their safe deployment.
+                                                                                Figure 1: Weighted Cohen’s κ correlations per harm cate-
+Repository — https://github.com/microsoft/RTP-LX                                gory in RTP-LX prompts. S/LLMs could detect insults, vi-
+                                                                                olence, and sexual content. Subtler discourse–namely, mi-
+                     1    Introduction                                          croaggressions, bias, and identity attacks–were not easily
+                                                                                detectable by any of the models.
+Warning: This paper contains and discusses content that
+may be offensive or upsetting. Large language models
+(LLMs) are being adopted swiftly in research and produc-                           LLMs and their more-portable, typically-open-source
+tion applications. However, their tendency to memorise con-                     counterparts, small language models (SLMs) have been
+tent (Carlini et al. 2023; Lee et al. 2023; De Wynter et al.                    used as annotators for some tasks with good results (Wei,
+2023) and the fact that they are trained from publicly-                         Chen, and Luo 2024; Zheng et al. 2023). However, it re-
+available data means that they are very prone to spew harm-                     mains unclear if S/LLMs can successfully annotate data in a
+ful content (Sheng et al. 2019; Wang et al. 2023; Rauh et al.                   culturally-sensitive multilingual scenario when harmful con-
+2022; Gehman et al. 2020). With the advent of more capa-                        tent is involved. This is important for content moderation,
+ble, multilingual LLMs such as GPT-4 (OpenAI 2024) or                           but also raises questions about the models’ multilingual rea-
+BLOOMZ (Wang, Zhai, and Hassan 2020), toxic language                            soning capabilities within a culture-specific context.
+detection must scale fast and effectively to the dozens, if not
+hundreds, of languages these models support.                                    Contributions
+Copyright © 2025, Association for the Advancement of Artificial                 To address whether S/LLMs can annotate and reason over
+Intelligence (www.aaai.org). All rights reserved.                               toxic, culturally-specific content, we introduce a multilin-
+
+
+                                                                        27940
+gual corpus in 28 languages, RTP-LX (“RTP-Language                         Toxicity Evaluation of S/LLMs
+eXpanded”). It is comprised of about 1, 100 toxic prompts                  It is well-known that S/LLMs are prone to memorise and
+and outputs per language, and derived from the RTP dataset                 generate harmful content (Sheng et al. 2019; Wang et al.
+(“Real Toxicity Prompts”; Gehman et al. 2020). Each                        2023; Rauh et al. 2022; Gehman et al. 2020). Hence there
+prompt has been professionally translated by native speak-                 is a growing focus on detecting and addressing their toxic-
+ers following participatory design practises, and the entire               ity (Rauh et al. 2022; Gehman et al. 2020), although there
+dataset has been human-labelled.                                           remains a gap in understanding it across different languages
+   While RTP-LX is a benchmark meant to facilitate safer                   and cultures. This oversight is particularly crucial because
+deployment of S/LLMs in culturally-nuanced scenarios, our                  S/LLMs are well-known to exhibit biases across various de-
+evaluation of ten S/LLMs on the corpus shows the follow-                   mographic, racial, and cultural lines (Dhamala et al. 2021).
+ing:                                                                          Current S/LLMs are not equipped to identify these sen-
+ • S/LLMs typically score acceptably in terms of accuracy,                 sitivities out-of-the-box, and they require additional fine-
+   with GPT-4 Turbo and Gemma 7B having the highest                        tuning data for mitigation (Hamad et al. 2023). However,
+   percentages of correctly-classified examples.                           generating high-quality, annotated datasets is challenging,
+                                                                           especially when they are built without following participa-
+ • However, S/LLMs have low agreement with human                           tory design (Davidson, Bhattacharya, and Weber 2019)–that
+   judges when scoring holistically the toxicity of a                      is, involving the target user base at every step of the system’s
+   prompt. Namely, they have difficulty discerning harm                    development. For instance, Sap et al. (2019) uncovered bias
+   in context-dependent scenarios, particularly with subtle-               in hate speech detection stemming from the annotators’ lack
+   yet-harmful content such as microaggressions and bias.                  of sensitivity to African-American Vernacular English.
+ • The models generally have a non-trivial amount of false                    This issue is exacerbated in multilingual contexts, es-
+   positives, ranging anywhere from around 0% (Llama                       pecially in low-resource languages (Deng et al. 2024; Lai
+   Guard) to 40% (Gemma 2B).                                               et al. 2023b). Although efforts have been made to fine-tune
+                                                                           S/LLMs using data from multiple languages (Wang et al.
+ • We tie the previous findings to each language’s online                  2024a,b; Hamad et al. 2023), the challenges around lack of
+   data availability.                                                      participatory design remain when generating datasets. For
+                                                                           instance, Wang et al. (2024b) highlighted the prevalence of
+We argue that the S/LLMs’ failure to detect certain cate-
+                                                                           region-specific risks in S/LLM performance when detect-
+gories could lead to erasure, and showcases the limitations
+                                                                           ing toxicity in Mandarin Chinese. A recent work by Jain
+of these models in classification on multilingual toxicity sce-
+                                                                           et al. (2024) scraped data from the internet, translated it, and
+narios. Given their low agreement with humans, we posit
+                                                                           then evaluated it using machine methods. While scalable and
+that accuracy as a metric is insufficient to evaluate this task.
+                                                                           cost-efficient, this pipeline currently lacks the cultural sensi-
+Our findings morevoer illustrate the need for participatory
+                                                                           tivity that comes from participatory design (Li et al. 2024),
+design in the development of culturally-specific solutions.
+                                                                           in particular with regards to localisms and subtler issues that,
+                                                                           as we will argue in this paper, require more attention.
+                    2   Related Work
+We focus on the evaluation of S/LLMs, and their applica-                                             3   RTP-LX
+tion as evaluators, both with a focus on multilingual toxicity             The seed corpus for RTP-LX is a subset of 1, 000 prompts
+scenarios. For an introduction to broader topics and open                  from the original RTP corpus. RTP is a set of nearly 100, 000
+problems on S/LLMs evaluation see Chang et al. (2024).                     toxic sentences mined from Reddit. Each entry in the corpus
+                                                                           is split into prompts and completions, and then annotated
+S/LLMs as Evaluators                                                       via the Perspective API1 . The prompts for the seed corpus
+                                                                           were collected with an even proportion of explicitly toxic
+There has been a push from the community to move towards                   prompts, and prompts that led to a toxic completion (i.e., the
+automated evaluation benchmarks based on LLMs such as                      completion is labelled as toxic while the prompt is below a
+GPT-4 (Wei, Chen, and Luo 2024; Zheng et al. 2023), some-                  threshold), based on their toxicity score. We chose the top
+times with good results, including high alignment with hu-                 1, 000 prompts fulfilling this criterion, and corresponds to
+man judgments (Wei, Chen, and Luo 2024). This, however,                    the English subset of RTP-LX. The full set of languages and
+does not extend to all domains, such as languages other than               dialects supported by RTP-LX is in Appendix B.
+English, where some LLMs have low alignment with human
+judgements (Hada et al. 2024).                                             Participatory Design
+   Evaluation of LLMs in multilingual scenarios has shown
+                                                                           In addition to the prompts from RTP, we also manually cu-
+that larger models outperform smaller models, but that data
+                                                                           rated 50-100 toxic prompts that fulfilled the following:
+contamination does affect evaluation metrics (Ahuja et al.
+2024). Benchmarks like MultiQ (Holtermann et al. 2024)                     1. They could not be explicitly toxic (e.g., no profanity),
+and others (Lai et al. 2023a; Ahuja et al. 2024; Hada et al.                  since a simple string matching algorithm could detect it.
+2024) have likewise found that there are performance differ-
+                                                                              1
+ences across languages.                                                           https://www.perspectiveapi.com/
+
+
+                                                                   27941
+2. They had to be hard to translate into English. This was                Annotation
+    introduced due the scarcity of human-designed datasets;               We used a set of harm categories slightly different than that
+    and, dually, due to the abundance of machine-translated               of RTP, closer to that of the Azure Content Safety (ACS)
+    corpora.                                                              service3 , because it would enable us to detect subtler harms.
+3. They had to relate explicitly to their culture. Although               The harm categories are: Bias, Identity Attack, Insult, Mi-
+    self-explanatory, this requirement was phrased as “[the               croaggression, Self-Harm, Sexual Content, Toxicity and Vi-
+    prompt] could lead to an output which is offensive to a               olence. The definition of each is in Appendix A. Toxicity is
+    native speaker”.                                                      scored on a five-point Likert scale, and the rest of the harms
+   Requirements (2) and (3) are somewhat related: hard-to-                on a three-point scale. We used ternary scales to leave less
+translate content (slang, specific sensitive subjects, etc.) is           room of ambiguity for the S/LLMs, thus avoiding overly op-
+deemed so because of the difficulty of capturing nuances                  timistic LLM scoring–a known issue in multilingual scenar-
+without adding an explanation of why it is harmful.                       ios (Hada et al. 2024).
+   For example, in Thailand, the monarchy is a highly-                       The annotators were given guidelines (available online)
+sensitive topic: the royal family is held in high regard,                 and could run a test and ask questions prior to fully annotat-
+and their criticism could result in legal repercussions. Even             ing the data. Each harm was annotated independently, and
+seemingly innocuous prompts, such as “What is the role of                 used Toxicity as an overall score of the prompt’s (or comple-
+a monarch in a country?” could generate responses sensitive               tion’s) toxicity. To avoid any potential conflicts with internal
+to some Thai readers.                                                     value systems, we also attached a copy of a uniform value
+   Due to the complexity of finding these prompts, we com-                system. This value system is designed to mitigate the risks
+plemented some languages with similar datasets in Hebrew                  of working with toxic language in a global context, which
+(Hamad et al. 2023), Danish (Sigurbergsson and Derczynski                 we discuss further in Section 7. However, annotators were
+2020), Korean (Moon, Cho, and Lee 2020), and Brazilian                    asked to use their best judgement and only defer to the value
+Portuguese (Leite et al. 2020).                                           system when in doubt.
+
+Transcreation                                                             Inter-Rater Reliability (IRR)
+Gehman et al. (2020) showed that LLMs memorise and re-                    We measured IRR with weighted Cohen’s κ, or κw , and
+turn some of the most harmful content from their training                 observed a substantial positive agreement in the corpus
+data via sentence completion. Since Reddit–the source for                 (0.62 ± 0.2 overall). We chose κw because it takes into ac-
+RTP–is a primarily US-based site, the subjects handled by                 count the value of the ordinal, so broad differences in scor-
+RTP are typically US-centric.                                             ing (e.g., 1-3 versus 1-2) are encoded in this measure. To
+   To address this and maintain a trustworthy dataset with                account for multiple annotators, we took pairwise IRR and
+equivalence across locales, the seed RTP corpus was profes-               averaged it out.
+sionally transcreated. In addition to the cultural relevance,
+this introduced a minor source of noise helpful in ablating                                 4     Evaluation Setup
+out data contamination, which is well-known to cause prob-
+lems in LLM evaluations, especially in multilingual settings              Models Evaluated
+(De Wynter et al. 2023; Ahuja et al. 2024).                               We evaluated ten S/LLMs: four Llama (Touvron et al.
+   The translators were encouraged to try out multiple di-                2023; AI@Meta 2024), two Gemma (Team et al. 2024),
+alects if they were familiar with them, and specify them in               and two Mistral (Jiang et al. 2023) variants; plus Llama
+the corpus. They were also given the sentence completion                  Guard (Inan et al. 2023) and GPT-4 Turbo. All models
+to ensure that the original intent from the prompt was pre-               were called through their respective Hugging Face model
+served, and encouraged to use the closest-cultural equivalent             cards on four A100 80Gb PCIE GPUs; except GPT-4 Turbo,
+to remove as many allusions to US English as possible.2 We                which was via Azure OpenAI. The data analysis was done
+don’t know how many sentences were transcreated, as the                   in a consumer-grade laptop. We used temperature of zero
+translators noted that many prevalent aspects of US culture               throughout, and all outputs were generated between 11th and
+in the data (e.g., “Donald Trump”) did not need replacement.              25th May, 2024.
+Completion                                                                 • GPT-4 is a LLM from OpenAI. We used
+                                                                             gpt-4-turbo-2024-04-09, which was explicitly
+In addition to the transcreated prompts, we created toxic and
+                                                                             noted to have multilingual capabilities, and has shown
+benign completions. For the benign completions, the tran-
+                                                                             good performance in various multilingual benchmarks.
+screators were requested to, given the prompt, write a com-
+pletion such that it would be lowest-scoring in all harm cat-              • Llama is a family of open-source SLMs by
+egories for the corpus. We generated the toxic prompt com-                   Meta.      We       use     Llama-3-8b-Instruct,
+pletions with gpt-4-32k-0613, called through the Azure                       Llama-3-70b-Instruct, Llama-2-7b-chat,
+OpenAI Platform, and cleaned them prior to sending them to                   and Llama-2-70b-chat. The original papers men-
+annotation along with the transcreated prompts.                              tion a multilingual training corpus; but the models were
+   2                                                                          3
+     For example, replacing “George Washington” with “Touissant                 https://learn.microsoft.com/en-us/azure/ai-services/content-
+Louverture” in Haitian French.                                            safety/
+
+
+                                                                  27942
+   evaluated only in English and the authors indicate that                                      5    Results
+   non-English use is out-of-scope.                                      We performed three experiments: a baselining with FLO-
+ • Llama Guard is an SLM based on Llama-2, de-                           RES Toxicity-200, the actual evaluation of the S/LLMs, and
+   signed to classify content safety. We work with                       an ablation study relating S/LLM performance with lan-
+   LlamaGuard-7b. While not explicitly mentioned, we                     guage availability.
+   assume Llama Guard to be English-only.                                   Throughout this section, we partition the full RTP-LX
+ • Gemma is an SLM by Google. We evaluate                                corpus in either the toxic prompts and benign comple-
+   gemma-2b-it and gemma-7b-it. It does not                              tions subset; or the transcreated subset (i.e., the original
+   claim to be multilingual, and the authors indicate the                RTP prompts with its corresponding transcreations) and the
+   training data to be mainly in English.                                manual subset (culturally-specific hand-crafted prompts for
+                                                                         every language). Both partitions (toxic/benign and transcre-
+ • Mistral is a 7B parameter model by MistralAI.                         ated/manual) overlap, but represent different aspects of the
+   We evaluate Mistral-7B-Instruct-v0.3 and                              dataset. Namely, the toxic/benign split allows us to deter-
+   Mistral-7B-Instruct-v0.2. These models are                            mine whether S/LLMs can recognise toxic human-generated
+   not stated to be multilingual, and do not have any moder-             content. On the other hand, the transcreated set allows us
+   ation mechanisms.                                                     to have machine-translation free comparability across lan-
+   In addition to the S/LLMs above, we evaluated two non-                guages; while the manual subset serves as a testbench for
+S/LLM solutions: ACS and the FLORES Toxicity-200 block                   model performance in culturally-sensitive issues.
+list (Costa-jussà et al. 2022). These acted as our baselines,
+in addition to RTP-LX’s own English subset.                              FLORES Exact-Match Block Rate
+                                                                         The results of our experiment for FLORES Toxicity-200
+ • ACS is a content moderating service by Azure. Its API
+                                                                         block list is in Figure 2. In the toxic prompts subset, the
+   returns a subset of the harms from RTP-LX (Identity At-
+                                                                         block list had a 24.3 ± 8.3% block rate across all languages
+   tack, Violence, Self-Harm, and Sexual Content) in a scale
+                                                                         and partitions, with Japanese being the lowest (10%) and
+   from 1-10. It explicitly supports the languages from our
+                                                                         Thai the highest (46%). The manual subset had a much
+   corpus, although it is has only been evaluated in a smaller
+                                                                         lower (−8% average) block rate when compared to the tran-
+   subset. We evaluated this API in February 2024; and re-
+                                                                         screated subset. This suggests that the models, on average,
+   normalised the scores to our scale.
+                                                                         should consider 24% of the toxic prompts corpus with a la-
+ • FLORES Toxicity-200 is a collection of frequent words                 bel denoting some toxicity.
+   and phrases that are considered toxic. It is human-                      We also calculated the block rates for the benign comple-
+   translated and covers all the languages for RTP-LX. It                tions. The completions have around a 0% block rate across
+   also includes a finer dialectal distinction compared to our           languages. Overall, this suggests that RTP-LX reliance on
+   corpus. In this paper we consider it a baseline via exact             lexical features–as opposed to semantic features–is compar-
+   match (EM): if any toxic word is present, we flag it. This            atively low (24%).
+   baseline helps us determine whether lexical matching is
+   sufficient to address multilingual toxicity.                          Evaluation of S/LLMs
+                                                                         We evaluated the labelling performance of the S/LLMs in
+Prompting                                                                RTP-LX by comparing their output with the aggregated hu-
+We modified the annotation rubric to included exemplars,                 man scores in terms of PA and κw (Figure 3).
+and formatted it as per each model’s requirements (e.g.
+ChatML). The prompt is available in the repository. We                   Toxic Prompts Subset In terms of PA, Llama Guard out-
+wrote a parser to extract scores from the response, and to               performed all other S/LLMs, closely followed by Gemma
+account for pathologies of some models, like GPT-4’s boil-               7B and GPT-4 Turbo. The lowest-performing models were
+erplate (“One possible answer is...”).                                   Gemma 2B and Llama-2 70B. ACS outperformed all other
+                                                                         approaches, but it was only evaluated over half of the harm
+                                                                         categories. When looking at κw , however, we found that
+Metrics                                                                  Llama Guard–the best-performing model in terms of PA–
+In addition to EM for FLORES, in the rest of our exper-                  dropped to almost the last position. GPT-4 Turbo was signif-
+iments we calculated IRR between the aggregated (major-                  icantly better than other models. The Llama-3 models out-
+ity vote; average otherwise) human label and S/LLMs with                 performed the older Llama versions; and a similar trend can
+Percentage Agreement (PA) and with κw . PA is a compari-                 be seen for the Mistral variants.
+son of an exact label match and provides a raw, interpretable               None of the models seem to come close to human perfor-
+number. It does not account for multi-class imbalance (i.e.,             mance, however. When looking at the harm category break-
+a “lazy learner” could guess one label and score well), or               down in Figure 1, we noted that the models were adept at
+the tendency of the S/LLMs to score inputs as more or less               detecting explicit content, such as violence, sexual content,
+harmful than human judges. To address the lazy learner is-               and insults. However, comparatively subtle discourse, such
+sue, we compute κw , which lets us determine the agreement               as microaggressions, bias, and identity attacks, were not eas-
+between two raters over a random guess.                                  ily detectable by any of the models.
+
+
+                                                                 27943
+                           Full Corpus   Transcreated    Manual
+                                                                                     Language Availability Analysis
+                                  FR     FI                                          We explored the correlation, if any, between the availability
+                                              ES
+                            HE                      EN                               online of the languages and the κw in the prompts subset. For
+                      HI                                 DE                          this, we use the classes defined by Joshi et al. (2020). In this
+                 HU                                           DA
+                                                                                     work, the authors graded languages between 0 and 5, with
+                                                                                     zero-scoring languages being those with no labeled data at
+            ID                                                     CS                all; and languages scored with a five having the most (e.g.,
+                                                                                     English). RTP-LX contains languages mostly from classes 3
+        IT                                                          BCMS
+                                                                                     to 5, which we denote here as low, mid, and high-resource
+       JA                                                               AR           languages. We report the κw score for each model averaged
+                                         0 0.1 0.2 0.3 0.4 0.5 0.6
+                                                                                     across each group. Our results are in Figure 5.
+       KO                                                           ZH-                 All models presented a decreasing trend in κw from high
+                                                                    Hant             to low-resource languages, with differences of up to around
+         NL                                                        ZH-
+                                                                   Hans
+                                                                                     10%.
+         NO-NB                                                UK
+                      PL                                 TR                                                6    Discussion
+                             PT                    TH                                When simply looking at the percentage agreement as a met-
+                                  RU     SV   SW
+                                                                                     ric of performance, the models do relatively well: all score
+                                                                                     above the 24.3% theoretical minimum from an exact-match
+Figure 2: EM block rates when calculated using FLORES’                               approach such as FLORES Toxicity-200. The S/LLMs
+Toxicity-200 block list for the transcreated/manual partition                        have a relatively even performance, with Llama Guard and
+of RTP-LX. FLORES had an average 24.3 ± 8.3% block                                   Gemma 7B at the lead.
+rate across all languages and partitions. The manual subset                             However, this observation is misleading: when analysing
+had a much lower (−8% average) block rate when compared                              the accuracy and per-class breakdown, we note that the mod-
+to the transcreated subset. This suggests that the S/LLMs,                           els tend to not agree with human judgements.
+on average, should consider 24% of the corpus with a label                              Indeed, the breakdown per category shows that the models
+denoting at least some toxicity. Note that English does not                          failed to correctly classify typically subtle-yet-harmful dis-
+have a manual corpus.                                                                course such as microaggressions, bias, and identity attack.
+                                                                                     Concerningly, the holistic measure of toxicity in the models
+                                                                                     tended to be of lower-agreement. This is perhaps because
+                                                                                     of our observation that the models typically select higher-
+   This observation is reinforced by noting that although the                        valued labels and often output binary labels, overlooking
+human-authored labels are relatively even in terms of agree-                         nuances. That is, they return either no presence of the harm
+ment across all categories, the agreement with S/LLMs is                             criterion or explicitly presenting it, but not something that
+not, with an overall noticeable skewness towards not detect-                         could be contextually construed as harmful.
+ing microaggressions or overall toxicity.                                               This all suggests that, although the S/LLMs typically
+   When looking at κw we found that the models were not                              score well in accuracy-based measures, this metric perfor-
+optimistic, as suggested by Hada et al. (2024); instead, the                         mance alone does not imply that they can perform a reliable
+S/LLMs were prone to output higher-valued labels. In the                             job as judges of toxicity in multilingual scenarios. More-
+aforementioned work higher labels are considered better                              over, they have difficulties in discerning harm in context-
+(hence the “optimistic” moniker); but in RTP-LX lower-                               dependent situations, especially, as we mentioned, when
+valued labels are better. The per-category class distribution                        dealing with subtle content.
+for toxic prompts showed that the models were also very                                 It is worth noting that the Llama and Mistral models, al-
+prone to output binary labels on the ternary set (i.e., no pres-                     though claimed to be pretrained with a relatively small vol-
+ence of the criterion, or explicit presence of the criterion;                        ume of multilingual data, perform comparatively well in
+but overlooking contextually harmful sentences), which sug-                          non-English scenarios.
+gested an additional source for the disagreement with human
+annotators.                                                                                               7    Limitations
+                                                                                     We have three core limitations in our work: the nature of our
+Benign Completions Subset We calculated the fraction of                              data, the nature of our problem, and the models evaluated.
+false positives (FP), which we define as the fraction of times
+the model predicted a label higher than 1. This helped us                            Data Limitations RTP-LX has two main limitations: cul-
+elucidate whether the S/LLMs do have a grasp on the task,                            tural skewness and coverage. In terms of cultural skewness,
+or are solely outputting syntactically-relevant labels. The re-                      the majority of this corpus is sourced from RTP, which itself
+sults are in Figure 4. Llama Guard and ACS had near-zero                             was obtained from a predominantly website with discourse
+FP, thus making them–in raw-scoring terms–the most reli-                             in US English. We have mitigated this by ensuring transcre-
+able models. The rest of the S/LLMs follow a trend similar                           ation, not translation, of the prompts along with adding in
+to the κw values for the toxic prompts.                                              the manual subset of the corpus.
+
+
+                                                                             27944
+                                                                                      Mean PA for all Evaluators                                                                                                                                                                                                                       Mean κw across Evaluators
+                                 1.0
+                                                                                                                                                                                          Transcreated                                      0.6
+
+                                                                                                                                                                                          Manual
+                                 0.8
+                                                                                                                                                                                          Full Corpus                                       0.5
+
+
+
+
+     Percentage Agreement (PA)
+                                 0.6                                                                                                                                                                                                        0.4
+
+
+                                                                                                                                                                                                                                  Mean κw
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   Humans
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   S/LLMs
+                                                                                                                                                                                                                                            0.3
+                                 0.4
+
+
+                                                                                                                                                                                                                                            0.2
+                                 0.2
+
+                                                                                                                                                                                                                                            0.1
+
+                                 0.0
+
+
+
+
+                                                     Llama Guard                      GPT-4 Turbo
+                                                                                                          Mistral-v2, 7B
+                                                                                                                            Llama 3, 8B
+                                                                                                                                               Mistral-v3, 7B     Llama 3, 70B   Llama 2, 7B                    Llama 2, 70B
+                                           ACS
+
+                                                                   Gemma, 7B                                                                                                                     Gemma, 2B
+                                                                                                                                                                                                                                            0.0
+
+
+
+
+                                                                                                                                                                                                                                                                                                         Llama 3, 70B                      Mistral-v3, 7B               Mistral-v2, 7B           Llama 2, 70B            Llama 2, 7B                           Llama Guard
+                                                                                                                                                                                                                                                                                                                                ACS
+
+                                                                                                                                                                                                                                                                  GPT-4 Turbo        Llama 3, 8B                                                                                                                                              Gemma, 7B                           Gemma, 2B
+
+
+
+
+Figure 3: We labelled the prompt subset with the S/LLMs and compared their output with the majority vote of the human scores.
+In terms of raw accuracy (left), Llama Guard outperformed all other S/LLMs, closely followed by Gemma 7B and GPT-4 Turbo.
+ACS outperformed all other approaches, but ACS was only evaluated as the average of four, not eight, harm categories; and
+its agreement is lower than GPT-4’s on these categories alone. When looking at mean κw (right), it is clear that raw accuracy
+scoring is not a sufficient measure due to RTP-LX’s class imbalance–a lazy learner could output always the same label and
+obtain a decent performance. In fact, that is what happened for some models, such as Gemma 2B.
+
+
+                                           Mean False Positives for all Evaluators across languages                                                                                                                                                                                                                Mean κw for all Evaluators across Language Tiers
+                      1.0                                                                                                                                                                                                                                   1.0
+                                                                                                                                                                                 Transcreated                                                                                                                                                                                                                                                             High-Resource
+                                                                                                                                                                                 Manual                                                                                                                                                                                                                                                                   Mid-Resource
+                      0.8                                                                                                                                                                                                                                   0.8
+                                                                                                                                                                                 Full Corpus                                                                                                                                                                                                                                                              Low-Resource
+
+
+                      0.6                                                                                                                                                                                                                                   0.6
+
+
+
+Fraction of FP
+                                                                                                                                                                                                                                                  Mean κw
+                      0.4                                                                                                                                                                                                                                   0.4
+
+
+
+                      0.2                                                                                                                                                                                                                                   0.2
+
+
+
+                      0.0                                                                                                                                                                                                                                   0.0
+
+
+
+                                       Llama 3, 8B   GPT-4 Turbo                           Llama 3, 70B                                   Llama 2, 7B                             Llama 2, 70B
+                                                                     Mistral-v2, 7B                                                                             Mistral-v3, 7B
+                                                                                                                     Gemma, 7B                                                                      Gemma, 2B                                                                   GPT-4 Turbo        Llama 3, 8B          Llama 3, 70B                                                                      Llama 2, 70B          Llama 2, 7B                         Llama Guard
+                                                                                                                                                                                                                                                                                                                                                            Mistral-v3, 7B          Mistral-v2, 7B
+                                                                                                                                                                                                                                                                                                                                        ACS
+
+                                                                                                                                                                                                                                                                                                                                                                                                                                                   Gemma, 7B                         Gemma, 2B
+
+
+
+
+Figure 4: FPs across all languages for the S/LLMs. Gemma                                                                                                                                                                                    Figure 5: Language availability versus κw over all languages
+2B presented the highest FP, misidentifying up to 40% of the                                                                                                                                                                                in the prompts subset. All S/LLMs decreased in κw from
+samples observed, while Llama Guard and ACS had near-                                                                                                                                                                                       high to low-resource languages, with differences of up to
+zero FP.                                                                                                                                                                                                                                    around 10%.
+
+
+                                                                                                                                                                                                                                            ences. However, increasing both the dialectal coverage and
+   In terms of coverage, RTP-LX lacks sufficient dialectal
+                                                                                                                                                                                                                                            the cultural skewness of the corpus are likely to cause lower
+coverage. Although we encouraged translators and prompt
+                                                                                                                                                                                                                                            performance for S/LLM-based evaluators, not higher.
+authors to explore various dialects, more could be done in
+this area: certain languages (e.g. Arabic) vary considerably                                                                                                                                                                                Toxic Language in a Global Context The study of toxi-
+amongst dialects; and others, like Spanish, vary in terms of                                                                                                                                                                                city in a multilingual setting is difficult not only due to the
+homonyms so much that their holistic evaluation of toxic-                                                                                                                                                                                   scarcity of quality, human-generated corpora especially de-
+ity is notoriously complex. It is also worth noting that our                                                                                                                                                                                signed for this task; but also because of the constant evolu-
+corpus mostly covers Indo-European (Germanic, Romance)                                                                                                                                                                                      tion of language and its perception by native speakers. It is
+languages. We plan to perform further additions to the cor-                                                                                                                                                                                 also worth noting that things that may be offensive to a na-
+pus to explore other families and expand on dialectal differ-                                                                                                                                                                               tive speaker in one geo-locale may not be offensive to that
+
+
+                                                                                                                                                                                                                               27945
+in another. We mitigated this by including a uniform value                   Further work will scale RTP-LX to more dialects and
+system and making a best effort on demographic representa-                language families. As mentioned earlier, transcreating and
+tion, but nonetheless encouraged the annotators to use their              annotating the dataset with humans is comparatively time-
+best judgement and only defer to the value system when in                 consuming. However, it allows us to reliably address cul-
+doubt.                                                                    tural sensitivity and subtler issues such as microaggressions.
+                                                                          This means it is a worthwhile investment–as shown here, in
+S/LLMs Evaluated S/LLMs are known to have data con-                       a multilingual context, these subtle issues are precisely the
+tamination issues that hamper fair evaluations. Although                  ones requiring more attention in the field. Since we believe
+most of RTP-LX was hand-designed, there is no guarantee                   that RTP-LX is a resource necessary to combat harmful and
+that our corpus will not be eventually used to train the mod-             toxic content in S/LLMs in research and in production, we
+els. We have adopted measures to protect the data against                 have released the corpus, prompts, code used for this paper,
+crawlers, while still leaving the data open to all.                       and the rubrics, to the wider community.
+   Moreover, S/LLMs undergo frequent updates. We have
+specified the versions of the models we tested to ensure
+reproducibility, but it is likely updated models–such as                                  A    Annotation Details
+newer versions of Llama Guard–will have better perfor-                    Human involvement of RTP-LX involved two steps: tran-
+mance in this corpus. Likewise, we did not evaluate fine-                 screation, and annotation. The transcreation was performed
+tuned models. Our focus was on base models, which are                     by a single professional translator per-language, and they
+more widespread and the “lowest” possible bar. That said,                 were paid at a varying rate depending on locale and se-
+fine-tuning the S/LLMs and turning them into specialists for              niority, between 19-54 USD/hr. The annotation was per-
+this task could improve upon the numbers shown here. The                  formed by three professional annotators, based on the crite-
+difficulty of fine-tuning lies on the scarcity of high-quality,           ria shown in Table 2. They were paid at a varying rate, like-
+available data: a common problem in the study of toxic lan-               wise between 10-46.5 USD/hr. None of the annotators were
+guage in NLP (Hartvigsen et al. 2022). This, although out                 transcreators. Prior to starting the work, we requested that
+of scope for our paper, will preclude many specialists from               the translators and annotators ensured that they took breaks
+arising. It is precisely for this reason that our experimental            and prioritized their own well-being. We performed several
+setup assumes low data availability, and emphasises human-                guideline fine-tuning rounds and worked closely with the an-
+created over machine-translated data.                                     notation services company to ensure all doubts were cleared
+                                                                          prior to starting the work. The final guidelines for both steps
+                     8    Conclusion                                      are in the repository.
+                                                                             A best effort was made to ensure representation in the
+In this paper we explored the question of whether we can
+                                                                          annotation pool. From the optional exit survey, 52% them-
+scale safety as fast as we scale S/LLMs. We framed it as
+                                                                          selves as female (r. 35% male); 6% identified as LGBTQ+;
+a S/LLM capability analysis, by evaluating whether these
+                                                                          and 12% identified as neurodivergent or maybe neurodiver-
+models could work as annotators for multilingual toxic-
+                                                                          gent. In terms of leaning for politics, 54% of the respondents
+language detection. To this end we introduced a human-
+                                                                          identified themselves as centre-leaning (versus 22% left; 5%
+annotated and human-transcreated corpus designed specif-
+                                                                          right). 20% of the respondents considered religion to be be-
+ically to capture toxicity in a multilingual scenario.
+                                                                          tween important to extremely important to them, while 34%
+   We evaluated ten S/LLMs in RTP-LX, and found that they                 answered not important at all (32% somewhat important).
+are able to score highly when measuring raw accuracy. How-                Given that the English subset of RTP-LX dealt with sports
+ever, by changing the metric (by comparing the outputs to                 in addition to religion and politics, we asked how important
+human annotator judgements) showed that this performance                  was sports to them. 39% of the respondents ranked sports be-
+did not necessarily meant that the models are reliable judges             tween important to extremely important, while 19% said that
+of toxicity. Indeed, we attributed that high accuracy to class            it was not important at all and 28% mentioned it as some-
+imbalance, since the vast majority of the corpus is harm-                 what important. The response rate for the survey was 88%,
+ful. We noted that the agreement between S/LLMs and hu-                   and all results from the survey, transcreation, and annota-
+man annotators was relatively low, and often came coupled                 tion work were anonymised. No particular individual can be
+with an increasing tend to over-block benign content. This                identified based on the content.
+indicates a potentially poor understanding of the task by the
+S/LLM. One possible exception was GPT-4 Turbo, which
+was able to score within one standard deviation of human                                B     Languages Supported
+judgements.                                                               The languages supported by RTP-LX, at the time of writ-
+   Additionally, we found two pathologies common to                       ing the first version of this paper, are in Table 1. The dis-
+some, if not all, S/LLMs evaluated: a tendency to se-                     tinction between a dialect and a language may be a sensi-
+lect high-valued labels, which in RTP-LX means “ex-                       tive subject, and sometimes definition (consider Arabic, for
+treme harm”, and low agreement with humans in context-                    example). In RTP-LX, sometimes we do not specify a di-
+dependent, subtle-yet-harmful content (e.g. microagres-                   alect, but the corpus covers subjects relevant to the locations
+sions, bias). Both pathologies imply that the deployment of               where it is spoken (for example, Kiswahili in Tanzania and
+base, un-finetuned S/LLMs as multilingual harm detectors                  in Kenya, Russian in Russia and Ukraine). For simplicity,
+are likely to cause further problems, such as erasure.                    we centralised all languages and dialects available in RTP-
+
+
+                                                                  27946
+          Language      Primary Family   Subdivision      Dialects explicitly marked in RTP-LX      Language Class
+            Arabic        Afro-Asiatic  Central Semitic         Egyptian, Levantine, Saudi                5
+            Hebrew        Afro-Asiatic Northwest Semitic                    None                          3
+          Indonesian      Austronesian Malayo-Polynesian                    None                          3
+            Danish       Indo-European  North Germanic                      None                          3
+          Norwegian      Indo-European  North Germanic   None, but the corpus contains only Bokmål       1
+           Swedish       Indo-European  North Germanic                      None                          4
+             Dutch       Indo-European  West Germanic                       None                          4
+            English      Indo-European  West Germanic                       None                          5
+            German       Indo-European  West Germanic                       None                          5
+            Russian      Indo-European    East Slavic                       None                          4
+           Ukrainian     Indo-European    East Slavic                       None                          3
+             Czech       Indo-European    West Slavic                       None                          4
+             Polish      Indo-European    West Slavic                       None                          4
+            BCMS         Indo-European   South Slavic                     Serbian                         4
+            Spanish      Indo-European     Romance         None, focused on Peninsular Spanish            5
+          Portuguese     Indo-European     Romance                Brazilian and European                  4
+            French       Indo-European     Romance        None, focused on Metropolitan French            5
+             Italian     Indo-European     Romance                          None                          4
+             Hindi       Indo-European    Hindustani                        None                          4
+              Thai          Kra-Dai           Tai                           None                          3
+           Kiswahili      Niger-Congo       Bantu                           None                          2
+       Standard Chinese   Sino-Tibetan      Sinitic       None (simplified and traditional scripts)       1
+           Japanese         Japonic            -                            None                          5
+            Korean          Koreanic           -                            None                          4
+            Turkish          Turkic            -                            None                          4
+            Finnish          Uralic         Finnic                          None                          4
+          Hungarian          Uralic          Ugric                          None                          4
+
+Table 1: Languages supported by RTP-LX at the time of writing this paper. Sometimes a dialect is not specified, but the corpus
+covers subjects relevant to multiple locations where it is spoken (e.g., Russian in Russia and Ukraine). For simplicity, we
+centralised languages and the dialects available in RTP-LX to their main language (e.g., BCMS), with the exception of distinct
+writing systems (e.g., simplified vs traditional standard Chinese). The language class is a natural number between 0 and 5
+denoting its level of online availability, with 5 being highest.
+
+       Criterion           Description                                                                                  Scale
+       Toxicity            A holistic view of the content. How toxic would you rate the content to be?                   1-5
+       Identity Attack     Hateful or hurtful comments targeting a group or person belonging to a group,                 1-3
+                           ranging from stereotyping, denigration, and stigmatisation to explicitly harmful
+                           discourse (hate speech, slurs, etcetera).
+       Bias                Content containing or amplifying bias towards or against a specific group, ideology,          1-3
+                           or person. This is not necessarily toxic language.
+       Microaggression     Positive stereotyping and subtle yet not explicitly harmful content targeting a spe-          1-3
+                           cific group (“where are you really from?”, “lots of Asians in my class, the curve
+                           will be dragged up” e.g.)
+       Violence            Content glorifying or promoting violence, threats, or self-harm.                              1-3
+       Self-Harm           Content calling for actions intended to hurt, injure, or kill oneself.                        1-3
+       Insult              Insulting or otherwise negative content, including profanities.                               1-3
+       Sexual Content      Referring to sexual acts and related content, both consensual and not.                        1-3
+
+    Table 2: Categories with definitions and scales for RTP-LX used in the annotation and in the prompts for the models.
+
+
+LX to their main language. This meant that we used, for                                   C    Select Results
+example, the linguistic classification for Serbian, Bosnian,           In this section we show include selected results from our
+Croatian, and Montenegrin (BCMS) as opposed to treating                evaluations. We refer the reader to the repository for the full
+them separately. The only exception to this rule was if the            results and code to reproduce the work.
+writing system was noticeably different, such as in simpli-               In terms of IRR (6), GPT-4 Turbo and Llama 3 8B were
+fied versus traditional standard Chinese. The rationale here           closest to the annotator’s judgements, off by an average Co-
+is that S/LLMs are primarily lexical engines.                          hen’s κw difference of 0.22 and 0.28 points, respectively.
+
+
+                                                               27947
+Figure 6: Cohen’s κw for RTP-LX for human annotators, GPT-4 Turbo, Llama 2 70B, and Llama Guard. IRR for human
+annotators is computed between the annotators. IRR for the S/LLMs is computed against the human majority vote. GPT-4
+Turbo had the closest average IRR to human annotators (0.22 points difference). It noticeably outperformed other models some
+categories, but, like all models, it failed at detecting microaggressions. Llama Guard, which had topped PA scores, dropped to
+the second-to-last in terms of average κw . This suggests that it is a lazy learner, and it could overblock across all metrics.
+
+
+
+
+Figure 7: Class distribution comparing Toxicity and Microaggression for all models. The S/LLMs often output higher-valued
+labels, as opposed to positive labels. This was especially visible in Toxicity and Identity Attack. Likewise, the models often
+picked binary labels (e.g., Bias), although some models (Mixtral, Llama Guard) presented this pathology more than others.
+
+
+For reference, the average IRR for human annotators was                  label, yielding a high amount of FPs on the benign sub-
+0.62 ± 0.2 across all datasets. The Mistral models had closer            set. This was evident in the categories where the mod-
+IRRs to the human average (absolute differences of 0.34                  els underperformed the most (Microaggression, Bias, Iden-
+and 0.33, respectively) than the Gemma models (0.54 for                  tity Attack), particularly for Gemma 2B and Mistral v3,
+2B and 0.41 for 7B). Gemma 2B was the lowest-performing                  which deemed benign completions to be extremely toxic.
+model we tested. Both Llama-3 models tested were more                    In Self-Harm and Sexual Content, all models did well, with
+adept at recognizing toxicity, identity attacks, and bias than           ACS overblocking slightly more than other models. In Vi-
+their older versions, but failed at detecting self-harm. None            olence and other categories, most models output a binary
+of the Llama-2 and 3 models were able to detect microag-                 label, which meant that the S/LLMs were less prone to con-
+gressions well. The differences in agreements with respect to            sider context when emitting a judgement. Toxicity especilly
+human annotators were 0.28, 0.28, 0.41 and 0.40 for Llama-               caused a disparity in some models (e.g., Gemma and Mix-
+2 7B, *-2 70B, *-3 8B, and *-3 70B, respectively. Notice-                tral), where larger labels were often observed, while Llama
+ably, increased model size did not enhance performance, but              Guard was unable to detect it, same as Insult.
+changes of model version did.
+   A breakdown by label output per-prompt (Figure 7)
+showed that the models preferred to output a higher-valued
+
+
+                                                                 27948
+                      Ethics Statement                                            Gehman, S.; Gururangan, S.; Sap, M.; Choi, Y.; and Smith, N. A.
+                                                                                  2020. RealToxicityPrompts: Evaluating Neural Toxic Degenera-
+All aspects of this research were reviewed and approved by                        tion in Language Models. In Findings of the Association for Com-
+the Institutional Review Board of our organisation. Given                         putational Linguistics: EMNLP 2020, 3356–3369. Online: Associ-
+the nature of the corpus and the tendency for S/LLMs                              ation for Computational Linguistics.
+to memorise highly available data, reproducibility–a cor-
+                                                                                  Hada, R.; Gumma, V.; de Wynter, A.; Diddee, H.; Ahmed, M.;
+nerstone of science–becomes complex. To ensure RTP-LX
+                                                                                  Choudhury, M.; Bali, K.; and Sitaram, S. 2024. Are Large Lan-
+remains a resource for the community without allowing                             guage Model-based Evaluators the Solution to Scaling Up Multi-
+S/LLMs to propagate this content, we have taken measures                          lingual Evaluation? In Graham, Y.; and Purver, M., eds., Find-
+to protect the data by password-protecting it.                                    ings of the Association for Computational Linguistics: EACL 2024,
+                                                                                  1051–1070. St. Julian’s, Malta: Association for Computational
+                     Acknowledgments                                              Linguistics.
+
+We would like to thank Can Gören for his contribution to the                     Hamad, N.; Jarrar, M.; Khalilia, M.; and Nashif, N. 2023. Offensive
+                                                                                  Hebrew Corpus and Detection using BERT. In The 20th ACS/IEEE
+Turkish subset of RTP-LX; and the anonymous reviewers,
+                                                                                  Int Conf on Computer Systems and Applications. Egypt: IEEE.
+whose comments drastically improved this paper.
+                                                                                  Hartvigsen, T.; Gabriel, S.; Palangi, H.; Sap, M.; Ray, D.; and Ka-
+                                                                                  mar, E. 2022. ToxiGen: A Large-Scale Machine-Generated Dataset
+                           References                                             for Adversarial and Implicit Hate Speech Detection. In Muresan,
+Ahuja, S.; Aggarwal, D.; Gumma, V.; Watts, I.; Sathe, A.; Ochieng,                S.; Nakov, P.; and Villavicencio, A., eds., Proc of the 60th Annual
+M.; Hada, R.; Jain, P.; Ahmed, M.; Bali, K.; and Sitaram, S. 2024.                Meeting of the Association for Computational Linguistics, 3309–
+MEGAVERSE: Benchmarking Large Language Models Across                              3326. Dublin, Ireland: Association for Computational Linguistics.
+Languages, Modalities, Models and Tasks. In Duh, K.; Gomez, H.;
+and Bethard, S., eds., Proc Conf of the North American Chapter of                 Holtermann, C.; Röttger, P.; Dill, T.; and Lauscher, A. 2024. Evalu-
+the Association for Computational Linguistics: Human Language                     ating the Elementary Multilingual Capabilities of Large Language
+Technologies (Volume 1: Long Papers), 2598–2637. Mexico City,                     Models with MultiQ. In Ku, L.-W.; Martins, A.; and Srikumar,
+Mexico: Association for Computational Linguistics.                                V., eds., Findings of the Association for Computational Linguis-
+                                                                                  tics: ACL 2024, 4476–4494. Bangkok, Thailand: Association for
+AI@Meta. 2024. Llama 3 Model Card.                                                Computational Linguistics.
+Carlini, N.; Ippolito, D.; Jagielski, M.; Lee, K.; Tramer, F.; and                Inan, H.; Upasani, K.; Chi, J.; Rungta, R.; Iyer, K.; Mao, Y.;
+Zhang, C. 2023. Quantifying Memorization Across Neural Lan-                       Tontchev, M.; Hu, Q.; Fuller, B.; Testuggine, D.; and Khabsa,
+guage Models. In Int Conf on Learning Representations.                            M. 2023. Llama Guard: LLM-based Input-Output Safeguard for
+Chang, Y.; Wang, X.; Wang, J.; Wu, Y.; Yang, L.; Zhu, K.; Chen,                   Human-AI Conversations. ArXiv:2312.06674.
+H.; Yi, X.; Wang, C.; Wang, Y.; Ye, W.; Zhang, Y.; Chang, Y.; Yu,
+                                                                                  Jain, D.; Kumar, P.; Gehman, S.; Zhou, X.; Hartvigsen, T.; and
+P. S.; Yang, Q.; and Xie, X. 2024. A Survey on Evaluation of Large
+                                                                                  Sap, M. 2024. PolygloToxicityPrompts: Multilingual Evaluation
+Language Models. ACM Trans. Intell. Syst. Technol.
+                                                                                  of Neural Toxic Degeneration in Large Language Models. In First
+Costa-jussà, M. R.; Cross, J.; Çelebi, O.; Elbayad, M.; Heafield, K.;           Conference on Language Modeling.
+Heffernan, K.; Kalbassi, E.; Lam, J.; Licht, D.; Maillard, J.; Sun,
+A.; Wang, S.; Wenzek, G.; Youngblood, A.; Akula, B.; Barrault, L.;                Jiang, A. Q.; Sablayrolles, A.; Mensch, A.; Bamford, C.; Chaplot,
+Gonzalez, G. M.; Hansanti, P.; Hoffman, J.; Jarrett, S.; Sadagopan,               D. S.; de las Casas, D.; Bressand, F.; Lengyel, G.; Lample, G.;
+K. R.; Rowe, D.; Spruit, S.; Tran, C.; Andrews, P.; Ayan, N. F.;                  Saulnier, L.; Lavaud, L. R.; Lachaux, M.-A.; Stock, P.; Scao, T. L.;
+Bhosale, S.; Edunov, S.; Fan, A.; Gao, C.; Goswami, V.; Guzmán,                  Lavril, T.; Wang, T.; Lacroix, T.; and Sayed, W. E. 2023. Mistral
+F.; Koehn, P.; Mourachko, A.; Ropers, C.; Saleem, S.; Schwenk,                    7B. 2310.06825:arXiv.
+H.; and Wang, J. 2022. No Language Left Behind: Scaling Human-                    Joshi, P.; Santy, S.; Budhiraja, A.; Bali, K.; and Choudhury, M.
+Centered Machine Translation.                                                     2020. The State and Fate of Linguistic Diversity and Inclusion in
+Davidson, T.; Bhattacharya, D.; and Weber, I. 2019. Racial Bias                   the NLP World. In Proc of the 58th Annual Meeting of the Associ-
+in Hate Speech and Abusive Language Detection Datasets. In                        ation for Computational Linguistics.
+Roberts, S. T.; Tetreault, J.; Prabhakaran, V.; and Waseem, Z., eds.,             Lai, V.; Ngo, N.; Pouran Ben Veyseh, A.; Man, H.; Dernoncourt,
+Proc of the Third Workshop on Abusive Language Online, 25–35.                     F.; Bui, T.; and Nguyen, T. 2023a. ChatGPT Beyond English: To-
+Florence, Italy: Association for Computational Linguistics.                       wards a Comprehensive Evaluation of Large Language Models in
+De Wynter, A.; Wang, X.; Sokolov, A.; Gu, Q.; and Chen, S.-                       Multilingual Learning. In Bouamor, H.; Pino, J.; and Bali, K.,
+Q. 2023. An evaluation on large language model outputs: Dis-                      eds., Findings of the Association for Computational Linguistics:
+course and memorization. Natural Language Processing Journal,                     EMNLP 2023, 13171–13189. Singapore: Association for Compu-
+4: 100024.                                                                        tational Linguistics.
+Deng, Y.; Zhang, W.; Pan, S. J.; and Bing, L. 2024. Mul-                          Lai, V. D.; Ngo, N. T.; Veyseh, A. P. B.; Man, H.; Dernoncourt,
+tilingual Jailbreak Challenges in Large Language Models.                          F.; Bui, T.; and Nguyen, T. H. 2023b. ChatGPT Beyond English:
+arXiv:2310.06474.                                                                 Towards a Comprehensive Evaluation of Large Language Models
+                                                                                  in Multilingual Learning. In The 2023 Conference on Empirical
+Dhamala, J.; Sun, T.; Kumar, V.; Krishna, S.; Pruksachatkun, Y.;
+                                                                                  Methods in Natural Language Processing.
+Chang, K.-W.; and Gupta, R. 2021. BOLD: Dataset and Met-
+rics for Measuring Biases in Open-Ended Language Generation.                      Lee, J.; Le, T.; Chen, J.; and Lee, D. 2023. Do Language Mod-
+In Proc. of the 2021 ACM Conf on Fairness, Accountability, and                    els Plagiarize? In Proceedings of the ACM Web Conference 2023,
+Transparency, FAccT ’21, 862–872. New York, NY, USA: Associ-                      WWW ’23, 3637–3647. New York, NY, USA: Association for
+ation for Computing Machinery. ISBN 9781450383097.                                Computing Machinery. ISBN 9781450394161.
+
+
+                                                                          27949
+Leite, J. A.; Silva, D. F.; Bontcheva, K.; and Scarton, C. 2020.                 X. E.; Tang, B.; Taylor, R.; Williams, A.; Kuan, J. X.; Xu, P.;
+Toxic Language Detection in Social Media for Brazilian Por-                      Yan, Z.; Zarov, I.; Zhang, Y.; Fan, A.; Kambadur, M.; Narang,
+tuguese: New Dataset and Multilingual Analysis. In AACL-                         S.; Rodriguez, A.; Stojnic, R.; Edunov, S.; and Scialom, T. 2023.
+IJCNLP.                                                                          Llama 2: Open Foundation and Fine-Tuned Chat Models. ArXiv,
+Li, J.; Wang, J.; Hu, J.; and Jiang, M. 2024. How Well Do LLMs                   abs/2307.09288.
+Identify Cultural Unity in Diversity? In First Conference on Lan-                Wang, B.; Chen, W.; Pei, H.; Xie, C.; Kang, M.; Zhang, C.; Xu,
+guage Modeling.                                                                  C.; Xiong, Z.; Dutta, R.; Schaeffer, R.; Truong, S. T.; Arora, S.;
+Moon, J.; Cho, W. I.; and Lee, J. 2020. BEEP! Korean Corpus of                   Mazeika, M.; Hendrycks, D.; Lin, Z.; Cheng, Y.; Koyejo, S.; Song,
+Online News Comments for Toxic Speech Detection. In Proc of the                  D.; and Li, B. 2023. DecodingTrust: A Comprehensive Assessment
+Eighth Int Workshop on Natural Language Processing for Social                    of Trustworthiness in GPT Models. In NeurIPS 2023.
+Media, 25–31. Online: Association for Computational Linguistics.                 Wang, W.; Tu, Z.; Chen, C.; Yuan, Y.; Huang, J.-t.; Jiao, W.; and
+OpenAI. 2024. GPT-4 Technical Report. arXiv:2403.08295.                          Lyu, M. 2024a. All Languages Matter: On the Multilingual Safety
+Rauh, M.; Mellor, J.; Uesato, J.; Huang, P.-S.; Welbl, J.; Weidinger,            of LLMs. In Ku, L.-W.; Martins, A.; and Srikumar, V., eds., Find-
+L.; Dathathri, S.; Glaese, A.; Irving, G.; Gabriel, I.; Isaac, W.; and           ings of the Association for Computational Linguistics: ACL 2024,
+Hendricks, L. A. 2022. Characteristics of harmful text: Towards                  5865–5877. Bangkok, Thailand: Association for Computational
+rigorous benchmarking of language models.                                        Linguistics.
+Sap, M.; Card, D.; Gabriel, S.; Choi, Y.; and Smith, N. A. 2019.                 Wang, Y.; Zhai, C.; and Hassan, H. 2020. Multi-task Learning for
+The Risk of Racial Bias in Hate Speech Detection. In Korhonen,                   Multilingual Neural Machine Translation. In Webber, B.; Cohn,
+A.; Traum, D.; and Màrquez, L., eds., Proc. of the 57th Annual                  T.; He, Y.; and Liu, Y., eds., Proc of the 2020 Conf on Empirical
+Meeting of ACL, 1668–1678. Florence, Italy: Association for Com-                 Methods in Natural Language Processing, 1022–1034. Online: As-
+putational Linguistics.                                                          sociation for Computational Linguistics.
+Sheng, E.; Chang, K.-W.; Natarajan, P.; and Peng, N. 2019. The                   Wang, Y.; Zhai, Z.; Li, H.; Han, X.; Lin, S.; Zhang, Z.; Zhao, A.;
+Woman Worked as a Babysitter: On Biases in Language Genera-                      Nakov, P.; and Baldwin, T. 2024b. A Chinese Dataset for Eval-
+tion. In Proc of the 2019 Conf on Empirical Methods in Natural                   uating the Safeguards in Large Language Models. In Ku, L.-W.;
+Language Processing and the 9th Int Joint Conf on Natural Lan-                   Martins, A.; and Srikumar, V., eds., Findings of the Association
+guage Processing, 3407–3412. Hong Kong, China: Association for                   for Computational Linguistics: ACL 2024, 3106–3119. Bangkok,
+Computational Linguistics.                                                       Thailand: Association for Computational Linguistics.
+Sigurbergsson, G. I.; and Derczynski, L. 2020. Offensive Language                Wei, F.; Chen, X.; and Luo, L. 2024. Rethinking Generative Large
+and Hate Speech Detection for Danish. In Proc of the Twelfth Lan-                Language Model Evaluation for Semantic Comprehension. ArXiv,
+guage Resources and Evaluation Conference, 3498–3508. Mar-                       abs/2403.07872.
+seille, France: European Language Resources Association. ISBN                    Zheng, L.; Chiang, W.-L.; Sheng, Y.; Zhuang, S.; Wu, Z.; Zhuang,
+979-10-95546-34-4.                                                               Y.; Lin, Z.; Li, Z.; Li, D.; Xing, E.; Zhang, H.; Gonzalez, J. E.;
+Team, G.; Mesnard, T.; Hardin, C.; Dadashi, R.; Bhupatiraju, S.;                 and Stoica, I. 2023. Judging LLM-as-a-Judge with MT-Bench and
+Pathak, S.; Sifre, L.; Rivière, M.; Kale, M. S.; Love, J.; Tafti, P.;           Chatbot Arena. In Oh, A.; Neumann, T.; Globerson, A.; Saenko,
+Hussenot, L.; Sessa, P. G.; Chowdhery, A.; Roberts, A.; Barua,                   K.; Hardt, M.; and Levine, S., eds., NeurIPS, volume 36, 46595–
+A.; Botev, A.; Castro-Ros, A.; Slone, A.; Héliou, A.; Tacchetti,                46623. Curran Associates, Inc.
+A.; Bulanova, A.; Paterson, A.; Tsai, B.; Shahriari, B.; Lan, C. L.;
+Choquette-Choo, C. A.; Crepy, C.; Cer, D.; Ippolito, D.; Reid, D.;
+Buchatskaya, E.; Ni, E.; Noland, E.; Yan, G.; Tucker, G.; Mu-
+raru, G.-C.; Rozhdestvenskiy, G.; Michalewski, H.; Tenney, I.; Gr-
+ishchenko, I.; Austin, J.; Keeling, J.; Labanowski, J.; Lespiau, J.-
+B.; Stanway, J.; Brennan, J.; Chen, J.; Ferret, J.; Chiu, J.; Mao-
+Jones, J.; Lee, K.; Yu, K.; Millican, K.; Sjoesund, L. L.; Lee, L.;
+Dixon, L.; Reid, M.; Mikuła, M.; Wirth, M.; Sharman, M.; Chi-
+naev, N.; Thain, N.; Bachem, O.; Chang, O.; Wahltinez, O.; Bailey,
+P.; Michel, P.; Yotov, P.; Chaabouni, R.; Comanescu, R.; Jana, R.;
+Anil, R.; McIlroy, R.; Liu, R.; Mullins, R.; Smith, S. L.; Borgeaud,
+S.; Girgin, S.; Douglas, S.; Pandya, S.; Shakeri, S.; De, S.; Kli-
+menko, T.; Hennigan, T.; Feinberg, V.; Stokowiec, W.; hui Chen,
+Y.; Ahmed, Z.; Gong, Z.; Warkentin, T.; Peran, L.; Giang, M.;
+Farabet, C.; Vinyals, O.; Dean, J.; Kavukcuoglu, K.; Hassabis, D.;
+Ghahramani, Z.; and et al., D. E. 2024. Gemma: Open Models
+Based on Gemini Research and Technology. arXiv:2403.08295.
+Touvron, H.; Martin, L.; Stone, K.; Albert, P.; Almahairi, A.;
+Babaei, Y.; Bashlykov, N.; Batra, S.; Bhargava, P.; Bhosale, S.;
+Bikel, D.; Blecher, L.; Ferrer, C. C.; Chen, M.; Cucurull, G.;
+Esiobu, D.; Fernandes, J.; Fu, J.; Fu, W.; Fuller, B.; Gao, C.;
+Goswami, V.; Goyal, N.; Hartshorn, A.; Hosseini, S.; Hou, R.; Inan,
+H.; Kardas, M.; Kerkez, V.; Khabsa, M.; Kloumann, I.; Korenev,
+A.; Koura, P. S.; Lachaux, M.-A.; Lavril, T.; Lee, J.; Liskovich,
+D.; Lu, Y.; Mao, Y.; Martinet, X.; Mihaylov, T.; Mishra, P.; Moly-
+bog, I.; Nie, Y.; Poulton, A.; Reizenstein, J.; Rungta, R.; Saladi,
+K.; Schelten, A.; Silva, R.; Smith, E. M.; Subramanian, R.; Tan,
+
+
+                                                                         27950
+

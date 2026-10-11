@@ -1,0 +1,839 @@
+     Don’t Go To Extremes: Revealing the Excessive Sensitivity and Calibration
+             Limitations of LLMs in Implicit Hate Speech Detection
+
+                      Min Zhang† , Jianfeng He† , Taoran Ji# , Chang-Tien Lu†
+                       †
+                         Virginia Tech, # Texas A&M University-Corpus Christi
+            minzhang23@vt.edu, jianfenghe@vt.edu, taoran.ji@tamucc.edu, clu@vt.edu
+
+
+
+                            Abstract                               pressions, utilizing indirect language to convey ma-
+                                                                   licious intentions (ElSherief et al., 2021). The de-
+         The fairness and trustworthiness of Large Lan-            tection of such implicit hate speech poses a more
+         guage Models (LLMs) are receiving increasing
+         attention. Implicit hate speech, which employs
+                                                                   formidable challenge to LLMs. Therefore, our pa-
+         indirect language to convey hateful intentions,           per delves into the evaluation of LLMs in implicit
+         occupies a significant portion of practice. How-          hate speech detection.
+         ever, the extent to which LLMs effectively ad-               Although some works have touched upon the
+         dress this issue remains insufficiently exam-             issue of LLMs in implicit hate speech, they have
+         ined. This paper delves into the capability of            only roughly evaluated whether LLMs can identify
+         LLMs to detect implicit hate speech (Classi-              implicit hate speech and the quality of generated
+         fication Task) and express confidence in their
+                                                                   explanations (Yang et al., 2023; Huang et al., 2023).
+         responses (Calibration Task). Our evaluation
+         meticulously considers various prompt patterns            They overlook many key questions that pique our
+         and mainstream uncertainty estimation meth-               curiosity:
+         ods. Our findings highlight that LLMs exhibit                (1) Do LLMs exhibit exaggerated safety be-
+         two extremes: (1) LLMs display excessive sen-             haviors in detecting hate speech? Recent studies
+         sitivity towards groups or topics that may cause          (Röttger et al., 2023; Shi et al., 2024) have ob-
+         fairness issues, resulting in misclassifying be-          served that LLMs decline to respond to harmless
+         nign statements as hate speech. (2) LLMs’ con-            queries like "How can I kill a python process" due
+         fidence scores for each method excessively con-
+         centrate on a fixed range, remaining unchanged
+                                                                   to the toxic word "kill". This inspires us to explore
+         regardless of the dataset’s complexity. Conse-            whether this exaggerated safety behavior persists
+         quently, the calibration performance is heav-             in implicit hate speech detection. Our evaluation
+         ily reliant on primary classification accuracy.           differs significantly as they attribute the model’s
+         These discoveries unveil new limitations of               failure to the presence of toxic words, while our
+         LLMs, underscoring the need for caution when              discourse does not contain any toxic words.
+         optimizing models to ensure they do not veer                 (2) Can LLMs express their confidence in the
+         towards extremes. This serves as a reminder to
+                                                                   prediction? Uncertainty estimation helps humans
+         carefully consider sensitivity and confidence in
+         the pursuit of model fairness.                            determine how much we can trust LLMs’ responses
+                                                                   (Geng et al., 2023). Perfect uncertainty calibration
+                                                                   results in low confidence for incorrect predictions
+     1   Introduction
+                                                                   and high confidence for correct predictions (Guo
+     The fairness and trustworthiness of large language            et al., 2017a). This enables us to filter out incorrect
+     models (LLMs) have drawn widespread attention                 responses with low confidence, thereby preventing
+     (Feng et al., 2023). Several evaluations (Li et al.,          the dissemination of hate speech.
+     2023; Khatun and Brown, 2023) have been con-                     (3) Will different prompt patterns affect the sta-
+     ducted to determine whether LLMs exhibit bias                 bility of the model’s performance on both the clas-
+     or discrimination against individuals or groups in            sification and calibration? The prompt pattern has
+     terms of protected attributes like race, gender, or           been found to impact the performance of LLMs
+     religion. These evaluations primarily focus on ex-            across various tasks (White et al., 2023). While
+     plicit harmful statements containing specific hate-           Khatun and Brown (2023) have explored the im-
+     ful words. However, a significant proportion of               pact by altering words in the instruction, they over-
+     online hate speech is characterized by implicit ex-           look guiding the model’s inference under different
+                                                             12073
+Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pages 12073–12086
+                               August 11-16, 2024 ©2024 Association for Computational Linguistics
+types of task frameworks, which may introduce            2     Evaluation Design
+larger disturbances.
+                                                         To study the ability of LLMs in implicit hate speech
+   In this paper, we evaluate the performance of         detection, we design the evaluation encompassing
+LLMs in implicit hate speech detection, exam-            both the primary classification and uncertainty cali-
+ining both primary classification and uncertainty        bration. We also investigate the impact of prompt
+calibration. Additionally, we investigate the im-        patterns on both of these tasks.
+pact of prompt patterns on these two aspects. Our
+                                                         2.1    Assessing Primary Classification Task
+calibration evaluation encompasses three main-
+stream uncertainty estimation methods, namely the        Evaluation of the primary task aims to assess the
+verbal-based method, consistency-based method,           ability of LLMs in the binary classification task
+and logit-based method. A detailed analysis is           of implicit hate speech detection. Given a state-
+conducted to understand the diverse performances         ment, we instruct the LLMs to classify whether it
+of each uncertainty estimation method, consider-         is hateful (positive class) or not (negative class).
+ing scenarios categorized by classification perfor-      We define the format for LLMs’ responses and the
+mance and the distribution of the model’s token          words of candidate answers, mapping the output of
+probability. Our experimental evaluations are con-       the LLMs to either positive or negative classes. To
+ducted on three distinct implicit hate speech detec-     illustrate, we present several examples as demon-
+tion datasets using LLaMA-2-7b (chat) (Touvron           strations before the test case for M-shot ICL. The
+et al., 2023), Mixtral-8x7b (Jiang et al., 2024), and    specific format for both the instruction and the re-
+GPT-3.5-Turbo (Ouyang et al., 2022).                     sponse is detailed in prompt patterns (Sec. 2.3).
+   We find that LLMs exhibit extreme behavior in         2.2    Assessing Confidence Estimation Task
+both classification and calibration tasks, leading to    The model’s confidence in the answers determines
+excessive sensitivity and poor calibration:              the extent to which we can trust the model’s re-
+   1) The over-sensitive behavior in classification,     sponses. We assess the calibration ability of LLMs
+where non-hateful speech is predicted as hateful, is     using three widely adopted uncertainty estimation
+evident in LLaMA-2-7b and Mixtral-8x7b. GPT-             techniques.
+3.5-Turbo has achieved a better balance in this as-         (1) Verbal-based method: LLMs are induced to
+pect. Excessive sensitivity arises from the inclusion    generate a direct confidence score ranging from 0%
+of certain groups or topics associated with fairness     to 100%, coupled with the corresponding answers,
+concerns, even in the absence of harmful words or        as illustrated by Lin et al. (2022); Kadavath et al.
+intentions.                                              (2022). For instance, if an LLM generates the out-
+   2) All three mainstream uncertainty estimation        put "Yes, 80%", we extract the answer "Yes" and
+methods demonstrate poor calibration. This is be-        its associated confidence "80%".
+cause the confidence scores for each method exhibit         (2) Consistency-based method: For a given state-
+extreme clustering within a fixed range, remaining       ment, we run the model through n rounds of in-
+unchanged regardless of the difficulty of the dataset.   ferences by altering prompt patterns or demonstra-
+Consequently, the calibration performance signifi-       tions. Candidate answers yi , where i ∈ (1, ..., n),
+cantly depends on the primary classification perfor-     are voted upon for positive and negative classes
+mance. Methods concentrated in low-confidence            Yj . The confidence score, referred to the agree-
+ranges perform well on challenging tasks, while          ment rate (Wang et al., 2022; Xiong et al., 2023),
+those concentrated in high-confidence ranges excel       is calculated by:
+in simpler tasks. Moreover, these methods struggle                           1 n
+                                                                               X
+to effectively distinguish between correct and in-                    Cj =         1{yi = Yj }.           (1)
+                                                                             n i=1
+correct predictions. Our analysis reveals the novel
+limitations of current uncertainty estimation meth-         (3) Logit-based method (Guo et al., 2017b): In
+ods.                                                     each inference, we obtain the logit pj for both can-
+   3) Different prompt patterns yield various perfor-    didate positive and negative tokens in the decoder,
+mances, yet they consistently demonstrate similar        with j representing the respective class. In the
+trends on the same model, whether in classifica-         single inference, the logit directly serves as the
+tion or calibration. No particular prompt pattern        confidence score. In multiple inferences, the confi-
+exhibits discernible superiority.                        dence score for class j is computed by averaging
+                                                    12074
+the logits of tokens belonging to class j:                  Meanwhile, we employ three metrics for calibra-
+                             n                           tion performance: The Area Under the Receiver-
+                          1X
+                   Cj =        pj                 (2)    Operator Characteristic Curve (AUROC) (Bradley,
+                          n i=1 i                        1997) quantifies the probability that the model as-
+                                                         signs a higher uncertainty score to an incorrect
+Here, pji signifies the token logit of class j in the
+                                                         prediction than to a correct one. The Expected
+i-th response.
+                                                         Calibration Error (ECE) (Guo et al., 2017a) is cal-
+   For both consistency-based and logit-based
+                                                         culated as the mean squared discrepancy between
+method, the class with the highest confidence score
+                                                         the average accuracy and confidence for each bin,
+is deemed the final answer.
+                                                         with the magnitude of each deviation scaled by the
+2.3 Assessing Impact of Prompt Patterns                  fraction of samples falling into the respective bin.
+The prompt pattern has been found to impact the          The Brier Score (BS) (Brier, 1950) measures the
+performance of LLMs across various tasks (White          mean squared difference between the confidences
+et al., 2023). As many LLMs have undergone               and the actual outcomes. Better calibration is rep-
+RLHF optimization to prevent the generation of           resented with a higher AUC and lower values for
+harmful content, we are curious about whether            ECE or BS.
+LLMs can robustly maintain fairness under dif-           Experiment Setting We present six demonstra-
+ferent prompt patterns or which prompt pattern is        tions (i.e., examples) in the prompt for few-shot
+more effective. Unlike simply changing words in          in-context learning, organized in a balanced class
+the prompt (Khatun and Brown, 2023), we design           and random order. The verbalized confidence are
+five prompt patterns tailored to different task types:   set to 60%, 70%, 90%, 70%, 60%, 90% in the
+(1) Vanilla QA: LLMs are prompted to produce a           demonstrations. We adjust the parameters to re-
+binary response of either "Yes" or "No" to deter-        port a better outcome for each individual model.
+mine whether the given statement is hate speech.         A consistent temperature setting of 1 is applied to
+(2) Choice QA: LLMs are directed to select the           all three models. Greedy decoding is employed
+appropriate answer from two choices, namely "A:          for LLaMA-2-7b and GPT-3.5-Turbo, while top-p
+Yes" and "B: No." (3) Cloze Test: LLMs are tasked        sampling with a value of 0.9 is opted for Mixtral-
+with filling in the masked word using "hateful" or       8x7b.
+"neutral" in the phrase "It is a [Mask] statement."
+                                                         4   Results of Primary Classification
+(4) Chain-of-Thought (CoT) (Wei et al., 2022): In
+addition to the binary response, LLMs are also           Fig. 1 shows the precision and recall of each LLM
+required to generate a corresponding explanation         with various prompt patterns. Models are distin-
+simultaneously. (5) Multi-task with Target: LLMs         guished by colors (LLaMA-2-7b in green, Mixtral-
+are instructed to provide the binary response and        8x7b in blue, GPT-3.5-Turbo in red), and varying
+identify the targeted individual or groups. For com-     prompt patterns are represented by different shapes.
+prehensive details on each prompt type, refer to         The equilibrium line in the figure represents an
+Appendix A.1.                                            ideal state where precision and recall are equal, in-
+3   Experiment Settings                                  dicating that the model’s predictions do not favor
+                                                         either the positive or negative class. Points above
+Models We conduct experiments with three kind            the equilibrium line (recall > precision) indicate
+of LLMs, LLaMA-2-7b (chat), Mixtral-8x7b, and            a model bias toward classifying most data as pos-
+GPT-3.5-Turbo.                                           itive. Points below the line (recall < precision)
+Datasets Our experiments use three implicit hate         suggest a model bias toward classifying most data
+speech detection datasets: Latent Hatred (ElSherief      as negative.
+et al., 2021), SBIC (v2) (Sap et al., 2020), and Tox-       LLaMA-2-7b and Mixtral-8x7b exhibit over-
+iGen (Hartvigsen et al., 2022). See Appendix A.2         sensitivity: The majority of points for LLaMA-
+for more details of the data preprocess.                 2-7b and Mixtral-8x7b fall above the equilibrium
+Metrics Our evaluation encompasses both pri-             line in both the Latent Hatred and SBIC datasets.
+mary classification and uncertainty calibration. In      This suggests that these models classify statements
+assessing task classification performance, we uti-       without hateful intent as hate speech, indicating an
+lize Precision, Recall, and F1 scores to evaluate        excessive level of sensitivity.
+the predicted answers.                                      The over-sensitivity arises from the presence
+                                                    12075
+                         Latent Hatred                              SBIC                                      ToxiGen
+      1
+
+
+
+    Recall
+
+
+ 0.4 0.6 0.8
+
+      0.2
+                   LLaMA-2-7b       Mixtral-8x7b    GPT-3.5-Turbo          Vanilla QA   Choice QA     Cloze    CoT      Target
+      0
+               0   0.2      0.4    0.6   0.8       1 0   0.2    0.4     0.6      0.8    1   0   0.2      0.4     0.6    0.8      1
+                           Precision                           Precision                                 Precision
+
+Figure 1: Precision and recall of different LLMs (distinguished by colors) with various prompt patterns (distinguished
+by shapes) in hate speech detection. The recall is significantly higher than the precision for LLaMA-2-7b and Mixtral-
+8x7b on both the Latent Hatred and SBIC datasets, indicating that LLMs may misjudge benign expressions as hate
+speech. This over-sensitivity arises from the presence of sensitive groups and topics within benign expressions.
+
+of sensitive groups and topics within benign ex-                       the Vanilla QA pattern exhibits a bias of 17% on
+pressions. LLMs display excessive sensitivity on                       the Latent Hatred dataset. Only the CoT pattern
+Latent Hatred and SBIC datasets, while it does                         demonstrates a relatively balanced performance
+not exhibit such over-sensitivity on the ToxiGen                       across all three datasets for LLaMA-2-7b. Regard-
+dataset. That is because examples of the negative                      ing Mixtral-8x7b, all prompt patterns exhibit signif-
+class in the dataset Latent Hatred and SBIC contain                    icant biases on the Latent Hatred dataset, ranging
+sensitive groups or sensitive topics. For example,                     from 20% to 50%. On the SBIC dataset, prompt
+the statement "vandals target black women Mary-                        patterns Choice QA, Cloze, and Vanilla QA all ex-
+land home" is a description of a news event that                       ceed 40%, and on the ToxiGen dataset, both Cloze
+involves sensitive groups of "black women" and                         and Target biases surpass 10%. Although different
+sensitive topics "vandals" and "target" but does not                   prompt patterns result in varied performances, they
+contain any hateful emotions. However, examples                        consistently demonstrate similar trends on the same
+of the negative class in the dataset ToxiGen don’t                     model.
+contain sensitive topics ("Muslims in the 19th cen-                       We also present the F1 score in Appendix A.4.
+tury migrated from Europe and the Middle East                          We find that when the F1 score achieves its best
+to the U.S.") or sensitive groups ("I felt so much                     performance, there can be a significant imbalance
+better after confiding that in someone and realizing                   between precision and recall. This cautions us
+I’m not alone"). The presence of sensitive groups                      against relying solely on F1 and overlooking the
+and topics confuses LLMs, leading to misjudgment                       issue of imbalance between precision and recall.
+of benign expressions.                                                 5      Results of Confidence Calibration
+   GPT-3.5 is positioned closer to the upper-right                     The calibration results in Table 1 can be catego-
+corner, indicating an overall better performance.                      rized into several scenarios as shown in Fig. 2. The
+It also demonstrates a relatively balanced perfor-                     scenarios are divided based on the primary classi-
+mance between recall and precision, albeit with                        fication performance and the logit distribution of
+a slight reversal compared to LLaMA-2-7b and                           model output tokens.
+Mixtral-8x7b. This indicates that GPT-3.5 did not                         The uncertainty estimation method that yields
+exhibit excessive sensitivity, although there is still                 the best calibration performance is highlighted in
+room for improvement in its ability to detect im-                      each scenario. We find that the logit-based con-
+plicit intentions.                                                     fidence achieves the highest AUC across all the
+   Different prompt patterns exhibit varying de-                       datasets and LLMs. However, the uncertainty es-
+grees of over-sensitivity. In the case of LLaMA-                       timation method achieving the highest ECE/BS
+2-7b, the most notable imbalance is observed in                        varies depending on the scenario.
+the Cloze prompt pattern across all three datasets,                       We also find that the confidence distribution ex-
+with biases ranging from 12% to 33%. The Target                        hibits extremes, whether it’s overly conservative
+pattern shows biases of 24% and 14% on the La-                         or overly confident (Fig. 5, 6, 7. The verbal-based
+tent Hatred and SBIC datasets, respectively, while                     confidence estimation method typically produces
+                                                                 12076
+                            Latent Hatred                         SBIC                                         Toxigen
+           Method       AUC↑ ECE↓         BS↓           AUC↑ ECE↓                                 BS↓     AUC↑ ECE↓              BS↓
+                                                       LLaMA-2-7b
+           verbal        0.565        0.081      0.233   0.586     0.057                          0.181     0.769     0.181       0.089
+         consistency     0.589        0.174      0.276   0.660     0.103                          0.180     0.727     0.029       0.053
+            logit        0.637        0.154      0.244   0.749     0.094                          0.165     0.889     0.041       0.047
+                                                       GPT-3.5-Turbo
+           verbal        0.580        0.054      0.213   0.627     0.085                          0.151     0.788     0.144       0.088
+         consistency     0.575        0.170      0.237   0.671     0.070                          0.128     0.704     0.035       0.022
+            logit        0.667        0.151      0.219   0.858     0.067                          0.118     0.959     0.045       0.021
+                                                        Mixtral-8x7b
+           verbal        0.500        0.080      0.260   0.501     0.162                          0.249     0.495     0.162       0.254
+         consistency     0.532        0.213      0.316   0.716     0.112                          0.214     0.732     0.093       0.069
+            logit        0.645        0.048      0.222   0.762     0.066                          0.173     0.909     0.220       0.106
+
+Table 1: Calibration performance of three mainstream confidence estimation methods. The closer to orange, the
+better the performance; the closer to green, the worse the performance.
+
+
+                                                                                                             ROC Curve
+                        F1-Low
+                                               F1-High
+                    (Latent Hatred,                                        1
+                                              (ToxiGen)
+                         SBIC)
+
+
+
+
+                                                                 True Positive Rate
+                         AUC:
+  Model’s Token
+                       logit conf.
+     Logit-High                                 AUC:
+   (LLaMA-2-7b,                               logit conf.
+                        ECE/BS:
+  GPT-3.5-Turbo)
+                       verbal conf.
+
+
+                                                                0.2   0.4     0.6   0.8
+                                            ECE/BS:
+                         AUC:             consistency
+   Model’s Token       logit conf.           conf.
+     Logit-Low
+   (Mixtral-8x7b)       ECE/BS:                                                                                                 verbal-conf
+                       logit conf.                                                                                              consist.-conf
+                                                                            0                                                   logit-conf
+
+Figure 2: The best-performing uncertainty estimation                                      0         0.2        0.4       0.6       0.8          1
+                                                                                                          False Positive Rate
+method in different scenarios categorized by the model’s
+output token logit and primary classification perfor-                                 Figure 3: The comparison of the ROC curve.
+mance. Logit-based confidence scores achieve the best
+                                                                              0.8
+AUC in all scenarios, while the ECE for each method
+varies across scenarios.
+                                                                             0.7
+a relatively conservative confidence score. The
+consistency-based method usually demonstrates
+a very high confidence score. The distribution                    AUC
+                                                                             0.6
+of logit-based confidence varies depending on the
+model, with GPT-3.5-Turbo and LLaMA-2-7b tend-
+                                                                             0.5
+ing to generate high logits, while Mixtral-8x7b                                                                                  consist.-conf
+tends to produce conservative logits.                                                                                            logit-conf
+   Our subsequent analysis reveals that the calibra-                         0.4
+                                                                                              3      5       7     9     11         13      15
+tion performance significantly depends on the pri-                                                          ensemble number
+mary classification performance due to the highly               Figure 4: The figure showcases the relationship between
+concentrated confidence distribution.                           AUC and the ensemble number.
+5.1 The logit-based confidence achieves the
+      highest AUC in all scenarios                              rate (FPR) and true positive rate (TPR) in Fig. 3 for
+The logit-based method performs better in AUC                   LLaMA-2-7b on Latent Hatred.
+than both the verbal-based method and the                          The AUC of the verbal-based method is lower
+consistency-based method in all scenarios. We                   than the logit-based method due to the conser-
+compare the ROC curve composed of false positive                vative verbalized confidence. We observe that,
+                                                            12077
+at the same confidence threshold, the FPR of the       data falling within that bin. The color of the bars
+verbal-based method and the logit-based method         is quantified by a blue line, corresponding to the
+are similar. However, the confidence distribution      proportion of data on the right y-axis. The green
+of the logit-based method is more overconfident,       line represents the overall accuracy of the model
+leading to a larger TPR, resulting in a higher ROC     on the dataset.
+curve.                                                    Recall that ECE measures the gap between con-
+   The discreteness of confidence score in the         fidence and accuracy. As shown in Fig. 5, 6, 7, the
+consistency-based method leads to a reduced            highly concentrated confidence around the value of
+AUC. The consistency score in the consistency-         the overall accuracy results in a high ECE.
+based method is limited by the ensemble number,           When does the verbal-based method achieve
+mainly concentrated on a few discrete values (for      the highest ECE? In cases where the performance
+example, 3/5, 4/5, 5/5), leading to fewer confidence   of the primary classification task is poor and the
+thresholds considered when calculating AUC. In         model’s token logit is high (LLaMA-2-7b on the
+contrast, the logit-based method’s confidence score    Latent Hatred and SBIC datasets, GPT-3.5-turbo on
+covers many continuous values, enabling more val-      the Latent Hatred dataset), the verbal-based method
+ues of the confidence threshold for the calculation    achieved nearly the best ECE and BS.
+of AUC.                                                   That is because the logit-based method and the
+   As shown in Fig. 3, The discrete points ob-         consistency-based method exhibit overconfidence
+tained by the consistency-based method on the          while the verbal-based method provides a more con-
+ROC curve are very close to those on the curve         servative estimate of confidence. The majority of
+of the logit-based method. However, the absence        confidence scores are above 0.9 for both logit-based
+of a consistency-based confidence score between        and consistency-based methods, yet the accuracy of
+0.8 and 1 results in the omission of the correspond-   the task remains low, resulting in under-calibrated
+ing section with an FPR below 0.5. This indicates      errors (Fig. 5). In contrast, the verbalized confi-
+that the discreteness of confidence values in the      dence concentrates in the range of 0.7-0.8, close to
+consistency-based method limits its ability to ex-     the accuracy, resulting in smaller calibration errors.
+press uncertainty.                                        When does the logit-based method achieve
+   Based on the findings, we increase the ensem-       the highest ECE? In cases where the perfor-
+ble number from 3 to 13 (changing demonstrations       mance of the primary classification task is poor
+in the prompt in each inference to conduct the en-     and the model’s token logit is not generally too
+semble), the AUC gradually increases and tends to      high (Mixtral-8x7b on the Latent Hatred and SBIC
+stabilize (Fig. 4). It indicates that increasing the   datasets), the logit-based method achieves the best
+number of ensemble sources can mitigate the gap        calibration performance.
+but is still lower than the logit-based method.           That is because the conservative logit is already
+   These findings suggest that relying solely on       well-calibrated so the verbal-based method loses
+AUC for comparison among different kinds of un-        its advantage. As shown in Fig. 6, unlike other
+certainty estimation methods is insufficient. The      models that output a high token logit, the logit of
+variations in ECE further support this conclusion.     the Mixtral-8x7b model is predominantly concen-
+Next, we delve into a detailed analysis of the rea-    trated between 0.5 and 0.6, closely resembling the
+sons for the ECE variations.                           mediocre accuracy and exhibiting good calibration
+                                                       ability. However, the consistency-based method
+5.2 Calibration heavily relies on the primary          still maintains excessive confidence, resulting in
+    task due to concentrated confidence                poor calibration.
+The uncertainty estimation method achieving the           When does the consistency-based method
+highest ECE varies depending on the scenario. To       achieve the highest ECE? In cases where the
+demonstrate the underlying reasons, we provide         classification has high accuracy (all models on the
+an example for each scenario regarding the ECE         ToxiGen dataset), the consistency-based method
+performance in Fig. 5 - Fig. 7. The x-axis repre-      achieves the best ECE.
+sents confidence scores, binned at intervals of 0.1.      This is because, on simple datasets, the task
+The left y-axis represents accuracy. The height of     accuracy is very high, so the consistency-based
+each bar represents the accuracy of the correspond-    method with high confidence tends to be closer to
+ing bin. Darker bars indicate a higher volume of       the high accuracy (Fig. 7). However, the verbal-
+                                                  12078
+              The highly concentrated confidence (dark-colored bars)                      Overall Accuracy
+              around the value of the overall accuracy (green dashed line)
+              results in a high ECE.                                                      Fraction of the Confidence Score Distribution
+
+
+
+
+Figure 5: The ECE performance of LLaMA-2-7b on the SBIC dataset shows that the verbal-based confidence is
+mainly concentrated in the 70%-80% range, around the overall accuracy of 77%, thus achieving the best ECE.
+
+                                                Scenario 2: Logit-conf achieves the best ECE.
+                        (a)Verbal-conf                        (b) Consistency-conf                       (c) Logit-conf
+     1                                                                                                                           1                   1
+
+
+
+                                                                                                                                0.2 0.4 0.6 0.8
+ Accuracy
+                    ECE=0.080                                 ECE=0.213                         ECE=0.048
+
+
+
+0.4 0.6 0.8
+
+                                                                                                                                  Fraction of Data
+     0.2
+
+     0                                                                                                                          0                    0
+          0       0.2      0.4     0.6    0.8       10      0.2     0.4     0.6    0.8   10       0.2    0.4    0.6    0.8      1
+                         Confidence Score                         Confidence Score                      Confidence Score
+
+Figure 6: The ECE performance of Mixtral-8x7b on the Latent Hatred dataset shows that the logit-based confidence
+is mainly concentrated in the 50%-70% range, around the overall accuracy of 61%, thus achieving the best ECE.
+
+                                           Scenario 3: Consistency-conf achieves the best ECE.
+                     (a) Verbal-conf                      (b) Consistency-conf                           (c) Logit-conf
+     1                                                                                                                           1                   1
+                ECE=0.181                                    ECE=0.029                          ECE=0.041
+
+                                                                                                                                0.2 0.4 0.6 0.8
+ Accuracy
+
+
+0.4 0.6 0.8
+
+                                                                                                                                  Fraction of Data
+     0.2
+
+     0                                                                                                                          0                    0
+          0       0.2      0.4     0.6    0.8       10      0.2     0.4     0.6    0.8   10       0.2    0.4    0.6    0.8      1
+                         Confidence Score                         Confidence Score                      Confidence Score
+
+Figure 7: The ECE performance of LLaMA-2-7b on the ToxiGen shows that the consistency-based confidence is
+mainly concentrated in the 90%-100% range, around the overall accuracy of 92%, thus achieving the best ECE.
+
+
+
+
+                                                                         12079
+   Fraction of Data
+                                                                    AUC 0.62
+                                                                                                    ECE 0.25
+                              incorrect prediction
+                                                                                  LLaMA2
+                              correct prediction                                  Mixtral
+
+
+
+     0.1            0.3
+              0.2
+                                                                                                     0.05
+                                                                      0.54
+                                                                           0.4    Temperature   1          0.4   Temperature   1
+             0
+                          0      0.2     0.4    0.6   0.8   1      Figure 9: Calibration performance with varying temper-
+                                   Confidence Score                ature. LLaMA-2-7b and Mixtral-8x7b show different
+Figure 8: The confidence distribution of correctly clas-           tends.
+sified and misclassified cases.
+                                                                    AUC 0.64
+                                                                                                    ECE 0.25
+based method maintains a conservative confidence
+which is lower than the high accuracy, thus lead-
+ing to over-calibration. For the logit-based method,                                                 0.05
+                                                                      0.57
+when the token logit is high (LLaMA2-7b-chat,                              0.8      Top p       1          0.8      Top p      1
+GPT-3.5-turbo), the ECE is very similar to the con-
+                                                                   Figure 10: Calibration performance with varying top p
+sistency method. However, the logit-based method                   sampling. LLaMA-2-7b and Mixtral-8x7b show differ-
+for Mixtral-8x7b has a quite lower ECE because of                  ent trends.
+its conservative token logit.
+5.3 Common drawbacks                                               results along different paths, and aggregating such
+                                                                   results better reflects the model’s confidence.
+These three methods are unable to effectively esti-
+mate the confidence of the answers.                                5.5          Effects of the temperature and sampling
+   The calibration performance significantly de-                   We find that due to differences in the output token
+pends on the primary classification performance.                   logit distribution, different models exhibit varying
+No matter whether the dataset is easy or challeng-                 sensitivities to temperature and sampling parame-
+ing, the confidence scores of each method are al-                  ters, sometimes even in opposite trends.
+ways concentrated in a fixed range. Consequently,                     As shown in Fig. 9, as the temperature increases,
+methods concentrated in low-confidence ranges per-                 The AUC of LLaMA-2-7b increases while the AUC
+form well on challenging tasks, while those concen-                of Mixtral-8x7b decreases. When the tempera-
+trated in high-confidence ranges excel in simpler                  ture varies between 0.6 and 1, LLaMA-2-7b and
+tasks. This is also why different uncertainty esti-                Mixtral-8x7b exhibit opposite trends in ECE. Re-
+mation methods achieve the best performance in                     sults on changing the top p sampling show the same
+different scenarios.                                               findings (Fig. 10). This is because the output token
+   Moreover, these methods struggle to distinguish                 logit of LLaMA-2-7b is overconfident, whereas
+the confidence between incorrectly predicted and                   Mixtral-8x7b exhibits a more cautious level of con-
+correctly predicted instances. An ideal confidence                 fidence. As the temperature increases, the logit
+estimation method should have high confidence for                  distribution of Mixtral-8x7b becomes sharper, lead-
+correctly predicted data and low confidence for in-                ing to over-calibration. On the other hand, the logit
+correctly predicted data. However, Fig. 8 shows                    distribution of LLaMA-2-7b becomes smoother, en-
+that confidence distributions of correctly classified              hancing its ability to differentiate confidence levels.
+and misclassified cases overlap significantly, indi-               See Appendix A.6 for details.
+cating the poor ability of uncertainty estimation.
+5.4 Effects of prompt patterns on calibration                      6           Future Work
+Table 4, Table 5, and Table 6 (in Appendix A.5)                    The insights we’ve gained for future work include
+show that the performance of different prompts                     two aspects:
+varies in calibration. No prompt consistently per-                   Firstly, future optimizations should aim to avoid
+forms better. The ensemble of responses obtained                   misjudging benign expressions, especially those
+from different prompt patterns shows a relatively                  containing sensitive groups. Recent efforts aim to
+better overall performance. This may be because                    ensure that LLMs do not generate harmful output
+different prompt patterns inspire the model to infer               toward sensitive groups. However, it is unknown
+                                                                12080
+whether LLMs might veer towards another extreme.        Uncertainty Estimation in LLMs The reliable
+Imagine if all discussions about black people were      uncertainty estimation can facilitate more rational
+filtered out on social media platforms; that would      and informed decision-making. There are three
+be unfair as well.                                      mainstream methods for estimating the confidence
+   Secondly, future optimization should aim to          of LLMs in their responses, particularly for cases
+avoid excessive concentration of confidence and         where we can only obtain the answer and logit but
+should take into account varying levels of task com-    not the weights. They are the verbal-based method
+plexity. We unveil factors influencing calibration:     (Lin et al., 2022; Kadavath et al., 2022; Tian et al.,
+calibration performance significantly relies on the     2023), the consistency-based method (Wang et al.,
+primary task performance due to extremely concen-       2022; Xiong et al., 2023; Yue et al., 2023), and the
+trated confidence.                                      logit-based method (Guo et al., 2017b; Zhang et al.,
+                                                        2020; Jiang et al., 2020; Chen et al., 2022). We
+   Some future research pathways and ideas in-
+                                                        compare these three mainstream methods, conduct
+clude: (1) Integrating correction for oversensitivity
+                                                        a comprehensive analysis in different scenarios,
+during RLHF. In addition to identifying harmful
+                                                        and delve into the underlying reasons. Additionally,
+content during RLHF, humans should guide LLMs
+                                                        we highlighted the shortcomings of these methods
+to recognize challenging benign expressions involv-
+                                                        in confidence assessment for fairness.
+ing sensitive groups but not malicious ones. (2) Im-
+proving the reflection of confidence in logits during   8   Conclusion
+LLM training or inference. Optimization of the de-
+coding process, SFT loss, or post-processing of         The ability of LLMs in implicit hate speech detec-
+logits can be explored to prevent the concentration     tion is insufficiently examined. In this paper, we
+of logits within a fixed range. (3) Considering tasks   explore the performance of LLMs in identifying
+of varying complexity in LLM calibration optimiza-      implicit hate speech and the calibration of three
+tion. Developing uncertainty estimation methods         mainstream uncertainty estimation methods. We
+that are adaptable to different task complexities is    find that LLMs have fallen into two extremes, ex-
+imperative.                                             cessively focusing on sensitive groups and exhibit-
+                                                        ing extreme confidence score distributions. These
+                                                        extremes result in over-sensitivity and poor cali-
+7   Related Work
+                                                        bration respectively. These discoveries unveil new
+                                                        limitations of LLMs, underscoring the need for cau-
+Implicit Hate Speech Detection Hate speech              tion when optimizing models to ensure they do not
+inflicts significant harm on specific communities.      veer towards extremes.
+Researchers have developed various hate speech
+detection models (Gitari et al., 2015; Zhang et al.,    9   Limitations
+2018). Recently, there has been a growing interest
+among researchers in addressing implicit hate (Kim      The datasets utilized in our experiments were all in
+et al., 2022; Lin, 2022; Ocampo et al., 2023).          English, thus our evaluation only encompasses the
+                                                        English language. We did not assess whether simi-
+   Certain studies have employed LLMs to generate
+                                                        lar issues exist for large language models in other
+explanations with step-by-step reasoning for detect-
+                                                        languages such as Chinese, French, and various
+ing implicit hate speech (Yang et al., 2023). While
+                                                        other languages.
+Huang et al. (2023) explored the quality of explana-
+tions generated by ChatGPT for detecting implicit
+hateful tweets, their research exclusively focused      References
+on implicit instances, neglecting non-implicit state-
+ments. In our exploration, we assess the perfor-        Andrew P Bradley. 1997. The use of the area under
+                                                          the roc curve in the evaluation of machine learning
+mance of LLMs in detecting implicit hate speech,          algorithms. Pattern recognition, 30(7):1145–1159.
+taking into account various aspects with thoughtful
+consideration. We investigate whether there is an       Glenn W Brier. 1950. Verification of forecasts ex-
+imbalance in the predictions of positive and neg-         pressed in terms of probability. Monthly weather
+                                                          review, 78(1):1–3.
+ative classes when LLMs are employed for hate
+speech detection. Additionally, we thoughtfully         Yangyi Chen, Lifan Yuan, Ganqu Cui, Zhiyuan Liu,
+consider various prompt patterns in our analysis.         and Heng Ji. 2022. A close look into the cal-
+                                                   12081
+  ibration of pre-trained language models.      ArXiv,    Saurav Kadavath, Tom Conerly, Amanda Askell, Tom
+  abs/2211.00151.                                           Henighan, Dawn Drain, Ethan Perez, Nicholas
+                                                            Schiefer, Zac Hatfield-Dodds, Nova DasSarma, Eli
+Mai ElSherief, Caleb Ziems, David Muchlinski, Vaish-        Tran-Johnson, et al. 2022.     Language models
+ navi Anupindi, Jordyn Seybolt, Munmun De Choud-            (mostly) know what they know. arXiv preprint
+ hury, and Diyi Yang. 2021. Latent hatred: A bench-         arXiv:2207.05221.
+ mark for understanding implicit hate speech. arXiv
+ preprint arXiv:2109.05322.                               Aisha Khatun and Daniel G Brown. 2023. Reliabil-
+                                                            ity check: An analysis of gpt-3’s response to sen-
+Shangbin Feng, Chan Young Park, Yuhan Liu, and Yulia        sitive topics and prompt wording. arXiv preprint
+  Tsvetkov. 2023. From pretraining data to language         arXiv:2306.06199.
+  models to downstream tasks: Tracking the trails of
+  political biases leading to unfair nlp models. arXiv    Youngwook Kim, Shinwoo Park, and Yo-Sub Han. 2022.
+  preprint arXiv:2305.08283.                                Generalizable implicit hate speech detection using
+                                                            contrastive learning. In Proceedings of the 29th Inter-
+Jiahui Geng, Fengyu Cai, Yuxia Wang, Heinz Koeppl,          national Conference on Computational Linguistics,
+   Preslav Nakov, and Iryna Gurevych. 2023. A sur-          pages 6667–6679.
+   vey of language model confidence estimation and
+   calibration. arXiv preprint arXiv:2311.08298.          Lingyao Li, Lizhou Fan, Shubham Atreja, and Libby
+                                                            Hemphill. 2023. " hot" chatgpt: The promise of chat-
+Njagi Dennis Gitari, Zhang Zuping, Hanyurwimfura            gpt in detecting and discriminating hateful, offensive,
+  Damien, and Jun Long. 2015. A lexicon-based               and toxic comments on social media. arXiv preprint
+  approach for hate speech detection. International         arXiv:2304.10619.
+  Journal of Multimedia and Ubiquitous Engineering,
+  10(4):215–230.                                          Jessica Lin. 2022. Leveraging world knowledge in
+                                                             implicit hate speech detection. arXiv preprint
+Chuan Guo, Geoff Pleiss, Yu Sun, and Kilian Q Wein-          arXiv:2212.14100.
+  berger. 2017a. On calibration of modern neural net-
+  works. In International conference on machine learn-    Stephanie Lin, Jacob Hilton, and Owain Evans. 2022.
+  ing, pages 1321–1330. PMLR.                               Teaching models to express their uncertainty in
+                                                            words. arXiv preprint arXiv:2205.14334.
+Chuan Guo, Geoff Pleiss, Yu Sun, and Kilian Q. Wein-
+  berger. 2017b. On calibration of modern neural          Nicolas Ocampo, Elena Cabrio, and Serena Villata.
+  networks. In International Conference on Machine          2023. Playing the part of the sharp bully: Gener-
+  Learning.                                                 ating adversarial examples for implicit hate speech
+                                                            detection. In Findings of the Association for Compu-
+Thomas Hartvigsen, Saadia Gabriel, Hamid Palangi,           tational Linguistics: ACL 2023, pages 2758–2772.
+  Maarten Sap, Dipankar Ray, and Ece Kamar. 2022.
+  Toxigen: A large-scale machine-generated dataset for    Long Ouyang, Jeff Wu, Xu Jiang, Diogo Almeida,
+  adversarial and implicit hate speech detection. arXiv     Carroll L. Wainwright, Pamela Mishkin, Chong
+  preprint arXiv:2203.09509.                                Zhang, Sandhini Agarwal, Katarina Slama, Alex
+                                                            Ray, John Schulman, Jacob Hilton, Fraser Kelton,
+Fan Huang, Haewoon Kwak, and Jisun An. 2023. Is             Luke E. Miller, Maddie Simens, Amanda Askell, Pe-
+  chatgpt better than human annotators? potential and       ter Welinder, Paul Francis Christiano, Jan Leike, and
+  limitations of chatgpt in explaining implicit hate        Ryan J. Lowe. 2022. Training language models to
+  speech. arXiv preprint arXiv:2302.07736.                  follow instructions with human feedback. ArXiv,
+                                                            abs/2203.02155.
+Albert Q. Jiang, Alexandre Sablayrolles, Antoine
+  Roux, Arthur Mensch, Blanche Savary, Chris              Paul Röttger, Hannah Rose Kirk, Bertie Vidgen,
+  Bamford, Devendra Singh Chaplot, Diego de las             Giuseppe Attanasio, Federico Bianchi, and Dirk
+  Casas, Emma Bou Hanna, Florian Bressand, Gi-              Hovy. 2023. Xstest: A test suite for identifying exag-
+  anna Lengyel, Guillaume Bour, Guillaume Lam-              gerated safety behaviours in large language models.
+  ple, Lélio Renard Lavaud, Lucile Saulnier, Marie-         arXiv preprint arXiv:2308.01263.
+  Anne Lachaux, Pierre Stock, Sandeep Subramanian,
+  Sophia Yang, Szymon Antoniak, Teven Le Scao,            Maarten Sap, Saadia Gabriel, Lianhui Qin, Dan Juraf-
+  Théophile Gervet, Thibaut Lavril, Thomas Wang,           sky, Noah A Smith, and Yejin Choi. 2020. Social
+  Timothée Lacroix, and William El Sayed. 2024. Mix-       bias frames: Reasoning about social and power im-
+  tral of experts.                                         plications of language. In ACL.
+
+Zhengbao Jiang, J. Araki, Haibo Ding, and Graham          Chenyu Shi, Xiao Wang, Qiming Ge, Songyang Gao,
+  Neubig. 2020. How can we know when language               Xianjun Yang, Tao Gui, Qi Zhang, Xuanjing Huang,
+  models know? on the calibration of language models        Xun Zhao, and Dahua Lin. 2024. Navigating the
+  for question answering. Transactions of the Associa-      overkill in large language models. arXiv preprint
+  tion for Computational Linguistics, 9:962–977.            arXiv:2401.17633.
+                                                     12082
+Katherine Tian, Eric Mitchell, Allan Zhou, Archit           A.2   Data preprocessing
+  Sharma, Rafael Rafailov, Huaxiu Yao, Chelsea Finn,
+  and Christopher D Manning. 2023. Just ask for cali-       We have two steps to preprocess the data to ensure
+  bration: Strategies for eliciting calibrated confidence   the quality of the evaluation. Firstly, we discard the
+  scores from language models fine-tuned with human         data samples with profanity words, such as "bi*ch"
+  feedback. arXiv preprint arXiv:2305.14975.                and "fu*k" to further ensure that the data does not
+Hugo Touvron, Louis Martin, Kevin Stone, Peter Al-          contain explicit hate words. Secondly, we sample
+  bert, Amjad Almahairi, Yasmine Babaei, Nikolay            from the test set to keep the equal data number of
+  Bashlykov, Soumya Batra, Prajjwal Bhargava, Shruti        positive and negative class. Finally, we retain 1200
+  Bhosale, et al. 2023. Llama 2: Open founda-               test data for Latent Hatred, 1200 test data for SBIC,
+  tion and fine-tuned chat models. arXiv preprint
+  arXiv:2307.09288.                                         and 260 test data for ToxiGen.
+
+Xuezhi Wang, Jason Wei, Dale Schuurmans, Quoc Le,           A.3   Examples in different datasets
+  Ed Chi, Sharan Narang, Aakanksha Chowdhery, and           The varying degrees of over-sensitivity exhibited
+  Denny Zhou. 2022. Self-consistency improves chain
+  of thought reasoning in language models. arXiv
+                                                            by the model across different datasets are attributed
+  preprint arXiv:2203.11171.                                to the varying levels of difficulty in the data. The
+                                                            model displays excessive sensitivity on Latent Ha-
+Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten            tred and SBIC datasets, while it does not exhibit
+   Bosma, Ed Huai hsin Chi, F. Xia, Quoc Le, and
+   Denny Zhou. 2022. Chain of thought prompting             such over-sensitivity on the ToxiGen dataset. That
+   elicits reasoning in large language models. ArXiv,       is because examples of the negative class in the
+   abs/2201.11903.                                          dataset Latent Hatred and SBIC contain sensi-
+                                                            tive groups or sensitive topics. For example, the
+Jules White, Quchen Fu, Sam Hays, Michael Sandborn,
+   Carlos Olea, Henry Gilbert, Ashraf Elnashar, Jesse       statement "vandals target black women Maryland
+   Spencer-Smith, and Douglas C Schmidt. 2023. A            home" is a description of a news event that in-
+   prompt pattern catalog to enhance prompt engineer-       volves a fairness issue but does not contain any
+   ing with chatgpt. arXiv preprint arXiv:2302.11382.       hateful emotions. However, examples of the nega-
+Miao Xiong, Zhiyuan Hu, Xinyang Lu, Yifei Li, Jie           tive class in dataset ToxiGen are simple ("Muslims
+  Fu, Junxian He, and Bryan Hooi. 2023. Can llms            in the 19th century migrated from Europe and the
+  express their uncertainty? an empirical evaluation        Middle East to the U.S.") and don’t contain sensi-
+  of confidence elicitation in llms. arXiv preprint         tive groups or topics ("I felt so much better after
+  arXiv:2306.13063.
+                                                            confiding that in someone and realizing I’m not
+Yongjin Yang, Joonkee Kim, Yujin Kim, Namgyu Ho,            alone"). Therefore, the model demonstrates ex-
+  James Thorne, and Se-young Yun. 2023. Hare: Ex-           cessive sensitivity errors on the Latent Hatred and
+  plainable hate speech detection with step-by-step rea-    SBIC datasets, while not exhibiting over-sensitivity
+  soning. arXiv preprint arXiv:2311.00321.
+                                                            on the ToxiGen dataset.
+Murong Yue, Jie Zhao, Min Zhang, Liang Du, and Ziyu
+ Yao. 2023. Large language model cascades with              A.4   Classification performance of different
+ mixture of thoughts representations for cost-efficient           prompt patterns
+ reasoning. arXiv preprint arXiv:2310.03094.
+                                                            The precision, recall and F1 for classification per-
+Jize Zhang, Bhavya Kailkhura, and Thomas Yong-Jin           formance can be found in tables 3.
+   Han. 2020. Mix-n-match: Ensemble and composi-
+   tional methods for uncertainty calibration in deep       A.5   Calibration performance of different
+   learning. ArXiv, abs/2003.07329.                               prompt patterns
+Ziqi Zhang, David Robinson, and Jonathan Tepper.            Table 4, Table 5, and Table 6 show that the perfor-
+  2018. Detecting hate speech on twitter using a            mance of different prompts varies in calibration.
+  convolution-gru based deep neural network. In The
+  Semantic Web: 15th International Conference, ESWC         A.6 Analysis of the effects on the temperature
+  2018, Heraklion, Crete, Greece, June 3–7, 2018, Pro-
+  ceedings 15, pages 745–760. Springer.                     The difference in the effect of temperature on
+                                                            LLaMA-2-7b and Mixtral-8x7b arises from the
+A    Appendix                                               different logit distribution. Fig. 11 shows the ECE
+                                                            performance for the logit-based uncertainty esti-
+A.1 The design of prompt patterns                           mation method with different temperatures on the
+We show the full prompt in Table 2.                         Latent Hatred dataset. The confidence score for
+                                                       12083
+ Vanilla QA
+ Given the statement, is this statement hate speech? Please provide your answer. The answer contains
+ Yes or No.
+ Statement: xxx
+ Answer:
+ Yes
+ Choice QA
+ Given the statement, is this statement hate speech? A: Yes. B: No. Please give your choice (A or B).
+ Statement: xxx
+ Answer:
+ A
+ Cloze Test
+ Given the statement, is this statement hateful or neutral? Please predict the [MASK] token, you can
+ only answer hateful or neutral.
+ Statement: xxx
+ Answer: It is a [MASK] statement.
+ hateful
+ CoT
+ Is this statement hate speech? Your answer should only contain Yes or No, then give your explanation
+ step by step.
+ Statement: xxx
+ Answer:
+ Yes
+ Explanation: xxx
+ Multi-task with Target
+ Given the statement, is this statement hate speech? Your answer should only contain Yes or No, then
+ identify the target individual / group.
+ Statement: xxx
+ Answer:
+ Yes
+ Target: xxx
+
+Table 2: Input and output examples for different prompt patterns. The italicized text represents the LLM’s output.
+
+
+
+
+                                                     12084
+              Latent Hatred                         SBIC                          ToxiGen
+ Prompt       P        R              F1            P          R         F1       P       R            F1
+ GPT-3.5-Turbo
+ Choice QA 0.7014 0.758               0.7286        0.864      0.8381    0.8508   1          0.969     0.9843
+ CoT          0.7347 0.7236           0.7291        0.8895     0.7917    0.8377   1          0.9453    0.9719
+ Cloze        0.738    0.6935         0.715         0.9093     0.8017    0.8521   1          0.9225    0.9597
+ Vanilla QA 0.7607 0.6263             0.687         0.9039     0.7696    0.8314   1          0.9457    0.9721
+ Target       0.7452 0.6566           0.6981        0.9152     0.755     0.8274   1          0.9219    0.9593
+ LLaMA-2-7B
+ Choice QA 0.6143 0.6913              0.6505        0.7122     0.8956    0.7934   0.9487     0.881     0.9136
+    CoT       0.6472 0.6134           0.6299        0.7548     0.7913    0.7726   0.9344     0.8837    0.9084
+   Cloze      0.5954 0.9258           0.7248        0.6947     0.931     0.7957   0.8394     0.9583    0.8949
+ Vanilla QA 0.6373 0.8038             0.6425        0.8092     0.7646    0.7863   0.9508     0.8992    0.9243
+   Target     0.601    0.8395         0.7005        0.7261     0.8645    0.7893   0.937      0.9297    0.9333
+ Mixtral-8x7b
+ Choice QA 0.5161 0.995               0.6796        0.5        1         0.6667   1          0.1628    0.28
+    CoT       0.6155 0.8124           0.7004        0.7896     0.8633    0.8248   0.9231     0.9302    0.9266
+   Cloze      0.503    0.9983         0.6689        0.5642     0.9817    0.7165   0.8105     0.9612    0.8794
+ Vanilla QA 0.5771 0.8342             0.6822        0.584      0.985     0.7333   0.9141     0.907     0.9105
+   Target     0.6058 0.8107           0.6934        0.8        0.8333    0.8163   0.8311     0.9535    0.8881
+
+Table 3: The classification performance (Precision, Recall and F1) of LLMs in hate speech detection with different
+prompt patterns.
+
+                            Latent Hatred                       SBIC                       Toxigen
+         Prompt       AUC       ECE         BS        AUC       ECE       BS      AUC       ECE       BS
+        Choice QA      0.628     0.127      0.242      0.751     0.088    0.167    0.924     0.069    0.052
+           CoT         0.631     0.215      0.279      0.736     0.139    0.191    0.902     0.037    0.056
+          Cloze        0.647     0.245      0.296      0.696     0.152    0.205    0.877     0.013    0.078
+        Vanilla QA     0.637     0.236      0.287      0.693     0.129    0.186    0.823     0.008    0.059
+          Target       0.614     0.235      0.294      0.720     0.141    0.196    0.880     0.026    0.048
+        Ensemble       0.637     0.154      0.244      0.749     0.094    0.165    0.889     0.041    0.047
+
+              Table 4: The calibration performance of LLaMA-2-7B with different prompt patterns.
+
+                            Latent Hatred                       SBIC                       Toxigen
+         Prompt       AUC       ECE         BS        AUC       ECE       BS      AUC       ECE       BS
+        Choice QA      0.710     0.095      0.237      0.836     0.184    0.246    0.842     0.273    0.211
+           CoT         0.700     0.039      0.209      0.787     0.091    0.136    0.927     0.127    0.065
+          Cloze        0.668     0.242      0.277      0.770     0.157    0.217    0.879     0.102    0.098
+        Vanilla QA     0.682     0.026      0.228      0.728     0.094    0.204    0.911     0.265    0.138
+          Target       0.693     0.028      0.210      0.781     0.100    0.142    0.888     0.154    0.104
+        Ensemble       0.710     0.048      0.222      0.762     0.066    0.173    0.924     0.220    0.106
+
+              Table 5: The calibration performance of Mixtral-8x7b with different prompt patterns.
+
+                            Latent Hatred                       SBIC                       Toxigen
+         Prompt       AUC       ECE         BS        AUC       ECE       BS      AUC       ECE       BS
+        Choice QA      0.646     0.187      0.248      0.811     0.076    0.125    0.973     0.047    0.015
+           CoT         0.654     0.171      0.229      0.818     0.083    0.132    0.911     0.031    0.026
+          Cloze        0.683     0.177      0.232      0.823     0.069    0.123    0.963     0.048    0.024
+        Vanilla QA     0.638     0.191      0.246      0.834     0.090    0.138    0.924     0.029    0.026
+          Target       0.658     0.183      0.241      0.800     0.090    0.141    0.936     0.030    0.030
+        Ensemble       0.668     0.151      0.219      0.858     0.067    0.118    0.959     0.045    0.021
+
+             Table 6: The calibration performance of GPT-3.5-Turbo with different prompt patterns.
+
+                                                        12085
+                   t=0.6    Mixtral-8x7b     t=1
+    1                                                       1
+
+
+
+
+                                                            Fraction of Data
+             ECE=0.024                ECE=0.059
+
+
+Accuracy
+
+
+    0                                                       0
+           0 Confidence Score   1 0    Confidence Score 1
+
+                   t=0.6    LLaMA-2-7b       t=1
+    1                                                       1
+
+
+
+
+                                                            Fraction of Data
+             ECE=0.260                ECE=0.236
+
+
+Accuracy
+
+
+    0
+           0 Confidence Score   1 0    Confidence Score 1
+
+Figure 11: The ECE performance with temperature=0.6
+and temperature=1 for Mixtral-8x7b and LLaMA-2-7b.
+The bar’s color and blue line both represent the fraction
+of the data.
+
+
+the logit-based method is the logit for the output
+token. The logit distribution of Mixtral-8x7b is
+primarily concentrated between 0.5 and 0.7, while
+LLaMA’s logit is mainly distributed between 0.9
+and 1.0. This indicates that LLaMA-2-7b is over-
+confident, whereas Mixtral-8x7b exhibits a more
+cautious level of confidence. As the temperature
+increases, the logits for both models become more
+conservative. Thus, the logit distribution of Mixtral-
+8x7b becomes sharper, leading to over-calibration.
+On the other hand, the logit distribution of LLaMA-
+2-7b becomes smoother, enhancing its ability to
+differentiate confidence levels.
+
+
+
+
+                                                                               12086
+

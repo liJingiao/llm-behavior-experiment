@@ -1,0 +1,2038 @@
+                                                                             A Theory of LLM Sampling:
+                                                                        Part Descriptive and Part Prescriptive
+
+                                                   ∗
+                                                       Sarath Sivaprasad1 , ∗ Pramod Kaushik2 , Sahar Abdelnabi3 , Mario Fritz1
+                                                          1                                                     2                        3
+                                                              CISPA Helmholtz Center for Information Security       TCS Research, Pune       Microsoft
+                                                 {sarath.sivaprasad, fritz}@cispa.de            saabdelnabi@microsoft.com         pramod.kaushik@tcs.com
+
+
+
+
+                                                                  Abstract                                  We systematically study this sampling heuris-
+                                             Large Language Models (LLMs) are increas-                   tics and show that they resemble that of human
+                                             ingly utilized in autonomous decision-making,               decision-making. When an LLM samples from
+
+
+
+
+arXiv:2402.11005v3 [cs.CL] 18 Apr 2025
+                                             where they sample options from vast action                  multiple possibilities of a concept, the sampling
+                                             spaces. However, the heuristics that guide this             heuristics is driven by a descriptive component (the
+                                             sampling process remain under-explored. We
+                                                                                                         statistical norm of the concept) and a prescriptive
+                                             study this sampling behavior and show that
+                                             this underlying heuristics resembles that of hu-
+                                                                                                         component (a notion of an ideal of the concept).
+                                             man decision-making: comprising a descriptive               These norms on the concept are learned in context
+                                             component (reflecting statistical norm) and a               or in pre-training. We define response sampling as
+                                             prescriptive component (implicit ideal encoded              the process by which the model probabilistically
+                                             in the LLM) of a concept. We show that this de-             selects outputs from a distribution of potential op-
+                                             viation of a sample from the statistical norm to-           tions. A descriptive component represents what
+                                             wards a prescriptive component consistently ap-             is statistically likely for a concept, reflecting the
+                                             pears in concepts across diverse real-world do-
+                                                                                                         occurrence or probability of options. A prescrip-
+                                             mains like public health, and economic trends.
+                                             To further illustrate the theory, we demonstrate            tive component is an implicit standard of what is
+                                             that concept prototypes in LLMs are affected                considered ideal, desirable, or a valued option of a
+                                             by prescriptive norms, similar to the concept               concept.
+                                             of normality in humans. Through case studies                   We design a critical experiment to isolate the ef-
+                                             and comparison with human studies, we illus-                fects of the proposed theory. We then show the ef-
+                                             trate that in real-world applications, the shift of         fects of this heuristic appearing consistently across
+                                             samples toward an ideal value in LLMs’ out-
+                                                                                                         diverse real-world domains. We perform extensive
+                                             puts can result in significantly biased decision-
+                                             making, raising ethical concerns.
+                                                                                                         experiments covering different LLMs, evaluated
+                                                                                                         concepts, and ablations to show the robustness of
+                                         1   Introduction                                                observations. We present a medical case study
+                                         Decision making is a challenging task which often               where an LLM as an agent is used to assign a re-
+                                         requires choosing an option from a vast set of pos-             covery time of patients to show potential practical
+                                         sibilities (Mattar and Lengyel, 2022; Ross et al.,              concerns. As illustrated in Figure 1, the proposed
+                                         2023). In many real world cases deliberating on                 theory implies that when the LLM picks samples
+                                         these innumerable options to decide on the action is            for a concept, the sample not only reflects the statis-
+                                         computationally prohibitive, due to which, agents               tical regularities of the concept (descriptive norms)
+                                         employ heuristics to sample their options (Gigeren-             but also systematically incorporates an idealized
+                                         zer and Gaissmaier, 2011). For instance, humans                 version of the concept (prescriptive norms). We
+                                         (and animals) are shown to deliberate only on a                 show that these shifts may not align with human
+                                         few options that are selected based on a heuristics             ideals, raising ethical concerns when LLMs are
+                                         guided by possibility (how statistically likely an              used for autonomous decision making.
+                                         option is) and utility (the value associated to the                Prescriptive component in options considered
+                                         option) (Bear et al., 2020; Mattar and Daw, 2018).              by humans is shown to be driven by their concept
+                                         LLMs, though widely benchmarked as ‘system-1’                   prototypicality which has a prescriptive component
+                                         and characterised by their reliance on heuristics,              (e.g., a prototypical teacher is one that teaches well).
+                                         have not been studied systematically for the heuris-            We study prototypicality and sampling in humans
+                                         tics that drive their sampling.                                 and LLMs to make initial explorations into the
+Figure 1: From left to right: when sampling on a concept, the LLM appears to account for the statistical likelihood
+(A(C)) and prescriptive norm (I(C)) of the concept. Consequently, the sampled distribution exhibits a shift (shown
+as α) away from the true distribution in the direction of the ideal (right most plot).
+
+cause of this deviation. Given that the training of        on programming languages, indicating a capacity
+LLMs is auto-regressive, it is not trivial that the        for meaningful text processing and generation(Jin
+heuristics of LLMs also behave as if they have a           and Rinard, 2023). This has sparked interest within
+value component. In short, we make the following           the community to explore the mechanisms govern-
+contributions:                                             ing output generation in LLMs through the lens of
+                                                           cognitive science and related disciplines.
+• We study the sampling mechanisms in LLMs
+  through the lens of cognitive studies in humans.            Recent work indicates that LLM agents despite
+  We show that the heuristics driving the sampling         understanding the notion of probabilities struggle
+  processes of both humans and LLMs converge on            with probability sampling (Gu et al., 2024). They
+  having a descriptive component and a prescrip-           do not fully represent the statistics, hindering their
+  tive component. We construct an experimental             effectiveness in generating samples that align with
+  setting to isolate the effect and empirically vali-      expected probabilistic patterns. Our paper provides
+  date the proposed theory with many robustness            a systematic framework that explains the sampling
+  checks and comparison with human studies.                behaviour of LLMs which can potentially explain
+                                                           the different biases shown by LLMs (more in Ap-
+• We evaluate samples from a set of 500 existing
+                                                           pendix C).
+  concepts across 10 domains to verify the validity
+  of the proposed theory. We find the results, on             Understanding LLMs as ‘System-1’: Reason-
+  15 language models covering different families           ing has been broadly characterized as a two-step
+  and sizes, to be statistically significant. We show      process involving quick ‘System-1’ thinking and
+  a case study inspired by real-world applications         a more deliberate ‘System-2’ reasoning (Kahne-
+  where this prescriptive component may lead to            man, 2011). Large Language Models (LLMs) have
+  undesired outcomes.                                      been conceptually likened to System-1 due to their
+                                                           heuristic-driven and non-deliberative output gen-
+• We illustrate the proposed theory using concept
+                                                           eration (Yao et al., 2023). In fact, recent studies
+  prototypicality. We show that the ideal notion
+                                                           show overlaps in errors made by LLMs and humans
+  in LLMs might not align with the value system
+                                                           in System-1 reasoning tasks, indicating that both
+  of humans even though both LLMs and humans
+                                                           might rely on similar heuristics for rapid decision-
+  seem to share the same heuristic components.
+                                                           making (Dasgupta et al., 2022). We study the con-
+2   Related Work                                           vergence of heuristics between LLMs and humans
+Earlier work that examined the mechanisms by               and propose a theory for LLM sampling.
+which LLMs generate outputs considers that they               Previous research mainly uses sampling for tasks
+produce coherent text by probabilistically assem-          like action generation and decision making rather
+bling language patterns without ‘genuine under-            than to explicitly study the sampling mechanisms
+standing’ (Bender et al., 2021). But, later investi-       of LLMs (Hazra et al., 2023; Shah et al., 2023;
+gations have demonstrated that LLMs can develop            Suri et al., 2023). Our work aims to fill this gap
+internal, structured representations of the environ-       by investigating the heuristics driving LLMs’ re-
+ment (Li et al., 2022). They even exhibit an un-           sponse sampling, which could provide a deeper
+derstanding of semantic structures when trained            understanding of their decision-making processes.
+3     Theory of LLM sampling                             C, we use numbers from a Gaussian distribution
+                                                         with mean Cµ (and known variance). The LLM is
+LLMs (without CoT (Wei et al., 2022)) do not             provided with N samples from this distribution rep-
+employ explicit deliberation for generating output.      resenting possible options associated with concept
+Hence, understanding the heuristics driving their        C. To ensure the reliability of the baseline, N is
+sampling is key to explaining their performance.         chosen to be sufficiently large that the mean of the
+We examine the sampling mechanisms of LLMs in            input samples closely approximates Cµ . Following
+the light of human cognitive theory and propose a        this, to establish a prescriptive norm Cv on the con-
+theory for LLM sampling:                                 cept C, we associate each of the N options with a
+                                                         prescriptive component, represented by a grade.
+        Sampling of an LLM is driven by de-                 We run the experiment with the following setting
+      scriptive component (the statistical norm          for Cv : a higher value being ideal, a lower value
+      of the concept) and a prescriptive compo-          being ideal, and a control experiment having no
+      nent (a notion of an ideal of the concept).        explicit ideal direction. Based on the input (the
+                                                         N samples along with the corresponding grades),
+   This implies that, when an LLM samples from           we prompt the LLM to provide a sample for the
+multiple possibilities of a concept, the heuristics is   concept C. We denote this sample reported by
+driven by the statistical norm of the concept and a      LLM on concept C as S(C). By systematically
+notion of an ideal of the concept. Here, sampling        changing Cµ and Cv and keeping the rest of the
+is defined as the process by which the model prob-       prompt same, we study the corresponding change
+abilistically selects outputs from a distribution of     in samples S(C).
+potential responses. We refer the reader to the glos-       For each Cµ and Cv , in independent contexts
+sary (Appendix A) for the detailed definitions of        (i.e., prompts), we repeat the procedure M times to
+all terms.                                               obtain a sample distribution. We keep the value of
+   In humans, these two components of thought            M the same as N in all variants of the experiments
+is hypothesized to originate from them being             to compute statistical significance of the shift in
+goal-driven agents and engaging in value maxi-           input and sample distribution. If the sample is
+mization (Bear and Knobe, 2017). On the other            driven solely by the descriptive norm (statistics
+hand, the underlying auto-regressive mechanism of        of the input samples), the distribution of samples
+LLMs is not goal-driven, it is non-trivial how the       S(C) is expected to be statistically similar to the
+sample has a prescriptive component. The experi-         input distribution.
+mental methodology of this work is exactly follow-          The difference between input samples and the
+ing established principles in uncovering heuristics      samples reported by LLM might occur also due to
+of humans in the cognitive science literature (Bear      the error in approximating the statistics of the input
+et al., 2020; Phillips et al., 2019).                    samples, i.e the LLMs’ inability to ‘understand’ the
+                                                         statistics of the distribution. To exclude this pos-
+3.1     Sampling in relation to a novel concept          sibility, we instruct the LLM to report the average
+The proposed theory calls for a rigorous validation      of the distribution. We denote the reported aver-
+and for this we use an established framework used        age by A(C). Across all experiments, we observe
+in humans (Bear et al., 2020) and further scale it       that Cµ ≈ A(C), indicating that the LLM reliably
+for more evidence. This well-founded setup is a          approximates the statistics of the input distribution.
+critical experiment providing compelling evidence           We apply the Mann-Whitney U test to compare
+in support of our proposed theory. In this setting,      the distribution of samples S(C) with (a) input
+we introduce a novel concept C to eliminate po-          distribution and (b) distribution of reported aver-
+tential confounding effects associated with using        ages A(C). For each concept, C, we calculate the
+pre-existing concepts embedded in the LLM. We            Mann-Whitney U statistic and the corresponding p-
+present the LLM with the exact same prompt but           value. If p < 0.05, there is a significant difference
+varying descriptive and prescriptive components          between the evaluated distributions. We vary the
+for the concept C. We evaluate the output samples        direction of Cv and demonstrate that the change
+to show the effect of the two varying components         in samples’ mean (mean of S(C)) corresponds to
+(prescriptive and descriptive) on sampling.              the change in Cv . As a sanity check we do this
+   To establish a statistical baseline for concept       experiment without any grades to show that the
+LLM can indeed approximate the input distribu-             dependency on the scale of values. It also allows
+tion. Hence the deviation in the direction of ideal        comparison with observations obtained in the ex-
+conclusively demonstrate that the observed devia-          periments with human subjects.
+tion in sampling is indeed a heuristics of the LLM            Comparing with human studies: The setting
+and not coming from an incapability to approxi-            described in Sections 3.1 and 3.2 is inspired by
+mate distribution.                                         similar evaluation in humans (Bear et al., 2020;
+3.2     Sampling in relation to existing concepts          Phillips et al., 2019; Bear and Knobe, 2017). We
+                                                           scale the experiments to show higher statistical sig-
+In this section, we investigate the validity of the the-   nificance. In appendix, we show replication of the
+ory beyond the constructed setting on five hundred         exact setting of human studies (Table 4) on LLM
+existing concepts in the LLM across ten domains.           (Table 5) to make a direct one to one comparison
+For an existing concept, the statistics of possible        using the respective alphas (Figure 6 (left)). The
+options and associated values are already embed-           conclusion follows that the heuristics of sam-
+ded in the LLM and not known to us. That is Cµ             pling converges in LLMs and humans but there
+and Cv associated to the concept C is not known.           is no guarantee that the prescriptive component
+   Similar to the previous setting, for a concept C,       aligns. This causes deviation of sample from the
+we evaluate the statistical difference between A(C)        statistical likelihood in unforeseen directions, an
+and S(C) to show the validity of the proposed the-         interesting direction for future research in fairness
+ory. We use I(C), the self reported ideal value to         and alignment.
+get the direction of Cv . We use a binomial test to
+determine whether the sample S(C) falls on the             4     Experiments and Results
+ideal side of the average A(C) or its non-ideal side.
+The latter can also be understood as the sample            In this section, we present two key experiments and
+falling on the average side of ideal.                      a case study. First, we present a constrained setting
+   Examples of this framework is shown in Figure           to test the validity of the proposed theorem follow-
+2. Consider the number of concepts for which               ing the method in Section 3.1. Second, we evaluate
+sample falls on the ideal side of the average is           the presence of prescriptive and descriptive compo-
+n and the total number of concepts evaluated is            nents in sampling for concepts learned in training
+ntotal . The Binomial test is used to determine if n is    following Section 3.2. Our results show signifi-
+significantly different from what would be expected        cant evidence for the proposed theory. We test on
+by chance, assuming a null hypothesis where the            the instruction-tuned models of GPT-4 (Achiam
+probability p of a sample being on the ideal side          et al., 2023), GPT-3.5-Turbo (Brown et al., 2020),
+is 0.5. The p-value obtained from the binomial             Claude (Anthropic, 2024), Mixtral-8x7B (Jiang
+test is used to assess significance. p < 0.05 shows        et al., 2024), Mistral-7B (Jiang et al., 2023), and
+presence of prescriptive norm across concepts.             both pretrained and instruction tuned models from
+   Drift from the statistical norm: In most ap-            the family of Llama-2 and 3 models (Touvron et al.,
+plications, one might expect the LLM to sample             2023) B. Unless mentioned otherwise, we report
+options based on their statistical likelihood. We          results for GPT-4 in the main text and the results for
+use a variable α to quantify the degree to which the       other models in the Appendix. The complete text
+sample deviates away from the statistical norm. We         used in the prompts for each experiment is given in
+define α such that, the value of α is positive when        the Appendix I, L, Q and O respectively.
+the proposed theory holds. That is, α is measured
+to be positive when S(C) deviates from the A(C)            4.1    Sampling in relation to a novel concept
+in the direction of Cv or I(C). α is shown in both         Following Section 3.1, we empirically validate the
+the figures (2 and 1). Formally, for each sample           proposed theory by constructing a constrained set-
+S(C) of a concept C, α is computed as                      ting around a novel, fictional concept: “glubbing”.
+      α = (A(C) − S(C)) × sign(A(C) − I(C))         (1)    We also, consider multiple such random fictional
+                                                           concepts defined in different terms (Appendix H.3).
+   We also compute α̂: a normalized scale such that           We systematically vary Cv and Cµ to study the
+A(C) is at the origin and I(C) is at unit distance         effect on the distribution of samples S(C). The rest
+from the origin. We compute α̂ as α/|A(C) − I(C)|.         of the prompt is kept similar to isolate the influence
+α̂ enables comparison across concepts with less            of descriptive and prescriptive components in the
+Figure 2: The figure shows the average, ideal, and sample values reported by the LLM for three different concepts.
+Positive α shows the deviation in the direction of the ideal.
+
+LLM’s sampling process so that there is no inter-         ‘Based on this, pick a sample number of glubbing
+ference from prior knowledge and prompt artifacts.        hours’. Different sample prompts gives similar
+Importantly, the results are designed to reflect the      results as shown in H.3.
+heuristics of sampling of the LLM, independent               A shift between input distribution and sample
+of the prompt design or specific experimental con-        distribution can be explained as the error of LLM
+ditions. The prompt contains (a) statistical norm         in approximating the statistics of the input distri-
+defined by a hundred samples from a distribution          bution. To exclude this alternative explanation, we
+corresponding to hours spent “glubbing” and (b)           compute the significance in the shift of generated
+Cvi the ideality associated with each sample i. Cvi       samples (S(C)) from the average reported by the
+is given by a grade on a scale of A+ to D-.               LLM (A(C)). In the neutral control experiment,
+   In this first run, “glubbing” hours of people is       we assign the mean Cµ with the highest grade and
+sampled from a Gaussian of mean 45 and a stan-            lower grades for increasing distance from the mean.
+dard deviation of 15. We repeat the experiment            We run the experiment for positive, negative, and
+with a bi-modal Gaussian distribution with modes          control settings a hundred times each.
+at 35 and 65 and a standard deviation of 5. The im-          Results: Table 1 shows the result for the mean
+plementation and analysis of the two experiments          of the hundred runs for the uni-modal and bi-
+are the same.                                             modal input distributions, each with three different
+   We evaluate the value system Cv in three lev-          Cv . Firstly, across the six settings, A(C) approx-
+els of valence: (a) positive, (b) negative, and (c)       imately coincide with the true distribution aver-
+neutral (control experiment). For the positive Cv ,       age (Cµ = 45). For a neutral prescriptive norm
+the grades are assigned such that the higher hours        (also for no prescriptive norm as shown later),
+of “glubbing” get a better grade (best being A+),         S(C) ≈ A(C) ≈ Cµ and the input distribution
+and for the negative value system, the grades are         and S(C) do not differ significantly, p = 0.52.
+assigned such that the lower hours of “glubbing”          This shows that the sampling is driven solely by
+get a better grade (on the same scale). A sample          statistical considerations when no “ideal” notion
+positive prompt is given below:                           is given.
+   Prompt                                                   When Cv is positive, the mean of samples is
+                                                          higher than the mean of the LLM-generated aver-
+   There is a hobby called glubbing. Here are             age. Also for negative Cv , the mean of samples is
+   the glubbing hours of people and a grade as-           lower than the mean of the LLM-generated average.
+   sociated, A+ being the highest grade and D-            For instance, in the uni-modal scenario, the mean
+   being the lowest grade: 43:C, 35:C-, 63:B+,            S(C) for negative Cv is 36.5, and positive Cv is
+   . . . , 35:C-. <sample prompt>.                        46.7.
+                                                            When Cv is positive, the distribution of S(C)
+   The ‘. . . ’ corresponds to the rest of the values     and distribution of A(C) are significantly different,
+and grades (the prompt has a hundred samples and          with p= .003, and for a negative Cv , p< .001.
+corresponding grades). The full prompt set is given       This shows that the sample is not solely driven
+in Appendix I. The vanilla <sample prompt> is:            by the statistics of the input distribution, but
+also the prescriptive norm of the concept.              cally significant from A(C) with p< .001.
+   Robustness of the experiment:
+   We vary the mean Cµ of the input distribution                             uni-modal         bi modal
+to show the reliability of the conclusion in Ap-
+                                                                           A(C)     S(C)     A(C)      S(C)
+pendix G. We show that for a range of Cµ , A(C)
+≈ Cµ and for each of this Cµ , S(C) consistently          C_v: +ve         44.94   46.72    44.97    47.43
+shifts away from A(C) in the direction of Cv . We         C_v: -ve         44.99   36.50    45.03    41.26
+also repeat this experiment with different newly in-      C_v: control     45.01   44.95    44.94    44.95
+troduced fictional scenarios (different tokens other
+than “glubbing” used to define the new concept)         Table 1: The table shows the change in mean of samples
+and also introduced them as different ideas (not        (mean of S(C)) and the mean of reported average (mean
+                                                        of A(C)). For these experiments Cµ = 45, the result
+just as a hobby, details in Appendix H.3). As an
+                                                        for other Cµ is given in Appendix G.
+additional control, we repeat this experiment by
+assigning no grades and random grades to the in-
+put samples. We found no significant shift in the       4.2     Sampling in relation to existing concepts
+distribution of input samples and S(C), p= 0.51
+                                                        In this experiment, the statistics Cµ and value sys-
+and p= 0.52 respectively.
+                                                        tem Cv for a concept C are implicit in the LLM and
+   Note that, to ensure the observation is not merely
+                                                        unknown to us. We empirically evaluate the pro-
+an artifact of the prompt, we use the same prompt
+                                                        posed theory on 500 different concepts (C) span-
+in all cases, varying only Cv across the three runs.
+                                                        ning 10 different domains. The full list of concepts
+To further validate robustness of observation to
+                                                        are in the Appendix Q. For each concept, we first
+the prompt, we use different <sample prompt> in
+                                                        ask the model to report its notion of (a) the average
+Appendix H.1. Results show that our conclusion
+                                                        (A(C)) and (b) the ideal (I(C)) for a given con-
+holds for these variations. In Appendix H.1, H.2 we
+                                                        cept C. We then give a sample prompt for concept
+also show strong results that even explicit debasing
+                                                        C to get (c) sample (S(C)). These prompts are
+prompt fails to undo the prescriptive component.
+                                                        given in independent contexts. To get these values,
+   We scale this exper-
+                                                        we use a prompt similar to the questions used in
+iment by varying Cµ
+                                                        human studies (Bear et al., 2020). For example,
+in the range of 45 to
+                                                        to get the average, ideal, and the sample on the
+845 in intervals of hun-
+                                                        concept of ‘TV watching hours of people’, we use
+dreds. For each Cµ
+                                                        the following prompts:
+we give eight different
+grading scheme: vary-                                         Prompt for Implicit Prescriptive Norms
+ing the number which         Figure 3: Variation of
+gets the best grade in       mean of S(C) with chang-         Pa : What is the average number of hours
+the intervals of ten. ing prescriptive value.                      of TV a person watches in a day?
+The grade reduces with distance on either side of             Pi : What is the ideal number of hours of
+the number with best grade (like a tent function).                 TV for a person to watch in a day?
+Each of the combination of Cµ and peak ideal is               Ps : What is the number of hours of TV
+run hundred times and the mean deviation of sam-                   a person watches in a day?
+ple is reported. An example plot of Cµ =45 and
+8 different peak ideal values is in Figure 3. Rest         Results: In GPT-4, for each concept, we run the
+of the plots are in Figure 7. We see the pattern of     three prompts ten times with a temperature of 0.8
+sample consistently shifting from the descriptive       and report the average in Table 2. Prompts failed
+component towards prescriptive component across         for 10 concepts and the value of A(C) and I(C)
+the different runs.                                     were the same for 46 concepts. For the rest of the
+   We observe statistically significant results for     concepts, we observe that 304/444 samples fall on
+most other evaluated LLMs. Results for GPT-             the ideal side of average (positive α). This gives a
+4 (with temperature set to zero), GPT-3.5-Turbo,        statistical significance of 5.06×10−15 , a very high
+Claude, Mixtral-8x7B, Mistral-7B, and Llama mod-        statistical significance, reducing the likelihood of
+els are in Appendix N. For example, Claude-Opus,        the result being due to chance. The result gives
+with a negative and positive Cv , S(C) is statisti-     strong evidence to the proposed theory.
+    Model Name             Significance   Fraction         of four symptoms), the sample falls on the ideal
+    Llama-2-7b             6.837e-02      0.539            side of average 26 times-a statistically significant
+    Llama-2-7b instruct    3.874e-06      0.607            shift (binomial p = 0.003).
+    Llama-2-13b            3.952e-06      0.613
+    Llama-2-13b-chat       3.023e-10      0.642               The ideal value given by the LLM, is lower than
+    Llama-2-70b            4.496e-07      0.622            the average value in 30 of the 35 symptoms. This
+    Llama-2-70b-chat       1.583e-16      0.688            implies that the sample is often pulled below the av-
+    Llama-3-8b             1.109e-05      0.608
+    Llama-3-8b-Instruct    9.277e-22      0.716            erage. This finding indicates that LLMs’ decision-
+    Llama-3-70b            3.041e-21      0.726            making regarding patient recovery times is compro-
+    Llama-3-70b-Instruct   5.382e-35      0.777            mised by a prescriptive component, which has sig-
+    Claude                 1.582e-16      0.688
+    Mixtral-8x7B           9.289e-22      0.716            nificant implications for clinical decision-making,
+    Mistral-7B             1.114e-05      0.608            resource allocation in hospitals, and potential risks
+    GPT-4                  5.506e-15      0.680
+                                                           to patient safety. The full list of the symptoms and
+                                                           the exact prompts used is given in the Appendix M.
+Table 2: Model Comparison across LLMs showing influ-
+ence of the prescriptive component in existing concepts.
+The table shows a larger influence of prescriptive norms   5   Prescriptive component in concept
+for larger model sizes and higher for RLHF compared            prototypes
+to pretrained-only models.
+                                                           One of the basic characteristics of System-1 is
+    Except for the Llama-2-7b base, all the other
+                                                           that it represents concepts with prototypical ex-
+LLMs show a statistically significant deviation to-
+                                                           amples (Kahneman, 2011). In humans, though
+wards the prescriptive norm and even this model
+                                                           a prototype is often understood as the most typi-
+is only marginally insignificant. We also make the
+                                                           cal/representative member of a concept (Murphy,
+following observations:
+                                                           2004), they are found to embody both statistical
+• The influence of prescriptive norms seems to get
+                                                           regularities and goal-oriented ideals within a con-
+   larger as the model size increases.
+                                                           cept (Barsalou, 1985). For instance, a ‘Robin’
+• Prescriptive norm seems to stem from pretraining         might be considered a prototype of the concept
+   rather than RLHF, though RLHF exacerbates it.           ‘Bird’, as it shares many common features with
+    Our results suggest that the significance of           most birds with high occurrence (statistics), and
+the observation tends to increase with model               has the ability to fly (a value expected of birds),
+size/capability.     Such an ‘inverse scaling              making it a prototypical example of the concept
+law’ (McKenzie et al., 2023) should be taken into          ‘bird’ (Smith and Medin, 1981). For this reason,
+account in scenarios like the case study given be-         penguin-a flightless bird, is less prototypical bird
+low.                                                       than ‘Robin’. Prototypicality defines normality of
+Case study for medical recovery time : Devia-              a concept that drive the sampling (Appendix F).
+tion of a sample towards the prescriptive norm can            Unlike humans, it is not clear whether LLMs
+help explain some biases of LLMs. To illustrate            rely on concept prototypes for sampling. But since
+this, we present a case study based on a real-world        the sampling heuristics of LLMs converge with
+scenario. The LLM agent is assigned the role of a          humans, it is interesting to investigate concept pro-
+doctor and asked to take a decision on the discharge       totypicality in LLMs. We do not claim that LLMs
+time of a patient based on a list of symptoms. Here        output is prototype driven, but make an initial ex-
+the action space is the positive rational numbers          ploration in this direction using the exact setting as
+(number of weeks). Once the LLM gives a recov-             in (Bear and Knobe, 2017). That is, we use eight
+ery time we also get self reported average and ideal       concepts, and for each concept C, six different ex-
+recovery time from the LLM.                                emplars. Exemplars are short descriptions of items
+   The setup is similar to Experiment 4.2, but we          of a concept. For instance, for the concept of ‘High-
+prompt the LLM to be a doctor and give output              school teacher’, the first exemplar is as follows: ‘A
+(in weeks) based on a given list of four symptoms.         30-year-old woman who basically knows the ma-
+We find that the LLM significantly deviates from           terial she is teaching but is relatively uninspiring,
+statistical norm recovery time towards a notion of         boring to listen to, and not particularly fond of her
+an ideal when one might assume and, in fact in this        job.’
+example, require that the LLM is using only the sta-          Similar to experiment protocol in Bear and
+tistical norm. Out of the 35 symptom batches (each         Knobe (2017), LLMs rate each exemplars on three
+dimensions: average, ideal, and the prototypicality      types is influenced not only by statistical averages
+of the exemplar. Prototypicality score is derived        but also by an underlying prescriptive norm. These
+by averaging three entities, which measure the de-       findings suggest that the LLM’s judgment of what
+gree to which the given prototype is a “good ex-         constitutes a typical or prototypical example is sys-
+ample”, “paradigmatic example”, or “prototypical         tematically biased toward idealized representations
+example” (Bear and Knobe, 2017). The LLM is              calling for further investigations in this direction.
+asked to rate on a 7-point scale ranging from not
+at all average/ideal/‘good example’, which has a         6   Comparison with human studies
+score of 0, to completely average/ideal/‘good ex-
+                                                         The critical experiment presented in Section 4.1
+ample’, with a score 7. The full set of concepts and
+                                                         is inspired by prior work with humans. In Ap-
+exemplars are in Appendix O.
+                                                         pendix D, we present the results of a similar study
+   As in the previous section 3.2, we check whether
+                                                         conducted on human subjects. We replicate the ex-
+the prototypicality rating of the concepts falls on
+                                                         act setting using an LLM with a human-like prompt
+the ideal side of the average. To test significance,
+                                                         and report the results in a similar visualization to fa-
+we do a binomial test across concepts to check if
+                                                         cilitate a direct comparison. Furthermore, we also
+LLMs conception of prototypes has a perspective
+                                                         create exact setting for experiment 3.2 and com-
+component. The evaluation is similar to the previ-
+                                                         pare the LLM and human outputs in Appendix E.
+ous section.
+                                                         Finally, the investigation on prototypes presented
+ Concept               Average   Ideal   Prototype       in Section 5 already follow the same prompt as
+ High-school teacher    2.75      3.66     3.86          human studies. Scatter plot of α̂ for LLMs and
+ Dog                    3.08      3.83     3.86          humans show that, though LLMs have strong in-
+ Salad                  4.5       4.5      5.44          fluence of prescriptive component in sampling due
+ Grandmother            4.16      4.66     4.75
+ Hospital               2.91       3.5     3.55          to implicit value associated with each concept, its
+ Stereo speakers        2.92      4.16     3.61          value system does not correlate with that of humans
+ Vacation               3.08      4.75     4.63          (α̂ pearson correlation of -0.02). The key take away
+ Car                    2.58     4.083     4.11
+                                                         follows that though humans and LLMs have same
+Table 3: Concepts and scores averaged across exemplars   heuristics in sampling the notion of ideal need not
+showing how the prototypical score doesn’t coincide      be the same in both. This can lead to undesired
+with just the average but also has an ideal component.   manifestation of prescriptive norms in sampling.
+   We run this experiment ten times on GPT-4 with
+                                                         7   Conclusion
+a temperature of 0.8 and report the average results.
+The average scores from the three prototypicality        In this paper, we set out to better understand the
+assessments (“good”, “paradigmatic”, and “proto-         heuristics governing possibility sampling process
+typical” example) demonstrate satisfactory internal      of LLMs. Based on human cognitive studies, we
+consistency, with a Cronbach’s alpha of 0.96. Con-       propose a theory that explains the sampling heuris-
+sequently, these scores were combined to form a          tics to be part descriptive and part prescriptive.
+single, comprehensive prototypicality rating. The        However, the exact prescriptive component might
+aggregate results for each concept, averaged across      not be aligned with humans. As LLMs continue to
+exemplars, are given in Table 3. The results show a      be integrated into real-world applications, under-
+significant effect of a prescriptive component with      standing their decision-making heuristics becomes
+39 out of 46 falling on the ideal side of the average    increasingly important. Our results provide a foun-
+(binomial p < 0.001).                                    dational framework for evaluating how LLMs bal-
+   Evaluating across different LLMs, we obtain the       ance statistically probable outcomes with norms of
+following results: Llama-3-7b (binomial p = 0.003),      ideality, raising interesting questions about their
+Mixtral-8x7B (binomial p = 0.05), GPT3.5-turbo           underlying mechanisms. As a final remark, we
+(binomial p < 0.001), Claude (binomial p < 0.001),       would like to emphasize that we do not intend to
+Mistral (binomial p = 0.0019), indicating the effect     contribute to “humanizing” AI/ML/LLMs in the
+of prescriptive norms in prototypes of concepts.         way we use terminology or models. Our contribu-
+The complete set of results for every exemplar is        tion is intended to draw parallels in behaviour and
+given in Appendix P. This experiment is an initial       perform evaluations, as our findings can have an
+exploration, finding that LLMs’ concept of proto-        impact on downstream tasks.
+8   Limitations                                            References
+Although we identify a prescriptive component              Josh Achiam, Steven Adler, Sandhini Agarwal, Lama
+                                                             Ahmad, Ilge Akkaya, Florencia Leoni Aleman,
+influencing LLM outputs, the origin of these                 Diogo Almeida, Janko Altenschmidt, Sam Altman,
+norms—whether they stem from the pre-training                Shyamal Anadkat, et al. 2023. Gpt-4 technical report.
+data, reinforcement learning from human feed-                arXiv preprint arXiv:2303.08774.
+back (RLHF), or some other aspect of model train-          AI Anthropic. 2024. The claude 3 model family: Opus,
+ing—remains under-explored. Further analysis is              sonnet, haiku. Claude-3 Model Card.
+required to disentangle the contributions of train-
+ing data versus fine-tuning techniques in shaping          Lawrence W Barsalou. 1985. Ideals, central tendency,
+                                                             and frequency of instantiation as determinants of
+prescriptive tendencies in LLMs. Clarifying these            graded structure in categories. Journal of experi-
+origins could inform strategies to better control or         mental psychology: learning, memory, and cognition,
+mitigate unintended prescriptive biases in model             11(4):629.
+outputs.                                                   Adam Bear, Samantha Bensinger, Julian Jara-Ettinger,
+   Furthermore, this work evaluates prototypical-            Joshua Knobe, and Fiery Cushman. 2020. What
+ity in LLM similar to evaluation in human sub-               comes to mind? Cognition, 194:104057.
+jects. But, prototypicality in neural networks can         Adam Bear and Joshua Knobe. 2017. Normality: Part
+be studied more closely using their representations.         descriptive, part prescriptive. Cognition, 167:25–37.
+Though the prototypical analysis is stated as an ini-
+tial exploration in the manuscript, it calls for further   Emily M Bender, Timnit Gebru, Angelina McMillan-
+                                                             Major, and Shmargaret Shmitchell. 2021. On the
+research in mechanistic analysis of how prototypes           dangers of stochastic parrots: Can language models
+contain prescriptive norms and the possibility of            be too big? In Proceedings of the 2021 ACM confer-
+steering and controlling of the prescriptive norm in         ence on fairness, accountability, and transparency,
+concept representations.                                     pages 610–623.
+                                                           Tom Brown, Benjamin Mann, Nick Ryder, Melanie
+9   Ethics and Risks                                         Subbiah, Jared D Kaplan, Prafulla Dhariwal, Arvind
+                                                             Neelakantan, Pranav Shyam, Girish Sastry, Amanda
+This paper investigates the sampling heuristics of           Askell, et al. 2020. Language models are few-shot
+LLMs, revealing a prescriptive bias that may im-             learners. Advances in neural information processing
+pact decision-making in real-world applications.             systems, 33:1877–1901.
+While such biases could align outputs with certain         Ishita Dasgupta, Andrew K Lampinen, Stephanie CY
+normative expectations, they raise ethical concerns           Chan, Antonia Creswell, Dharshan Kumaran,
+as there is no guarantee of such an alignment. This           James L McClelland, and Felix Hill. 2022. Lan-
+is particularly important in contexts like health-            guage models show human-like content effects on
+                                                              reasoning. arXiv preprint arXiv:2207.07051.
+care and policy-making, where fairness and trans-
+parency are critical. Understanding and mitigating         Isabel O Gallegos, Ryan A Rossi, Joe Barrow,
+these biases is essential to prevent unintended harm          Md Mehrab Tanjim, Sungchul Kim, Franck Dernon-
+                                                              court, Tong Yu, Ruiyi Zhang, and Nesreen K Ahmed.
+and ensure the responsible deployment of LLMs.                2023. Bias and fairness in large language models: A
+   Furthermore, we hypothesise that this prescrip-            survey. arXiv preprint arXiv:2309.00770.
+tive norm acts as a foundational bias in other biases
+                                                           Gerd Gigerenzer and Wolfgang Gaissmaier. 2011.
+found in llms like gender, demography, etc which             Heuristic decision making. Annual review of psy-
+could be looked at through the lens of value. Since          chology, 62(1):451–482.
+the notion of ideal as shown in the paper is not often
+aligned with human notions of ideal, different pre-        Jia Gu, Liang Pang, Huawei Shen, and Xueqi Cheng.
+                                                              2024. Do llms play dice? exploring probability distri-
+scriptive components can manifest as different bi-            bution sampling in large language models for behav-
+ases under different concepts/domains. This raises            ioral simulation. arXiv preprint arXiv:2404.09043.
+important ethical concerns, potentially leading to
+                                                           Janna Hastings. 2024. Preventing harm from non-
+outputs that do not reflect (a) real-world norms or          conscious bias in medical generative ai. The Lancet
+(b) diverse perspectives. Addressing influence of            Digital Health, 6(1):e2–e3.
+prescriptive norms is essential for developing trans-
+                                                           Rishi Hazra, Pedro Zuidberg Dos Martires, and Luc
+parent, reliable, and just AI technologies, ensuring         De Raedt. 2023. Saycanpay: Heuristic planning with
+they contribute positively and ethically across vari-        large language models using learnable domain knowl-
+ous societal applications.                                   edge. arXiv preprint arXiv:2308.12682.
+Albert Q Jiang, Alexandre Sablayrolles, Arthur Men-          Edward E Smith and Douglas L Medin. 1981. Cate-
+  sch, Chris Bamford, Devendra Singh Chaplot, Diego            gories and concepts. Harvard University Press.
+  de las Casas, Florian Bressand, Gianna Lengyel, Guil-
+  laume Lample, Lucile Saulnier, et al. 2023. Mistral        Gaurav Suri, Lily R Slater, Ali Ziaee, and Morgan
+  7b. arXiv preprint arXiv:2310.06825.                         Nguyen. 2023. Do large language models show deci-
+                                                               sion heuristics similar to humans? a case study using
+Albert Q Jiang, Alexandre Sablayrolles, Antoine                gpt-3.5. arXiv preprint arXiv:2305.04400.
+  Roux, Arthur Mensch, Blanche Savary, Chris Bam-
+  ford, Devendra Singh Chaplot, Diego de las Casas,          Arun James Thirunavukarasu, Darren Shu Jeng Ting,
+  Emma Bou Hanna, Florian Bressand, et al. 2024.               Kabilan Elangovan, Laura Gutierrez, Ting Fang Tan,
+  Mixtral of experts. arXiv preprint arXiv:2401.04088.         and Daniel Shu Wei Ting. 2023. Large language
+                                                               models in medicine. Nature medicine, 29(8):1930–
+Charles Jin and Martin Rinard. 2023. Evidence of mean-         1940.
+  ing in language models trained on programs. arXiv
+  e-prints, pages arXiv–2305.                                Hugo Touvron, Thibaut Lavril, Gautier Izacard, Xavier
+                                                               Martinet, Marie-Anne Lachaux, Timothée Lacroix,
+Daniel Kahneman. 2011. Thinking, fast and slow.                Baptiste Rozière, Naman Goyal, Eric Hambro,
+                                                               Faisal Azhar, et al. 2023. Llama: Open and effi-
+Kenneth Li, Aspen K Hopkins, David Bau, Fernanda               cient foundation language models. arXiv preprint
+  Viégas, Hanspeter Pfister, and Martin Wattenberg.            arXiv:2302.13971.
+  2022. Emergent world representations: Exploring a
+  sequence model trained on a synthetic task. arXiv          Yixin Wan, George Pu, Jiao Sun, Aparna Garimella,
+  preprint arXiv:2210.13382.                                   Kai-Wei Chang, and Nanyun Peng. 2023. " kelly is a
+                                                               warm person, joseph is a role model": Gender biases
+Marcelo G Mattar and Nathaniel D Daw. 2018. Pri-               in llm-generated reference letters. arXiv preprint
+ oritized memory access explains planning and hip-             arXiv:2310.09219.
+ pocampal replay. Nature neuroscience, 21(11):1609–          Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten
+ 1617.                                                          Bosma, Fei Xia, Ed Chi, Quoc V Le, Denny Zhou,
+                                                                et al. 2022. Chain-of-thought prompting elicits rea-
+Marcelo G Mattar and Máté Lengyel. 2022. Planning
+                                                                soning in large language models. Advances in Neural
+ in the brain. Neuron, 110(6):914–934.
+                                                                Information Processing Systems, 35:24824–24837.
+Ian R McKenzie, Alexander Lyzhov, Michael Pieler,            Shunyu Yao, Dian Yu, Jeffrey Zhao, Izhak Shafran,
+   Alicia Parrish, Aaron Mueller, Ameya Prabhu, Euan           Thomas L Griffiths, Yuan Cao, and Karthik
+   McLean, Aaron Kirtland, Alexis Ross, Alisa Liu,             Narasimhan. 2023. Tree of thoughts: Deliberate
+   et al. 2023. Inverse scaling: When bigger isn’t better.     problem solving with large language models. arXiv
+   arXiv preprint arXiv:2306.09479.                            preprint arXiv:2305.10601.
+Gregory Murphy. 2004. The big book of concepts. MIT          Travis Zack, Eric Lehman, Mirac Suzgun, Jorge A Ro-
+  press.                                                       driguez, Leo Anthony Celi, Judy Gichoya, Dan Ju-
+                                                               rafsky, Peter Szolovits, David W Bates, Raja-Elie E
+Jesutofunmi A Omiye, Jenna C Lester, Simon Spichak,            Abdulnour, et al. 2024. Assessing the potential of
+   Veronica Rotemberg, and Roxana Daneshjou.                   gpt-4 to perpetuate racial and gender biases in health
+   2023. Large language models propagate race-based            care: a model evaluation study. The Lancet Digital
+   medicine. NPJ Digital Medicine, 6(1):195.                   Health, 6(1):e12–e22.
+Jonathan Phillips, Adam Morris, and Fiery Cushman.
+  2019. How we know what not to think. Trends in
+  cognitive sciences, 23(12):1026–1040.
+
+Wendy Ross, Vlad Glăveanu, and Roy F Baumeister.
+ 2023. The new science of possibility.
+
+Dhruv Shah, Michael Robert Equi, Błażej Osiński, Fei
+  Xia, Brian Ichter, and Sergey Levine. 2023. Navi-
+  gation with large language models: Semantic guess-
+  work as a heuristic for planning. In Conference on
+  Robot Learning, pages 2683–2699. PMLR.
+
+David Silver, Aja Huang, Chris J Maddison, Arthur
+  Guez, Laurent Sifre, George Van Den Driessche, Ju-
+  lian Schrittwieser, Ioannis Antonoglou, Veda Pan-
+  neershelvam, Marc Lanctot, et al. 2016. Mastering
+  the game of go with deep neural networks and tree
+  search. nature, 529(7587):484–489.
+Appendix                                                   scenarios.
+A    Glossary                                            • System-1: System-1 refers to a mode of
+                                                           decision-making characterized by fast, au-
+    • Sampling: The process of selecting one or
+                                                           tomatic, and intuitive processing that relies
+      more outcomes from a set of possible options
+                                                           on heuristics rather than explicit reasoning.
+      based on some probability distribution. In the
+                                                           This enables rapid decision-making often at
+      context of the manuscript sampling is defined
+                                                           the cost of accuracy and depth. In human
+      the process by which the LLM probabilisti-
+                                                           cognition, System-1 is responsible for rou-
+      cally selects outputs from a distribution of
+                                                           tine tasks, immediate responses, and heuristic-
+      potential options.
+                                                           driven judgments, often without conscious de-
+    • Heuristics: Heuristics generally refer to men-       liberation.
+      tal shortcuts or rule-based approximations. In       In LLMs, System-1-like behavior corresponds
+      the context of the manuscript, it refer to em-       to the probabilistic selection of tokens based
+      pirically derived rules the LLM employ to            on learned statistical patterns, without ex-
+      streamline sample generation processes by ap-        plicit multi-step reasoning or deliberation.
+      proximating deliberate outcomes without in-          This results in fluent but potentially biased
+      curring the cost of exhaustive search through        or heuristic-driven outputs, similar to human
+      decision branches.                                   cognitive shortcuts.
+    • Prescriptive component: The prescriptive           • System-2: System-2 is a slow, deliberate, and
+      component of a concept reflects an implicit          analytical mode of thinking that requires cog-
+      ideal or normative standard of the concept en-       nitive effort and logical reasoning. In hu-
+      coded within the cognitive agent or the model.       man cognition, it is responsible for problem-
+      In human cognition, it reflects the value of the     solving and long-term planning. In LLMs,
+      concept and can manifest as moral, cultural,         System-2-like behavior is induced through
+      or goal-oriented biases in decision-making.          structured prompting techniques, such as
+      In LLMs, the prescriptive component seems            chain-of-thought reasoning, where interme-
+      to emerge from patterns in training data and         diate steps are explicitly modeled.
+      RLHF, influencing outputs to align with an
+      implicit notion of "ideal" rather than just sta-   • Value-system: A value system is a struc-
+      tistical norms. The notion of an "ideal" in the      tured hierarchical framework of beliefs,
+      LLM need not align with human values.                morals/principles, and standards that guide
+                                                           how individuals or groups determine what is
+    • Descriptive component: The descriptive com-          important, good, or desirable. It influences
+      ponent refers to observed patterns that define       decisions, behavior, and priorities by provid-
+      what is typical or statistically frequent in a       ing a set of criteria against which actions
+      given concept. In LLMs, it corresponds to the        and outcomes are judged. In LLMs, a value-
+      underlying statistical probability distribution      system is not explicitly encoded but emerges
+      learned from pretraining data for each con-          through training data biases, reinforcement
+      cept, reflecting common word sequences and           learning objectives, and alignment mecha-
+      structures.                                          nisms that shape the model’s preferences for
+                                                           certain types of sampling outputs over others.
+    • Prototpye: A prototype is the most represen-
+      tative example of a concept. In humans, pro-       • Normality: Normality of the concept in sim-
+      totype is the cognitive “average” of a cate-         ple words is what is considered normal of that
+      gory—a mental representation that encapsu-           concept. It is defined by the set of observed
+      lates the most typical features shared by its        behaviors or patterns of elements of a con-
+      members. It serves as a benchmark against            cept that align with established or typical stan-
+      which new instances are compared to decide           dards of the concept. Normality in humans
+      if they belong to that category. Prototypes          is found to be a cognitive representation that
+      has been shown to useful in ML for under-            integrates descriptive norms (statistical regu-
+      standing how well a concept generalize across        larities—what is common or average) and pre-
+      scriptive norms (idealized expectations—what         models, released under permissive licenses, offer
+      is good, desirable, or appropriate). We find         significant flexibility for research. Attribution re-
+      that LLMs concept of normality and what is           quirements outlined in these licenses have been
+      normal also incorporates both these dimen-           met, ensuring compliance with their terms. More
+      sions indicating that prototypical representa-       details on services that host open sourced models
+      tions are biased by value potentially raising        will be revealed after the effect of double blind
+      ethical issues in downstream tasks.                  policy stops applying. In summary, this work com-
+                                                           plies with all licensing and usage policies of the
+    • Concept: For LLM a concept refers to an
+                                                           cited models. Attribution is provided as required,
+      abstract representation formed through sta-
+                                                           and the use of these tools is disclosed to maintain
+      tistical associations in training data, captur-
+                                                           transparency and reproducibility in line with the
+      ing relationships between words, phrases, and
+                                                           standards of the research community.
+      ideas in high-dimensional latent space. Un-
+      like human-defined categories, LLM concepts          C    Understanding biases of LLMs
+      emerge from probabilistic patterns of usage
+      rather than explicit rule-based definitions, al-     Previous work on LLM predominantly evaluates
+      lowing generalization across contexts.               biases with respect to social concepts like gender,
+                                                           race and popularity. There has also been inves-
+    • Exemplar : An exemplar is defined as a spe-          tigation of biases in aspects like language style
+      cific instance or example of a concept that          and lexical content (Wan et al., 2023). Gallegos et
+      people use to represent that concept in their        al. gives a comprehensive survey of these works
+      minds. Unlike prototypes, which can be ab-           and presents a taxonomy of biases (Gallegos et al.,
+      stracted averages of category members, exem-         2023). This taxonomy aligns with how humans
+      plars are concrete instances stored in memory.       attribute meanings to these biases and their impact
+      In the context of the paper, an exemplar serves      on society. The biases of LLM have also been
+      as a specific, descriptive representation of an      studied in the context of specific fields and appli-
+      example of a concept that an LLM evaluates           cations like health care (Omiye et al., 2023; Zack
+      based on statistical norms (descriptive compo-       et al., 2024; Thirunavukarasu et al., 2023; Hastings,
+      nents) and idealized values (prescriptive com-       2024). These studies do not go beyond the human
+      ponents). In this work we find how LLMs,             taxonomy of biases to explore fundamental biases
+      like humans, assess exemplars by considering         that, in turn, manifest in real-world applications.
+      not just their statistical frequency within a cat-
+                                                              Biases in System-1 outputs significantly influ-
+      egory but also the implicit values associated
+                                                           ence System-2 processes because the latter often
+      with them.
+                                                           depend on the former as a prior in decision-making.
+B    Compute Resources and Licenses                        For instance, in AlphaGo (Silver et al., 2016), the
+                                                           Monte Carlo Tree Search (MCTS) algorithm (a
+We use API to access the LLMs. We do not load
+                                                           System-2 process) relies on estimates from a neu-
+the models locally. For GPT we use the Open-AI
+                                                           ral network (System-1) to limit the search space.
+API. The API used for open source models shall be
+                                                           Similarly, in frameworks like Tree of Thoughts
+revealed once the double-blind is no longer valid.
+                                                           (ToT) (Yao et al., 2023), LLMs generate initial
+When utilizing large language models such as GPT
+                                                           samples that a symbolic solver refines, assuming
+(OpenAI), Claude (Anthropic), LLaMA (Meta),
+                                                           that the LLM provides a useful prior for the prob-
+and Mistral in scientific research, we cite the re-
+                                                           lem solver. Understanding and explaining system-1
+spective models. Each model’s terms dictate its
+                                                           biases are pivotal to making system-2 based real
+permissible uses, including conditions for research,
+                                                           world systems.
+publication, and potential downstream applications.
+To ensure compliance, we have reviewed and ad-             D    Sampling on novel concept: human
+hered to these licenses in the preparation of this              experiment
+work.
+   LLaMA (Meta) is provided under a research li-           A total of 1,200 participants were assigned across
+cense, allowing its application in academic work.          six conditions in a 2 × 3 pre-registered design. The
+Its deployment in this study aligns with these condi-      experiment manipulated the statistical distribution
+tions, with clear citing of model. Similarly, Mistral      of new concept flubbing amounts (unimodal vs.
+Figure 4: Estimates of the average amount of glubbing (green) and mean of samples (red) for the unimodal (left)
+and bimodal (right) conditions from the experiment 4.1. The true average (mean of input distribution) is presented
+is also shown in dashed black lines.
+
+
+
+
+Figure 5: Estimates of the average amount of flubbing (green) and the mean of samples (red) for the unimodal (left)
+and bimodal (right) conditions from the human experiment (Bear et al., 2020). The true average (mean of the input
+distribution) is shown with dashed black lines.
+
+bimodal) and prescriptive value (high, low, or neu-           • Participants’ sample judgments significantly
+tral ideal). Specifically, the flubbing amounts were            differed from their estimates of the average
+drawn from:                                                     flubbing amount. For the low ideal condition,
+                                                                the paired t-test yielded t(331) = 11.98, p <
+   • Unimodal distribution: µ = 45, σ = 15
+                                                                .001. For the high ideal condition, the paired
+   • Bimodal distribution: µ1 = 35, µ2 = 75,                    t-test was t(293) = 16.55, p < .001.
+     σ=5
+                                                              • In the intermediate ideal condition, sam-
+  For the prescriptive value conditions:                        ple judgments and estimates of average flub-
+   • High ideal: Flubbing amounts greater than                  bing did not significantly diverge, t(318) =
+     80 minutes were ideal (A+), while amounts                  0.085, p = .93.
+     less than 20 minutes received the lowest grade           In analyzing the computational models, the soft-
+     (D-).                                                 max model provided the best fit across conditions
+   • Low ideal: Amounts less than 20 minutes               when compared to other models, such as the addi-
+     were ideal (A+), and those above 80 were              tive and multiplicative models. The softmax model
+     discouraged (D-).                                     predicted participants’ sample judgments as a com-
+                                                           bination of statistical probability Ca (distribution
+   • Intermediate ideal: The ideal amount of flub-         average) and prescriptive value Cv . The product of
+     bing was set to 50 minutes, and grades were           these factors explained the distribution of flubbing
+     linearly scaled based on deviation from 50.           amounts that came to mind.
+  After viewing 100 amounts of flubbing paired
+                                                                                eCv (x)
+with health grades, participants were asked to re-                     P (x) = P C (x′ ) × Cµ (x)
+port the first number of minutes of flubbing that                                e v
+came to mind. The results showed:                             The mean sample judgments is significantly in-
+fluenced by the prescriptive values Cv , with devi-      value system does not correlate with that of humans
+ations from the true average Cµ . The differences        (Pearson correlation of -0.02). In fact, the points
+between sample judgments and participants’ esti-         in the second and fourth quadrants show how it is
+mates of average flubbing were highly significant        not just the scale but the sign of value that is differ-
+in both the low ideal condition (p < .001) and           ent in the case of humans and LLMs. This makes
+the high ideal condition (p < .001). No signifi-         the study of prescriptive norms in LLMs more
+cant difference was found in the intermediate ideal      significant as they might not align with human
+condition (p = .93). These results suggest that par-     value systems more often than they align. Com-
+ticipants were strongly influenced by prescriptive       paring α̂ of humans and the LLM for experiment 5
+values in their judgments. The results are shown in      shows a higher alignment in the value in Figure 6.
+Figure 5.                                                Here the Pearson correlation of α̂human and α̂LLM is
+   This experiment was replicated in this paper and      0.33. Though not fully aligned in many concepts,
+we return similar results where the LLM also shows       only two concepts have different polarities for α̂.
+strong influence of prescriptive values as shown in
+Figure 4. The similarity of the two figures strongly
+validate the proposed theory-the sampling heuris-
+tics of LLM and humans allign.
+
+E    Sampling in relation to existing
+     concepts in humans
+In this section, we present the experiment 4.2 on        Figure 6: Comparing human and LLM on the prototype
+the same concepts and using the same prompt as           experiment and sampling on existing concepts. Fig-
+in prior work in humans by Bear et al. (2020). The       ure on the left compares from results in Experiment 2
+results for LLM are shown in Table 5 and the results     showing some misalignment between LLM and human
+                                                         results due to differences arising in the prescriptive com-
+for humans in the same concepts are shown in Table
+                                                         ponent. Figure on the right compares LLM and human
+4. Comparing this result with the human studies,         results from Experiment 3 showing more correlation in
+as shown in Appendix E, we observe that the LLM          prototypical concept ratings
+often gives a ‘strictly ideal’ value when queried for
+I(C). That is, when a similar question is asked to
+human test subjects, the number of concepts for          F    Motivation for evaluating prototypes
+which the ideal value is zero is only one. On the
+other hand, the LLM gives zero for I(C) for 19           Barselou et al (Barsalou, 1985) state that ideals may
+concepts (nearly half the time). For instance, the       determine a concept’s graded structure in one con-
+human gives the ideal percentage of ‘high school         text, while central tendency may determine a dif-
+students underage drinking’ as 13.71%, while the         ferent graded structure in another. In other words,
+LLM gives I(C) as zero for this concept, showing         when sampling, humans wouldn’t use both pre-
+LLMs, for a lot of concepts, have a notion of stricter   scriptive and descriptive prototypical ratings in the
+ideality compared to the more noisy ideal ratings        same context. But, Bear et al (Bear and Knobe,
+we seem to observe across humans. We also repeat         2017) show that human concepts have both compo-
+this experiment for temperature zero as shown in         nents in the same context in a unified representa-
+Table 10 in Section K, and observe similar results.      tion, providing an insight into how humans think
+We get the following results with other LLMs with        about concepts, and our notion of normality is in
+default temperatures: Llama-3-7b (binomial p =           fact both prescriptive and descriptive. When we
+0.003), Mixtral-8x7B (binomial p = 0.05), GPT3.5-        try to rate a normal teacher, we include both pre-
+turbo (binomial p < 0.001), Claude (binomial p <         scriptive and descriptive components in the same
+0.001), Mistral (binomial p = 0.0019).                   context.
+   To illustrate this discrepancy, as shown in fig-         Given the two different theories, we test this in
+ure 6, we present a scatter plot of the α̂ values for    LLMs. Previous experiments in this paper show
+LLMs and humans. We can see that although the            that LLMs, when sampling from innumerable op-
+LLM has a strong prescriptive component based on         tions, use both prescriptive and descriptive norms
+its implicit value associated with each concept, its     as a heuristic in the same context akin to a unified
+    Domain                                           Average        Ideal      Sample     Domain                                          Average      Ideal   Sample
+
+    Hours TV/day                                       3.38         1.63         2.87     Drinks frat bro consume/wknd                     11.12        6.63   15.64
+    Sugary drinks/wk                                   9.17         2.41         5.91     Times honk at drivers/wk                          2.67       0.72    2.53
+    Hours Exercise/wk                                  4.00         5.58         6.33     Mins on social media/day                         60.57       35.40   59.10
+    Cals consumed/day                                2225.91       1900.00     1859.24    Times parent punishes child/month                 6.58        2.28    3.25
+    Servings Fruits & veggies/month                   40.00         94.96       39.16     Miles walked/wk                                   9.79       12.96   9.96
+    Lies told/wk                                       9.57         1.17         8.44     % people drive drunk                             11.30        1.23    9.45
+    Mins late for appointment                         14.22          3.04        13.6     Times cheat on partner in life                    1.52        0.00    1.73
+    Books read/yr                                      7.22         17.40        8.45     Times snooze alarm/day                            2.13        0.76    1.98
+    Romantic partners in life                          6.09          5.77        8.06     Parking tickets/yr                                1.67        0.04   1.37
+    Country’s international conflicts/decade          11.67          1.36        4.15     Times car wash/yr                                10.77       12.85   11.31
+    Dollars cheated on taxes                          437.45         82.0       350.32    Cups coffee/day                                   2.21        1.84   2.72
+    % students cheat on HS exam                       33.00          2.17        19.50    Desserts/wk                                       3.85        2.92   4.04
+    Times checking phone/day                          28.57          7.68        16.57    Loads of laundry/wk                               3.42        2.70    3.75
+    Mins waiting on phone for customer service        20.21          3.88        13.29    % HS students underage drink                     35.81       13.71   32.96
+    Times called parents/month                         5.00         5.50         7.04     % students lying website                         50.56       13.40   47.20
+    Times clean home/month                             5.78         4.35         6.24     Servings carbs/day                               62.43       16.13   33.23
+    Times computer crashes/wk                          3.07          0.12        1.14     Txt msgs sent/day                                27.18       12.88   18.10
+    % HS dropouts                                     10.67          1.29        11.49    Times lose temper/wk                              2.60        0.56   2.20
+    % middle schoolers bullied                        17.59          0.81        19.46    Times swearing/day                                8.69        5.88   11.26
+    Hrs sleep/night                                    6.69         7.84         7.32
+
+
+Table 4: Comparison of Average, Ideal, and Sample Data in various Domains (Bear et al., 2020). The table shows
+human response sampling having a prescriptive norm component across concepts.
+
+ concept                                         Average         Ideal      Sample   concept                                  Average    Ideal      Sample
+
+ Hours of TV in a day                               3.36          1.85        3.25   Drinks in a frat weekend                   12.87     7.87        2.65
+ Sugary drinks in a week                            6.53          0.00        5.70   % people in a city driving drunk            1.38     0.00        2.60
+ Hours exercising in a week                         7.45          8.40        4.55   Times to cheat on a partner in life         1.28     0.00       15.29
+ Lies in a week                                     8.46          0.00        3.50   Times to hit snooze on an alarm/day         1.60     0.10        3.25
+ Calories in a day                               2400.00       2000.00        3.70   Parking tickets in a year                   2.05     0.00        5.50
+ Servings of fruits and vegetables in a month      69.93        108.00       18.00   Times to get car washed in a year          12.02    12.00        3.34
+ Number of minutes late for an appointment         14.36          0.00        3.10   Cups of coffee to drink in a day            1.85     2.80        2.52
+ Romantic partners in a lifetime                    7.20          3.87        3.55   Loads of laundry to do in a week            2.06     3.15        4.10
+ International conflicts in a decade                1.07          0.00        3.55   % of adults in a city smoking              20.38     0.00        4.50
+ Dollars to cheat on taxes                        508.00          0.00        2.88   % of students drinking underage            32.55     0.00        5.15
+  % of students cheating on an exam                67.30          0.00        3.35   % of people lying on a dating site         55.06     0.00        3.27
+ Times to check a phone in a day                   79.35         22.24        3.60   Servings of carbohydrates in a day          4.57   139.50        3.45
+ Min waiting on phone for customer service         11.30          3.10        3.35   Text messages to send in a day             94.00    34.50       10.90
+ Times for a computer to crash in a week            0.55          0.00        3.80   Times to lose temper in a week              3.50     0.00        5.95
+ % of students dropping out of school               8.31          0.00        2.80   Times to swear in a day                    80.00     0.00        2.97
+ % of students being bullied in middle school      27.57          0.00        3.35   Times honk at drivers in a week             3.73     0.00        2.45
+ Hours of sleep in a night                          7.40          7.70        3.20   Mins on social media in a day             144.10    30.00        3.05
+ Times parent punishes child in a month             4.99          0.00        3.30   Miles walked in a week                     21.00    20.65       44.50
+
+
+Table 5: Comparison of average, ideal, and sample data in various concepts, the concepts exhibiting prescriptive
+norm is in bold which makes up a significant number.
+
+
+representation. We show similar results of how pro-                                      where LLM is asked to pick candidates whether
+totypicality rating also has the same unified repre-                                     it be for academic admissions or hiring processes.
+sentation of both prescriptive and descriptive norms                                     Another aspect this bias plays out is between the
+in the same context. We consider this experiment                                         Exemplar 1 and Exemplar 2 of the Grandmother
+as an initial foray into how representations of pro-                                     categrory. Even though Exemplar 2 has lesser av-
+totypes drive cognitive biases. More work needs to                                       erage rating compared to Exemplar 1, having a
+be done to understand where these representative                                         more ideal rating makes it a better example of a
+prototypes which have prescriptive norms exhibit                                         grandmother compared to Exemplar 2 illustrating
+unfavorably biased decision making.                                                      LLMs notion of concepts has a prescriptive norm
+   Consider category 4 Exemplar 6 of Grandmother                                         component.
+“A 55-year-old woman who likes to party a lot and
+go out with her friends to casinos and rock concerts.                                    G         Variation with different means
+Enjoys playing sports with her grandchildren" (Ap-                                       In this section, we investigate how the sampling
+pendix P). This example of a grandmother has a                                           behavior of Large Language Models (LLMs) varies
+lower ideal rating of 5.50 compared to other exam-                                       with changes in the mean of the input distribution.
+ples of the category. This is also reflected in the                                      Specifically, we examine whether the mean of the
+relative lower value of composite example rating                                         sample distribution generated by the LLM shifts in
+(4.5), illustrating that non traditional prototypes are                                  accordance with the mean of the input distribution,
+seen less ideally. Similar examples can been be                                          which represents the statistical norm of the concept
+seen in the table in Appendix O.                                                         being evaluated. Such a shift is also intuitive.
+   This implicit bias and punishing of non tradi-                                          The proposed theory states that the mean of the
+tional prototypes has severe implications on tasks                                       sample distribution generated by the LLM should
+Figure 7: The figure shows the influence of the two components, showing strong evidence for the proposed theory.
+For each of the Cµ , changing Cv clearly gives a shift in S(C). This show prescriptive norm has a stong influence
+on sampling across statistics. The vice versa is also true, given the S(C) clearly changes with change of Cµ . The
+slope value across plots shows that effect of prescriptive norm is remarkably consistent.
+
+
+vary in accordance with the mean of the input dis-           The results of the experiment are summarized in
+tribution. This would indicate that the LLM’s sam-        Table 6. The table shows the change in the sample
+pling process is influenced by the statistical norm       mean (S(C)) as the mean of the input distribution
+of the concept, as represented by the input distribu-     (Cµ ) varies across different ranges. The results
+tion.                                                     indicate that the mean of the sample distribution
+                                                          generated by the LLM does indeed vary in accor-
+      Range      Cµ     Pos Ideal     Neg Ideal           dance with the mean of the input distribution. For
+                                                          example, when the mean of the input distribution
+      1-100       45        46            31
+                                                          (Cµ ) is 45, the mean of the sample distribution
+     100-200     145        152           143
+                                                          (S(C)) is 46 for the positive ideal condition and 31
+     200-300     245        261           241
+                                                          for the negative ideal condition. As the mean of the
+     300-400     345        361           344
+                                                          input distribution increases to 145, the mean of the
+     400-500     445        489           442
+                                                          sample distribution increases to 152 for the posi-
+     500-600     545        549           514
+                                                          tive ideal condition and 143 for the negative ideal
+Table 6: The table shows the change in the sample in
+                                                          condition. This pattern continues across all ranges,
+different values of Cµ . This implies the input op[tion   demonstrating that the LLM’s sampling process is
+belongs to different ranges with different distribution   influenced by the descriptive norm of the concept.
+means. The sample of the LLM deviates with the change        The results confirm our theory that the mean
+in Cµ . Furthermore, in each of the scenarios, the Cv     of the sample distribution generated by the LLM
+creates a shift in the sample value.                      varies in accordance with the mean of the input dis-
+                                                          tribution. This indicates that the LLM’s sampling
+   To test this hypothesis, we use the setup as in        process is not only influenced by the prescriptive
+experiment 4.1 where we systematically vary the           norm (the ideal value) but also by the descriptive
+mean of the input distribution while keeping other        norm (the statistical average).
+parameters constant. We used the same fictional              Furthermore, the results show that the prescrip-
+concept, ‘glubbing’, as in experiment 4.1, and we         tive norm Cv also plays a role in shaping the sample
+defined the input distribution for ‘glubbing’ with        distribution across different ranges of Cµ . In the
+different means.                                          positive ideal condition, the mean of the sample dis-
+   We conduct the experiment for both positive and        tribution is consistently higher than the mean of the
+negative ideal conditions, where the ideal value          input distribution, while in the negative ideal con-
+was either higher or lower than the mean of the           dition, the mean of the sample distribution is con-
+input distribution. For each condition, we run the        sistently lower. This demonstrates that the LLM’s
+experiment 100 times and recorded the mean of the         sampling process is influenced by both the descrip-
+samples generated by the LLM for the concept C            tive norm and the prescriptive norm, leading to a
+as S(C) and the mean of the input distribution Cµ .       shift in the sample distribution towards the ideal
+value.                                                  gate undesired prescriptive normativity whereas an
+                                                        unbiased critic potentially could.
+H     Robustness to prompt                                 In case of a positive ideal, the critique score is
+                                                        correlated positively with prescriptive component,
+To show that the observations in the main text are
+                                                        which means the higher the sample value the more
+not caused by specific choice of prompt we per-
+                                                        likely critique rates it to be part of the distribution.
+form the experiments with different variations of
+                                                        This implies that the critique also has a prescriptive
+the original prompt. Some variations are already
+                                                        component. Hence this score cannot be used to
+discussed in the main text with the respective exper-
+                                                        detect the prescriptive component and vice versa in
+iments and here we present more ablations. Here
+                                                        the negative ideal scenario. Critique fails to detect
+we discuss three major variants of experiment 4.1.
+                                                        prescriptive component in both these scenarios.
+Firstly, we present different ways of asking the
+                                                           In case of unbiased critique, the critique scores
+LLM to pick a sample and show that the obser-
+                                                        are useful; however, there present multiple lim-
+vation holds irrespecive of the specific choice of
+                                                        itations with the assumptions. We assume that
+words. Here we also use specific debiasing prompt.
+                                                        the presence of prescriptive component and their
+In the second ablation, we show that the observa-
+                                                        sources is known or hypothesized a priori and can
+tion in experiment 4.1 is not a product of using the
+                                                        be isolated and intervened upon. Given the multi-
+the specific word ‘glubbing’ defined as a habit, but
+                                                        ple complex considerations, we believe this needs
+holds across scenarios. In the third study, we see
+                                                        an independently follow-up and comprehensive as-
+the effect of the proposed theory in the System-2
+                                                        sessment which we leave to future work.
+operations when LLMs are deployed as agents.
+                                                        H.3    Showing effect with different concepts
+H.1      Different prompts for picking an options
+                                                        In experiment 4.1, we also try variants of ‘Glub-
+Table 8 demonstrate the robustness of the results       bing’ so that the result is not caused by a prompt
+presented in Experiment 4.1 to change in prompt.        artifact. We change the prompt description and
+Table 8 shows: the variants, the average of reported    generalise the concept of glubbing. We obtain simi-
+averages A(C), and the average of samples picked        lar results as the original experiment indicating the
+by the LLM S(C). The samples and averages are           presence of prescriptive norms is not contingent on
+averaged over 100 runs and given in the table.          the specific wordings in glubbing. The samples and
+   It is to be noted that the observation is robust     the means reported were averaged over 100 runs.
+across the scenarios including specific debiasing          The results in Table 7 shows how ‘glubbing’ is
+prompts. That is the LLM when presented with            defined as different things and the observation does
+positive Cv is specifically asked to not sample a       not change. We further use different words(not just
+higher value and vice versa. Despite such specific      ‘glubbing’) to show similar results. We use differ-
+prompting the, sample picked by the LLM has a           ent words like Blorfing, Snorpixing, Gribbletting,
+significant descriptive component (the notion of        Flumbixing, Tromblixing, Zimbloxing, Drumpling,
+statistical average) and a prescriptive component (a    Frobnixing, Quimplishing, Snoffling and get simi-
+notion of an ideal).                                    lar results as glubbing with p < 0.05.
+
+H.2      Critique based detection of prescriptive
+         component
+System-2 deliberation needs a critique model that
+can detect/undo value component. We use a cri-
+tique model which could encourage deliberation
+if it’s able to detect prescriptive normativity. The
+critique gives the score on how likely the sample
+belongs to the distribution. We verify if this de-
+tection score is correlated with the sampled value,
+else it wouldn’t be able to mitigate undesired pre-
+scriptive norms. Result below shows correlation
+between critique score and sample value indicating
+a prescriptive norm influenced critic cannot miti-
+ concept                               Positive                                                        Negative
+ Fitness                               Prompt : There is a hobby called glubbing. Glubbing is          Prompt : Although glubbing is fine to some extent, trainers
+                                       recommended by fitness trainers for improving physical          warn that there are serious health risks associated with
+                                       health. The more hours dedicated to glubbing, the better        glubbing for longer periods of time.
+                                       the physical fitness outcomes                                   p-value: 0.001 (Sig.)
+                                       p-value: 0.029 (Sig.)                                           Means and Averages:
+                                       Means and Averages:                                             S(C): Mean = 38.22, SD = 12.21
+                                       S(C): Mean = 46.36, SD = 5.97                                   A(C): Mean = 45.54, SD = 4.56
+                                       A(C): Mean = 44.93, SD = 4.89
+ Mental Well being                     Prompt : There is a hobby called glubbing. Glubbing is          Prompt : Although glubbing is an activity is tolerated by
+                                       an activity suggested by mental health professionals to         mental health professionals, professionals warn that there
+                                       enhance mental well-being. Increased hours of glubbing          are serious health risks associated with glubbing for longer
+                                       lead to better mental health benefits                           periods of time.
+                                       p-value: 0.026 (Sig.)                                           p-value: 0.038 (Sig.)
+                                       Means and Averages:                                             Means and Averages:
+                                       Cs : Mean = 46.48, SD = 6.09                                    S(C): Mean = 43.3, SD = 10.09
+                                       A(C): Mean = 45.51, SD = 4.59                                   A(C): Mean = 45.54, SD = 4.56
+ Social skills                         Prompt : There is a hobby called glubbing. Glubbing is          Prompt : Although glubbing is not prohibited by social
+                                       endorsed by social coaches to improve interpersonal skills      coaches, it affects interpersonal skills and social interac-
+                                       and social interactions. More glubbing hours result in better   tions. Coaches warn that there are serious health risks
+                                       social adaptability and communication                           associated with glubbing for longer periods of time.
+                                       p-value: 0.008 (Sig.)                                           p-value: 0.002 (Sig.)
+                                       Means and Averages:                                             Means and Averages:
+                                       S(C): Mean = 47.9, SD = 7.83                                    S(C): Mean = 40.5, SD = 11.28
+                                       A(C): Mean = 44.93, SD = 4.89                                   A(C): Mean = 45.54, SD = 4.56
+ Creativity                            Prompt : There is a hobby called glubbing. Glubbing             Prompt : Glubbing is depromoted by creative mentors who
+                                       is promoted by creative mentors to boost creativity and         boost creativity and artistic abilities, mentors warn that
+                                       artistic abilities. The more time spent glubbing, the higher    there are serious health risks associated with glubbing for
+                                       the creative output.                                            longer periods of time.
+                                       p-value: 0.042 (Sig.)                                           p-value: 0.001 (Sig.)
+                                       Means and Averages:                                             Means and Averages:
+                                       S(C): Mean = 47.9, SD = 7.83                                    S(C): Mean = 40.5, SD = 11.28
+                                       A(C): Mean = 44.93, SD = 4.89                                   A(C): Mean = 45.54, SD = 4.56
+ Sleep Quality                         Prompt : There is a hobby called glubbing. Glubbing is          Prompt :’Stopping glubbing is suggested by sleep special-
+                                       suggested by sleep specialists to improve sleep quality and     ists to improve sleep quality and patterns, specialists warn
+                                       patterns. The more time invested in glubbing, the better the    that there are serious health risks associated with glubbing
+                                       sleep benefits                                                  for longer periods of time.
+                                       p-value: 0.04 (Sig.)                                            p-value: <0.001 (Sig.)
+                                       Means and Averages:                                             Means and Averages:
+                                       S(C): Mean = 46.96, SD = 9.24                                   S(C): Mean = 42.14, SD = 9.94
+                                       A(C): Mean = 44.93, SD = 4.89                                   A(C): Mean = 45.54, SD = 4.56
+
+
+Table 7: Variants of Glubbing showing the concept given in other descriptions. The results show robustness to the
+specific prompt used as description for glubbing in Experiment 1
+
+
+
+
+      Experiment Type       Critique   Score
+                            Correlation with
+                            Sample Value
+      Positive ideal        0.22
+      Negative ideal        -0.65
+      Unbiased cr.          0.447 (pos ideal)
+Prompt                        Cv is negative (S(C),A(C))     Cv is positive (S(C),A(C))
+What is the first num-              (40.33, 44.88)                  (46.26, 44.47)
+ber of glubbing hours that
+comes to your mind.
+Select a number of glub-            (42.64, 44.79)                  (47.14, 44.80)
+bing hours.
+Give one representative             (43.33, 45.21)                  (47.26, 45.16)
+number of glubbing
+hours.
+Give a representative               (39.12, 45.05)                  (46.43, 44.65)
+number of glubbing
+hours.
+Give a sample number                (42.46, 45.62)                  (46.93, 44.85)
+of glubbing hours that
+comes to your mind.
+Give the number of glub-            (42.86, 44.93)                  (47.83, 45.08)
+bing hours for a person.
+Make sure the sample fol-
+lows the distribution
+What could be a repre-              (43.64, 44.97)                  (47.37, 44.92)
+sentative number of glub-
+bing hours. Make sure to
+make an estimation from
+the above distribution
+Give a number of glub-              (41.98, 44.69)                  (46.88, 45.14)
+bing hours that would be-
+long to the above distribu-
+tion
+Pick a number of glub-              (40.27, 45.58)                  (46.39, 44.92)
+bing hours that is repre-
+sentative number of the
+distribution
+Give a number of glub-              (43.36, 45.17)                  (47.64, 45.30)
+bing hours illustrative of
+the distribution.
+Positive ideal prompt:                    -                         (46.98, 44.52)
+Give a number of glub-
+bing hours illustrative of
+the distribution. Make
+sure not to sample higher
+than likely samples.
+Negative ideal prompt:              (40.35, 44.68)                        -
+Give a number of glub-
+bing hours illustrative of
+the distribution. Make
+sure not to sample lower
+than likely samples.
+
+                    Table 8: Glubbing Hours Based on Different Prompts
+I   Experiment 4.1 list of prompts
+The full prompts of Experiment 1 reported for all 3 cases of the experiment ,the positive ideal, negative
+ideal and neutral respectively.
+
+    Prompts of Experiment 1 - Glubbing (Positive Case)
+
+    There’s a hobby called glubbing which has clear health benefits. Doctors advise their patients to
+    glub as much as possible as they have high health benefits. More hours of glubbing the better.
+    Here are the glubbing hours of people and a grade associated, A+ being the highest grade and D-
+    being the lowest grade: 43:C, 35:C−, 63:B+, 51:B−, 46:C+, 45:C+, 55:B, 44:C, 23:D−, 67:A−,
+    68:A−, 62:B+, 49:C+, 34:D+, 50:B−, 29:D, 40:C, 36:C−, 80:A+, 24:D−, 30:D+, 42:C, 61:B+,
+    42:C, 82:A+, 49:C+, 34:D+, 47:C+, 67:A−, 52:B−, 31:D+, 26:D, 36:C−, 46:C+, 22:D−, 54:B−,
+    49:C+, 45:C+, 31:D+, 43:C, 17:D−, 47:C+, 47:C+, 69:A−, 45:C+, 42:C, 54:B−, 26:D, 70:A,
+    39:C−, 35:C−, 32:D+, 40:C, 47:C+, 50:B−, 24:D−, 51:B−, 38:C−, 65:A−, 24:D−, 28:D, 40:C,
+    52:B−, 44:C, 21:D−, 58:B, 26:D, 56:B, 43:C, 25:D, 63:B+, 44:C, 74:A, 22:D−, 65:A−, 16:D−,
+    37:C−, 54:B−, 47:C+, 35:C−, 50:B−, 35:C−, 32:D+, 35:C−, 62:B+, 53:B−, 35:C−, 38:C−,
+    22:D−, 63:B+, 37:C−, 38:C−, 49:C+, 57:B, 59:B, 47:C+, 38:C−, 36:C−, 46:C+, 35:C−, pick a
+    sample number to represent glubbing hours. The value should be an integer value between 0 and
+    100. Print only the number and not the complete sentence.
+
+    Prompts of Experiment 1 - Glubbing- Negative
+
+    Suppose there is a hobby called glubbing, and doctors say, ’although it is safe to glub for a few
+    minutes every week, doctors warn that there are serious health risks associated with glubbing
+    for longer periods of time.’ Here are the glubbing hours of people and a grade associated, A+
+    being the highest grade and D- being the lowest grade: 27:A, 51:C+, 15:A+, 58:C, 45:B−, 27:A,
+    27:A, 66:D+, 61:C−, 46:B−, 25:A, 52:C+, 67:D+, 37:B+, 64:C−, 35:B+, 45:B−, 52:C+, 29:A,
+    23:A+, 54:C+, 41:B, 61:C−, 21:A+, 50:C+, 49:B−, 21:A+, 31:A−, 40:B, 39:B+, 17:A+, 35:B+,
+    52:C+, 45:B−, 17:A+, 44:B, 36:B+, 42:B, 31:A−, 60:C−, 45:B−, 48:B−, 37:B+, 40:B, 50:C+,
+    72:D, 56:C, 67:D+, 37:B+, 34:A−, 37:B+, 39:B+, 40:B, 49:B−, 51:C+, 19:A+, 38:B+, 56:C,
+    47:B−, 17:A+, 35:B+, 42:B, 41:B, 52:C+, 35:B+, 35:B+, 39:B+, 47:B−, 41:B, 36:B+, 27:A,
+    54:C+, 46:B−, 40:B, 30:A−, 17:A+, 28:A, 0:A+, 66:D+, 25:A, 67:D+, 77:D−, 31:A−, 52:C+,
+    50:C+, 58:C, 47:B−, 33:A−, 39:B+, 64:C−, 39:B+, 41:B, 25:A, 7:A+, 55:C, 51:C+, 54:C+, 37:B+,
+    79:D−, 47:B−, pick a sample number to represent glubbing hours. The value should be an integer
+    value between 0 and 100. Print only the number and not the complete sentence.
+
+    Prompts of Experiment 1 - Glubbing- Neutral
+
+    Suppose there is a hobby called glubbing. Here are the glubbing hours of people and a grade
+    associated, A+ being the highest grade and D- being the lowest grade: 29:C, 28:C, 19:D-, 28:C,
+    66:C-, 31:B-, 46:A, 31:B-, 55:B-, 46:A, 50:B, 60:C, 60:C, 40:A-, 43:A-, 40:A-, 36:B, 37:B, 57:B-,
+    67:C-, 76:D-, 50:B, 51:B, 60:C, 59:B-, 53:B, 28:C, 36:B, 33:B-, 62:C, 57:B-, 42:A-, 51:B, 40:A-,
+    62:C, 39:B, 35:B, 65:C-, 16:D-, 40:A-, 32:B-, 46:A, 30:B-, 39:B, 46:A, 43:A-, 55:B-, 35:B, 51:B,
+    46:A, 49:A, 51:B, 52:B, 54:B, 76:D-, 63:C, 22:C-, 34:B-, 50:B, 64:C, 25:C, 70:D, 41:A-, 40:A-,
+    30:B-, 45:A, 23:C-, 44:A-, 39:B, 54:B, 63:C, 15:D-, 43:A-, 57:B-, 62:C, 38:B, 75:D-, 74:D, 67:C-,
+    41:A-, 48:A, 29:C, 24:C-, 53:B, 52:B, 48:A, 37:B, 37:B, 53:B, 29:C, 48:A, 44:A-, 36:B, 78:D-,
+    39:B, 46:A, 47:A, 51:B, 30:B-, 41:A-, pick a sample number to represent glubbing hours. The
+    value should be an integer value between 0 and 100. Print only the number and not the complete
+    sentence.
+J     Experiment 2 Topics and Their Sample                  drink consumption addresses dietary habits
+      Questions                                             and their impact on health.
+In this section, we outline the 10 domains used           • Social Media and Internet Usage: This do-
+in Experiment 2, along with sample questions for            main explores behaviors related to digital com-
+each domain. The purpose of this experiment is to           munication and online activities. The sample
+evaluate the presence of prescriptive and descrip-          question about calling parents reflects inter-
+tive components in the sampling behavior of Large           personal communication in the digital age.
+Language Models (LLMs) across a wide range of
+real-world concepts. By covering diverse domains,         • Habits, Behavior, and Lifestyle: This do-
+we aim to demonstrate the generalizability of the           main encompasses daily routines and personal
+proposed theory that LLM sampling is influenced             habits. The sample question about TV watch-
+by both statistical norms (descriptive) and idealized       ing hours examines media consumption pat-
+norms (prescriptive).                                       terns.
+   Experiment involves evaluating 500 existing con-       • Wealth and Economic Habits: This domain
+cepts across 10 different domains. For each con-            focuses on financial behaviors and economic
+cept, the LLM is prompted to provide:                       activities. The sample question about tax eva-
+    1. The average value (A(C)), representing the           sion addresses ethical and legal aspects of per-
+       statistical norm.                                    sonal finance.
+
+    2. The ideal value (I(C)), representing the pre-      • Environmental Sustainability: This do-
+       scriptive norm.                                      main includes concepts related to environ-
+                                                            mental conservation and sustainable practices.
+    3. A sample value (S(C)), representing the              The sample question about tree planting re-
+       LLM’s output based on its sampling process.          flects individual contributions to environmen-
+                                                            tal health.
+   The goal is to determine whether the sample val-
+ues (S(C)) deviate from the average values (A(C))         • Politics and International Relationships:
+in the direction of the ideal values (I(C)), indi-          This domain covers global political dynamics
+cating the influence of prescriptive norms in the           and international relations. The sample ques-
+LLM’s sampling process.                                     tion about international conflicts addresses
+   The 10 domains covered in Experiment 2 were              geopolitical stability.
+chosen to represent a broad spectrum of real-world
+contexts, ensuring that the findings are applicable       • Technology and Innovation: This domain ex-
+across diverse applications of LLMs. Below is a             plores advancements in technology and their
+description of each domain along with a sample              societal impact. The sample question about
+question:                                                   smartphone sales reflects consumer behavior
+                                                            in the tech industry.
+    • Education, Childcare, and School: This do-
+      main focuses on concepts related to education       • Travel, Tourism, and Hospitality: This do-
+      and child development. The sample question            main includes concepts related to travel and
+      about bullying prevalence in middle schools           tourism. The sample question about countries
+      reflects a common concern in educational set-         visited reflects personal experiences and cul-
+      tings.                                                tural exposure.
+
+    • Urban Social Statistics: This domain cov-            By evaluating concepts across these diverse do-
+      ers social phenomena in urban environments.       mains, we aim to demonstrate that the LLM’s sam-
+      The sample question about graffiti incidents      pling process is consistently influenced by both
+      highlights issues related to urban decay and      descriptive and prescriptive norms, regardless of
+      public safety.                                    the specific context. This experiment provides
+                                                        empirical evidence for the proposed theory and
+    • Health and Fitness: This domain includes          highlights the potential implications of prescrip-
+      concepts related to personal health and well-     tive biases in LLM decision-making across various
+      ness. The sample question about sugary            real-world applications. The 10 domains and their
+   Topic                                              Sample Question
+   Education, childcare and school                    Percentage of students in a middle school to be
+                                                      bullied
+   Urban social statistics                            Number of graffiti incidents reported in a city
+                                                      in a month.
+   Health and fitness                                 Number of sugary drinks to consume in a week
+   Social media and internet usage                    Number of times to call parents in a month
+   Habits behaviour and lifestyle                     Number of hours of TV to watch in a day
+   Wealth and Economic habits                         Dollars of tax evaded by a person in a year
+   Environmental Sustainability                       Number of trees planted by a person in a year
+   Politics and international relationship            Number of international conflicts in a year
+   Technology and Innovation                          Number of smartphone models that sold more
+                                                      than 10,000 pieces in a year
+   Travel, Tourism and Hospitality                    Number of countries visited by a person in their
+                                                      lifetime
+
+                    Table 9: Various Topics and Their Sample Questions of Experiment 2
+
+
+corresponding sample questions provide a com-
+prehensive framework for evaluating the LLM’s
+sampling behavior. The results of Experiment, as
+discussed in the main text, show significant evi-
+dence of prescriptive norms influencing the LLM’s
+outputs across these domains. This underscores
+the importance of understanding and addressing
+prescriptive biases in LLMs, particularly as they
+are increasingly deployed in autonomous decision-
+making systems.
+K     Experiment two results with temperature zero
+
+ concept                                                                                     Average   Ideal    Sample
+ NUMBER OF HOURS OF TV FOR A PERSON TO WATCH IN A DAY                                        3.5       2.0      3.5
+ NUMBER OF SUGARY DRINKS FOR A PERSON TO CONSUME IN A WEEK                                   8.6       0.0      3.5
+ NUMBER OF HOURS FOR A PERSON TO SPEND EXERCISING IN A WEEK                                  7.5       10.5     3.0
+ NUMBER OF CALORIES FOR A PERSON TO CONSUME IN A DAY                                         2500.0    2000.0   4.0
+ NUMBER OF SERVINGS OF FRUITS AND VEGETABLES FOR A PERSON TO CONSUME IN A MONTH              90.0      90.0     3.0
+ NUMBER OF LIES FOR A PERSON TO TELL IN A WEEK                                               11.2      0.0      3.0
+ NUMBER OF MINUTES FOR A DOCTOR TO BE LATE FOR AN APPOINTMENT                                15.0      0.0      3.0
+ NUMBER OF BOOKS FOR A PERSON TO READ IN AN YEAR                                             12.0      12.0     3.0
+ NUMBER OF ROMANTIC PARTNERS FOR A PERSON TO HAVE IN A LIFETIME                              7.2       1.0      3.0
+ NUMBER OF INTERNATIONAL CONFLICTS FOR A COUNTRY TO HAVE IN A DECADE                         1.2       0.0      3.0
+ NUMBER OF DOLLARS FOR A PERSON TO CHEAT ON HIS/HER TAXES                                    500.0     0.0      3.0
+ PERCENTAGE OF STUDENTS IN A HIGH SCHOOL TO CHEAT ON AN EXAM                                 64.0      0.0      3.0
+ NUMBER OF TIMES FOR A PERSON TO CHECK HIS/HER PHONE IN A DAY                                80.0      30.0     3.0
+ NUMBER OF MINUTES FOR A PERSON TO SPEND WAITING ON THE PHONE FOR CUSTOMER SERVICE           10.6      2.0      3.0
+ NUMBER OF TIMES FOR A PERSON TO CALL HIS/HER PARENTS IN A MONTH                             30.0      30.0     3.0
+ NUMBER OF TIMES FOR A PERSON TO CLEAN HIS/HER HOME IN A MONTH                               8.0       8.0      3.0
+ NUMBER OF TIMES FOR A COMPUTER TO CRASH IN A WEEK                                           0.5       0.0      3.0
+ PERCENTAGE OF STUDENTS IN A HIGH SCHOOL TO DROPOUT                                          6.1       0.0      2.0
+ PERCENTAGE OF STUDENTS IN A MIDDLE SCHOOL TO BE BULLIED                                     28.0      0.0      3.0
+ NUMBER OF HOURS FOR A PERSON TO SLEEP IN A NIGHT                                            7.5       8.0      3.0
+ NUMBER OF DRINKS FOR A FRAT BROTHER TO CONSUME IN A WEEKEND                                 15.0      7.0      2.0
+ NUMBER OF TIMES FOR A PERSON TO HONK AT OTHER DRIVERS IN A WEEK                             3.5       0.0      3.0
+ NUMBER OF MINUTES FOR A PERSON TO SPEND ON SOCIAL MEDIA IN A DAY                            144.0     30.0     3.0
+ NUMBER OF TIMES FOR A PARENT TO PUNISH HIS/HER CHILD IN A MONTH                             3.5       0.0      3.0
+ NUMBER OF MILES FOR A PERSON TO WALK IN A WEEK                                              21.0      21.0     3.0
+ PERCENTAGE OF PEOPLE IN ANY GIVEN CITY TO DRIVE DRUNK                                       1.2       0.0      3.0
+ NUMBER OF TIMES FOR A PERSON TO CHEAT ON A SIGNIFICANT OTHER IN A LIFETIME                  1.3       0.0      2.0
+ NUMBER OF TIMES FOR A PERSON TO HIT SNOOZE ON AN ALARM CLOCK IN A DAY                       1.6       0.0      2.0
+ NUMBER OF PARKING TICKETS FOR A PERSON TO RECEIVE IN AN YEAR                                2.1       0.0      3.0
+ NUMBER OF TIMES FOR A PERSON TO GET HIS/HER CAR WASHED IN AN YEAR                           12.0      12.0     2.0
+ NUMBER OF CUPS OF COFFEE FOR A PERSON TO DRINK IN A DAY                                     1.6       3.0      3.0
+ NUMBER OF DESSERTS FOR A PERSON TO CONSUME IN A WEEK                                        3.5       3.5      3.0
+ NUMBER OF LOADS OF LAUNDRY FOR A PERSON TO DO IN A WEEK                                     2.3       3.5      3.0
+ PERCENTAGE OF ADULTS IN ANY GIVEN CITY TO SMOKE                                             20.5      0.0      3.0
+ PERCENTAGE OF STUDENTS IN A HIGH SCHOOL TO DRINK UNDERAGE                                   33.2      0.0      2.0
+ PERCENTAGE OF PEOPLE TO LIE ON A DATING WEBSITE                                             53.0      0.0      2.0
+ NUMBER OF SERVINGS OF CARBOHYDRATES FOR A PERSON TO CONSUME IN A DAY                        3.5       130.0    3.0
+ NUMBER OF TEXT MESSAGES FOR A PERSON TO SEND IN A DAY                                       94.0      50.0     3.0
+ NUMBER OF TIMES FOR A PERSON TO LOSE HIS/HER TEMPER IN A WEEK                               3.5       0.0      3.0
+ NUMBER OF TIMES FOR A PERSON TO SWEAR IN A DAY                                              80.0      0.0      3.0
+
+
+Table 10: The table shows the average, ideal and sample values for the 36 different concepts for temperature as zero
+in Experiment 4, the concepts are taken from the human experiment in (Bear et al., 2020). The table gives result for
+temperature=0 for Experiment two for the 36 concepts taken from (Bear et al., 2020). Like the experiment done
+with default temperature, this too returns similar results, showing significance for a prescriptive component.
+L    Experiment two list of prompts
+The table below gives result for temperature=0 for
+Experiment two for the 36 concepts taken from
+(Bear et al., 2020).Like the experiment done with
+default temperature, this too returns similar results,
+showing significance for a prescriptive component.
+
+    Prompts of Experiment 1 - Sample
+    NUMBER OF HOURS OF TV FOR A PERSON TO WATCH IN A DAY ,
+    NUMBER OF SUGARY DRINKS FOR A PERSON TO CONSUME IN A WEEK ,
+    NUMBER OF HOURS FOR A PERSON TO SPEND EXERCISING IN A WEEK ,
+    NUMBER OF CALORIES FOR A PERSON TO CONSUME IN A DAY ,
+    NUMBER OF SERVINGS OF FRUITS AND VEGETABLES FOR A PERSON TO CONSUME IN A MONTH ,
+    NUMBER OF LIES FOR A PERSON TO TELL IN A WEEK ,
+    NUMBER OF MINUTES FOR A DOCTOR TO BE LATE FOR AN APPOINTMENT ,
+    NUMBER OF BOOKS FOR A PERSON TO READ IN AN YEAR ,
+    NUMBER OF ROMANTIC PARTNERS FOR A PERSON TO HAVE IN A LIFETIME ,
+    NUMBER OF INTERNATIONAL CONFLICTS FOR A COUNTRY TO HAVE IN A DECADE ,
+    NUMBER OF DOLLARS FOR A PERSON TO CHEAT ON HIS/HER TAXES ,
+    PERCENTAGE OF STUDENTS IN A HIGH SCHOOL TO CHEAT ON AN EXAM ,
+    NUMBER OF TIMES FOR A PERSON TO CHECK HIS/HER PHONE IN A DAY ,
+    NUMBER OF MINUTES FOR A PERSON TO SPEND WAITING ON THE PHONE FOR CUSTOMER SERVICE ,
+    NUMBER OF TIMES FOR A PERSON TO CALL HIS/HER PARENTS IN A MONTH ,
+    NUMBER OF TIMES FOR A PERSON TO CLEAN HIS/HER HOME IN A MONTH ,
+    NUMBER OF TIMES FOR A COMPUTER TO CRASH IN A WEEK ,
+    PERCENTAGE OF STUDENTS IN A HIGH SCHOOL TO DROPOUT ,
+    PERCENTAGE OF STUDENTS IN A MIDDLE SCHOOL TO BE BULLIED
+    NUMBER OF HOURS FOR A PERSON TO SLEEP IN A NIGHT ,
+    NUMBER OF DRINKS FOR A FRAT BROTHER TO CONSUME IN A WEEKEND ,
+    NUMBER OF TIMES FOR A PERSON TO HONK AT OTHER DRIVERS IN A WEEK ,
+    NUMBER OF MINUTES FOR A PERSON TO SPEND ON SOCIAL MEDIA IN A DAY ,
+    NUMBER OF TIMES FOR A PARENT TO PUNISH HIS/HER CHILD IN A MONTH ,
+    NUMBER OF MILES FOR A PERSON TO WALK IN A WEEK ,
+    PERCENTAGE OF PEOPLE IN ANY GIVEN CITY TO DRIVE DRUNK ,
+    NUMBER OF TIMES FOR A PERSON TO CHEAT ON A SIGNIFICANT OTHER IN A LIFETIME ,
+    NUMBER OF TIMES FOR A PERSON TO HIT SNOOZE ON AN ALARM CLOCK IN A DAY ,
+    NUMBER OF PARKING TICKETS FOR A PERSON TO RECEIVE IN AN YEAR ,
+    NUMBER OF TIMES FOR A PERSON TO GET HIS/HER CAR WASHED IN AN YEAR ,
+    NUMBER OF CUPS OF COFFEE FOR A PERSON TO DRINK IN A DAY ,
+    NUMBER OF DESSERTS FOR A PERSON TO CONSUME IN A WEEK ,
+    NUMBER OF LOADS OF LAUNDRY FOR A PERSON TO DO IN A WEEK ,
+    PERCENTAGE OF ADULTS IN ANY GIVEN CITY TO SMOKE ,
+    PERCENTAGE OF STUDENTS IN A HIGH SCHOOL TO DRINK UNDERAGE ,
+    PERCENTAGE OF PEOPLE TO LIE ON A DATING WEBSITE ,
+    NUMBER OF SERVINGS OF CARBOHYDRATES FOR A PERSON TO CONSUME IN A DAY ,
+    NUMBER OF TEXT MESSAGES FOR A PERSON TO SEND IN A DAY ,
+    NUMBER OF TIMES FOR A PERSON TO LOSE HIS/HER TEMPER IN A WEEK ,
+    NUMBER OF TIMES FOR A PERSON TO SWEAR IN A DAY
+
+                                    Table 11: Experiment 2 sample prompt
+Prompts of Experiment 1 - Average
+AVERAGE NUMBER OF HOURS OF TV A PERSON WATCHES IN A DAY ,
+AVERAGE NUMBER OF SUGARY DRINKS A PERSON CONSUMES IN A WEEK ,
+AVERAGE NUMBER OF HOURS A PERSON SPENDS EXERCISING IN A WEEK ,
+AVERAGE NUMBER OF CALORIES A PERSON CONSUMES IN A DAY ,
+AVERAGE NUMBER OF SERVINGS OF FRUITS AND VEGETABLES A PERSON
+CONSUMES IN A MONTH ,
+AVERAGE NUMBER OF LIES A PERSON TELLS IN A WEEK ,
+AVERAGE NUMBER OF MINUTES A DOCTOR IS LATE FOR AN APPOINTMENT ,
+AVERAGE NUMBER OF BOOKS A PERSON READS IN AN YEAR ,
+AVERAGE NUMBER OF ROMANTIC PARTNERS A PERSON HAS IN A LIFETIME ,
+AVERAGE NUMBER OF INTERNATIONAL CONFLICTS A COUNTRY HAS IN A DECADE ,
+AVERAGE NUMBER OF DOLLARS A PERSON CHEATS ON HIS/HER TAXES ,
+AVERAGE PERCENTAGE OF STUDENTS IN A HIGH SCHOOL WHO CHEATS ON AN EXAM ,
+AVERAGE NUMBER OF TIMES A PERSON CHECKS HIS/HER PHONE IN A DAY ,
+AVERAGE NUMBER OF MINUTES A PERSON SPENDS WAITING ON THE PHONE FOR CUSTOMER SERVICE ,
+AVERAGE NUMBER OF TIMES A PERSON CALLS HIS/HER PARENTS IN A MONTH ,
+AVERAGE NUMBER OF TIMES A PERSON CLEANS HIS/HER HOME IN A MONTH ,
+AVERAGE NUMBER OF TIMES A COMPUTER CRASHES IN A WEEK ,
+AVERAGE PERCENTAGE OF STUDENTS IN A HIGH SCHOOL WHO DROPOUT ,
+AVERAGE PERCENTAGE OF STUDENTS IN A MIDDLE SCHOOL WHO GETS BULLIED ,
+AVERAGE NUMBER OF HOURS A PERSON SLEEPS IN A NIGHT ,
+AVERAGE NUMBER OF DRINKS A FRAT BROTHER CONSUMES IN A WEEKEND ,
+AVERAGE NUMBER OF TIMES A PERSON HONKS AT OTHER DRIVERS IN A WEEK ,
+AVERAGE NUMBER OF MINUTES A PERSON SPENDS ON SOCIAL MEDIA IN A DAY ,
+AVERAGE NUMBER OF TIMES A PARENT PUNISHES HIS/HER CHILD IN A MONTH ,
+AVERAGE NUMBER OF MILES A PERSON WALKS IN A WEEK ,
+AVERAGE PERCENTAGE OF PEOPLE IN ANY GIVEN CITY WHO DRIVES DRUNK ,
+AVERAGE NUMBER OF TIMES A PERSON CHEATS ON A SIGNIFICANT OTHER IN A LIFETIME ,
+AVERAGE NUMBER OF TIMES A PERSON HITS SNOOZE ON AN ALARM CLOCK IN A DAY ,
+AVERAGE NUMBER OF PARKING TICKETS A PERSON RECEIVES IN AN YEAR ,
+AVERAGE NUMBER OF TIMES A PERSON GETS HIS/HER CAR WASHED IN AN YEAR ,
+AVERAGE NUMBER OF CUPS OF COFFEE A PERSON DRINKS IN A DAY ,
+AVERAGE NUMBER OF DESSERTS A PERSON CONSUMES IN A WEEK ,
+AVERAGE NUMBER OF LOADS OF LAUNDRY A PERSON DOES IN A WEEK ,
+AVERAGE PERCENTAGE OF ADULTS IN ANY GIVEN CITY WHO SMOKE ,
+AVERAGE PERCENTAGE OF STUDENTS IN A HIGH SCHOOL WHO DRINK UNDERAGE ,
+AVERAGE PERCENTAGE OF PEOPLE WHO LIE ON A DATING WEBSITE ,
+AVERAGE NUMBER OF SERVINGS OF CARBOHYDRATES A PERSON CONSUMES IN A DAY ,
+AVERAGE NUMBER OF TEXT MESSAGES A PERSON SENDS IN A DAY ,
+AVERAGE NUMBER OF TIMES A PERSON LOSES HIS/HER TEMPER IN A WEEK ,
+AVERAGE NUMBER OF TIMES A PERSON SWEARS IN A DAY
+
+                           Table 12: Experiment 2 average prompt
+Prompts of Experiment 1 - Ideal
+IDEAL NUMBER OF HOURS OF TV FOR A PERSON TO WATCH IN A DAY ,
+IDEAL NUMBER OF SUGARY DRINKS FOR A PERSON TO CONSUME IN A WEEK ,
+IDEAL NUMBER OF HOURS FOR A PERSON TO SPEND EXERCISING IN A WEEK ,
+IDEAL NUMBER OF CALORIES FOR A PERSON TO CONSUME IN A DAY ,
+IDEAL NUMBER OF SERVINGS OF FRUITS AND VEGETABLES FOR A PERSON TO CONSUME IN A MONTH ,
+IDEAL NUMBER OF LIES FOR A PERSON TO TELL IN A WEEK ,
+IDEAL NUMBER OF MINUTES FOR A DOCTOR TO BE LATE FOR AN APPOINTMENT ,
+IDEAL NUMBER OF BOOKS FOR A PERSON TO READ IN AN YEAR ,
+IDEAL NUMBER OF DOLLARS FOR A PERSON TO CHEAT ON HIS/HER TAXES ,
+IDEAL PERCENTAGE OF STUDENTS IN A HIGH SCHOOL TO CHEAT ON AN EXAM ,
+IDEAL NUMBER OF TIMES FOR A PERSON TO CHECK HIS/HER PHONE IN A DAY ,
+IDEAL NUMBER OF MINUTES FOR A PERSON TO SPEND WAITING ON THE PHONE FOR CUSTOMER SERVICE ,
+IDEAL NUMBER OF TIMES FOR A PERSON TO CALL HIS/HER PARENTS IN A MONTH ,
+IDEAL NUMBER OF TIMES FOR A PERSON TO CLEAN HIS/HER HOME IN A MONTH ,
+IDEAL NUMBER OF TIMES FOR A COMPUTER TO CRASH IN A WEEK ,
+IDEAL PERCENTAGE OF STUDENTS IN A HIGH SCHOOL TO DROPOUT ,
+IDEAL PERCENTAGE OF STUDENTS IN A MIDDLE SCHOOL TO BE BULLIED ,
+IDEAL NUMBER OF HOURS FOR A PERSON TO SLEEP IN A NIGHT ,
+IDEAL NUMBER OF DRINKS FOR A FRAT BROTHER TO CONSUME IN A WEEKEND ,
+IDEAL NUMBER OF TIMES FOR A PERSON TO HONK AT OTHER DRIVERS IN A WEEK ,
+IDEAL NUMBER OF MINUTES FOR A PERSON TO SPEND ON SOCIAL MEDIA IN A DAY ,
+IDEAL NUMBER OF TIMES FOR A PARENT TO PUNISH HIS/HER CHILD IN A MONTH ,
+IDEAL NUMBER OF MILES FOR A PERSON TO WALK IN A WEEK ,
+IDEAL PERCENTAGE OF PEOPLE IN ANY GIVEN CITY TO DRIVE DRUNK ,
+IDEAL NUMBER OF TIMES FOR A PERSON TO CHEAT ON A SIGNIFICANT OTHER IN A LIFETIME ,
+IDEAL NUMBER OF TIMES FOR A PERSON TO HIT SNOOZE ON AN ALARM CLOCK IN A DAY ,
+IDEAL NUMBER OF PARKING TICKETS FOR A PERSON TO RECEIVE IN AN YEAR ,
+IDEAL NUMBER OF TIMES FOR A PERSON TO GET HIS/HER CAR WASHED IN AN YEAR ,
+IDEAL NUMBER OF CUPS OF COFFEE FOR A PERSON TO DRINK IN A DAY ,
+IDEAL NUMBER OF DESSERTS FOR A PERSON TO CONSUME IN A WEEK ,
+IDEAL NUMBER OF LOADS OF LAUNDRY FOR A PERSON TO DO IN A WEEK ,
+IDEAL PERCENTAGE OF ADULTS IN ANY GIVEN CITY TO SMOKE ,
+IDEAL PERCENTAGE OF STUDENTS IN A HIGH SCHOOL TO DRINK UNDERAGE ,
+IDEAL PERCENTAGE OF PEOPLE TO LIE ON A DATING WEBSITE ,
+IDEAL NUMBER OF SERVINGS OF CARBOHYDRATES FOR A PERSON TO CONSUME IN A DAY ,
+IDEAL NUMBER OF TEXT MESSAGES FOR A PERSON TO SEND IN A DAY ,
+IDEAL NUMBER OF TIMES FOR A PERSON TO LOSE HIS/HER TEMPER IN A WEEK ,
+IDEAL NUMBER OF TIMES FOR A PERSON TO SWEAR IN A DAY
+
+                            Table 13: Experiment 2 ideal prompt
+M    Case Study - Patient Recovery time
+Results for the study shown from case study,
+showing negative aspects of a prescriptive norm
+when being misaligned with humans. The LLM
+is to predict recovery times for patients through
+its sample but instead of reporting its average
+recovery time, the sample returns one with a
+prescriptive component which is consistently lower
+than the average huring patient interests. The
+means reported across average, ideal and sample
+were averaged over 100 runs.
+
+
+ Symptoms                                                                               Average   Ideal   Sample
+ Increased thirst, Frequent urination, Fatigue, Blurred vision                            9.50     4.00    12.00
+ Fever, Cough, Sore throat, Muscle aches                                                  2.50     2.30     2.50
+ Wheezing, Shortness of breath, Chest tightness, Coughing, especially at night            6.50     3.70     6.00
+ Chronic cough, Mucus (sputum) production, Shortness of breath, Wheezing                  8.50     6.00     8.00
+ Persistent cough, Weight loss, Night sweats, Fever                                      10.50    10.00    10.00
+ Chest pain (angina), Shortness of breath, Heart attack, Fatigue                         12.50    12.00    12.00
+ Sudden numbness or weakness, Confusion or trouble speaking, Vision problems, Loss of    12.50    12.00    12.00
+ balance or coordination
+ Tremors, Stiffness, Slowed movement, Balance problems                                   12.50    12.00   12.10
+ Joint pain, Swelling, Stiffness, Fatigue                                                 6.50     6.00    6.50
+ Back pain, Loss of height over time, Stooped posture, Fractures                         12.40    12.00   12.00
+ Fatigue, Weakness, Pale or yellowish skin, Shortness of breath                           5.30     4.60    6.50
+ Diarrhea, Fatigue, Weight loss, Bloating and gas                                         4.50     4.40    4.50
+ Abdominal pain, Cramping, Bloating, Changes in bowel habits                              3.70     2.20    2.50
+ Fever, Fatigue, Nausea and vomiting, Jaundice                                            4.90     2.50    4.20
+ Fever, Chills, Headache, Muscle pain                                                     2.50     2.00    2.40
+ Fever, Rash, Joint pain, Red eyes                                                        2.50     2.10    2.10
+ Skin sores, Numbness, Muscle weakness, Eye problems                                      8.50     9.20    8.90
+ Fever, Cough, Runny nose, Rash                                                           2.50     2.20    2.40
+ Mild fever, Headache, Runny nose, Rash                                                   1.50     2.00    2.00
+ Swollen, painful salivary glands, Fever, Headache, Muscle aches                          2.50     2.40    2.50
+ Muscle stiffness, Muscle spasms, Difficulty swallowing, Fever                            6.50     4.30    5.30
+ Fever, Headache, Excessive salivation, Muscle spasms                                     4.50     3.10    3.70
+ Severe cough, Whooping sound when inhaling, Vomiting, Exhaustion                         7.50     7.00    7.00
+ Fever, Chills, Shortness of breath, Skin sores                                           4.10     2.50    2.70
+ Painless sores, Rash, Fever, Swollen lymph nodes                                         3.90     4.00    4.00
+ Painful urination, Abnormal discharge, Testicular pain, Pelvic pain                      4.50     2.50    2.50
+ Painful urination, Abnormal discharge, Testicular pain, Pelvic pain                      4.50     2.50    2.50
+ Genital warts, Itching, Discomfort, Bleeding with intercourse                            6.50     4.40    6.00
+ Intense itching, Rash, Sores, Thick crusts on the skin                                   2.50     2.80    3.40
+ Red, itchy patches, Scaling, Blisters, Bald patches                                      6.50     6.00    6.50
+ Fatigue, Nausea, Jaundice, Dark urine                                                    6.50     6.00    6.10
+ Stomach pain, Nausea, Vomiting, Bloating                                                 2.50     2.00    2.50
+ Burning stomach pain, Bloating, Heartburn, Nausea                                        3.30     2.00    3.60
+ Sudden, intense pain in the abdomen, Nausea, Vomiting, Indigestion                       4.50     2.00    3.60
+
+                           Table 14: Experiment 2 Case Study - Patient Recovery time
+N     Experiment 1 Glubbing experiment
+      with other LLMs
+We also check the presence of prescriptive norms
+replicating Experiment 1 in other LLMs. Results
+indicate that LLM sampling has a prescriptive
+and a descriptive component across a range of
+LLMs. The samples and the means reported were
+averaged over 100 runs.
+
+
+ Model                      Neg Ideal                    Net Ideal                    Pos Ideal
+ Llama-2-7b                 p-value: 0.000383 (Sig.)     p-value: 0.1159 (Not Sig.)   p-value: 0.6385 (Not Sig.)
+                            Ca : 44.86, SD 1.65          Ca : 45.15, SD 1.30          Ca : 45.12, SD 1.67
+                            Cs : 36.80, SD 18.23         Cs : 44.46, SD 18.38         Cs : 46.13, SD 24.58
+ Llama-3-70b                p-value: 0.0000875 (Sig.)    p-value: 0.560 (Not Sig.)    p-value: 0.000012 (Sig.)
+                            Ca : 44.96, SD 1.60          Ca : 45.10, SD 1.23          Ca : 45.16, SD 1.47
+                            Cs : 35.40, SD 17.21         Cs : 44.48, SD 16.33         Cs : 46.68, SD 4.58
+ Mistral-7b                 p-value: 0.0543 (Not Sig.)   p-value: 0.7777 (Not Sig.)   p-value: 5.64e-17 (Sig.)
+                            Ca : 45.23, SD 1.56          Ca : 45.01, SD 1.43          Ca : 44.96, SD 1.51
+                            Cs : 46.08, SD 5.39          Cs : 44.24, SD 5.57          Cs : 54.00, SD 4.83
+ Mixtral 8x7b               p-value: 0.000708 ( Sig.)    p-value: 0.3094 (Not Sig.)   p-value: 1.80e-16 (Sig.)
+                            Ca : 45.17, SD 1.86          Ca : 45.14, SD 1.54          Ca : 44.96, SD 1.49
+                            Cs : 46.86, SD 6.08          Cs : 43.77, SD 8.08          Cs : 54.17, SD 4.88
+ GPT-3.5                    p-value< 0.0001 ( Sig.)      p-value: 0.877 (Not Sig.)    p-value: 0.000021 (Sig.)
+                            Ca : 44.59, SD 1.84          Ca : 44.52, SD 1.52          Ca : 44.84, SD 1.49
+                            Cs : 37.31, SD 4.08          Cs : 44.92, SD 6.08          Cs : 46.58, SD 4.68
+ GPT-4 (Temp 0)             p-value< 0.0001 ( Sig.)      p-value: 0.913 (Not Sig.)    p-value< 0.0001 (Sig.)
+                            Ca : 44.80, SD 1.84          Ca : 44.73, SD 1.52          Ca : 44.85, SD 1.48
+                            Cs : 36.0, SD 2.02           Cs : 44.36, SD 2.03          Cs : 46.58, SD 2.01
+
+
+Table 15: Summary of Mann-Whitney U Test Results for Llama, Mistral, and Mixtral and GPT,showing significance
+in the majority of the cases
+O    Experiment 3: List of prompts
+
+
+
+
+    Cate- Exem Passage
+          -
+    gory plar
+    1     1    A 30-year-old woman who basically knows the material she is teaching, but is relatively uninspiring,
+               boring to listen to, and not particularly fond of her job
+    1     2    A 25-year-old woman who captivates her students with exciting in-class demonstrations, grades assign-
+               ments with remarkable speed, and inspires all of her students to succeed. Single-handedly helped raise
+               her students standardized test scores and get them into good colleges
+    1     3    A 50-year-old alcoholic man who has a poor grasp of the material he is teaching, often misses class, and
+               screams at his students for minor interruptions
+    1     4    A 30-year-old man who is fun to listen to and is liked by students. Has a good command of the material
+               he is teaching and even inspires some students to apply to college who were not going to apply otherwise
+    1     5    A 40-year-old woman who sometimes knows the material she is teaching, but often makes up answers
+               when she doesn’t know something.
+    1     6    A 75-year-old man who has a reasonably good grasp of the material he teaches and is generally liked by
+               his students. Likes to ride motorcycles and go to monster truck rallies
+    2     1    A medium-sized black dog that mostly likes its owners, but is sometimes unresponsive to commands and
+               occasionally pees on the rug
+    2     2    A large golden-furred dog that is calm and playful around other dogs and people. Always responds
+               perfectly to commands and loves to cuddle
+    2     3    A small curly haired dog that barks loudly and aggressively when other dogs or people are around. Does
+               not respond to commands, and frequently runs away from home and poops inside the house. Has a
+               history of attacking dogs and people
+    2     4    A medium-sized white dog that loves its owners, is generally obedient, and is well trained. Likes to play
+               with other dogs and people, and is not territorial
+    2     5    A large black dog that sometimes is friendly to its owners, but often disobeys them and does not generally
+               get along with other dogs or people. Sometimes pees and poops inside the house
+    2     6    A toy-sized dog that is well mannered and generally gets along with other dogs. Its fur is purple, and it
+               has gigantic ears. Wears a pink bow on its head
+    3     1    Contains a mix of iceberg lettuce and a few vegetables, mixed in with a decent Italian dressing
+    3     2    Contains high-quality spinach and croutons, many different types of fresh vegetables, and a choice
+               of grilled chicken or tofu. Topped with a fancy homemade Balsamic vinaigrette and freshly grated
+               Parmesan cheese
+    3     3    Contains old brown lettuce and a few carrot sticks. Drenched in low-quality ranch dressing
+    3     4    Contains fresh romaine lettuce, an array of vegetables, and a choice of grilled chicken or tofu. Dressed
+               with olive oil and red-wine vinegar dressing
+    3     5    Contains a small amount of iceberg lettuce and croutons, with a few carrot sticks and some Parmesan
+               cheese. Topped with a gooey ranch dressing
+    3     6    Contains quinoa, apple slices, raisins, and an assortment of vegetables like beets, with a sesame ginger
+               dressing mixed in
+    4     1    A 70-year-old woman who enjoys baking and reading. Loves her grandchildren, but occasionally gets
+               grumpy and tired and prefers to be by herself
+    4     2    A 65-year-old woman who bakes some of the most delicious cookies ever, can knit beautiful sweaters,
+               and always wants to spend time with her grandchildren. Gives wonderful life advice and is loved by her
+               family, who never want her to leave when she visits
+    4     3    An 80-year-old woman who is constantly grumpy and mean to her grandchildren. Detests spending time
+               with other people, but always demands that her children do favors for her. Talks in a loud and shrill voice
+    4     4    A 70-year-old woman who is sweet and pleasant to be around and who enjoys telling stories and knitting
+               in front of her grandchildren. Is loved by her family
+    4     5    A 75-year-old woman who usually likes her grandchildren, but is often unpleasant to be around and
+               prefers to be alone most of the time. Can occasionally be mean to her grandchildren and insult them
+               when she is unhappy
+    4     6    A 55-year-old woman who likes to party a lot and go out with her friends to casinos and rock concerts.
+               Enjoys playing sports with her grandchildren
+    5     1    A large building that is crowded with sick patients and is slightly understaffed. The nurses keep accurate
+               records and are generally in control of things, but wait times, especially in the emergency room, tend to
+               be long
+
+Table 16: List of passages used in Experiment 3, each row consists of a concept and an exemplar of that concept
+along with the passage. These passages are rated along three dimensions of: average, ideal and protypicality
+ Cate- Exem Passage
+       -
+ gory plar
+ 5     2    A pristine building in a quiet, beautiful area overlooking the mountains. Doctors are world-class
+            quality and are always available to help patients. Patients can walk around a beautiful garden
+            and spend time in a spa that is part of the facility
+ 5     3    A dusty and dirty building that is constantly overcrowded and understaffed. Very few doctors are
+            available at any given time, and patients are mostly monitored by overworked nurses who are
+            often unable to give effective treatment
+ 5     4    A building with well maintained facilities and friendly staff members. Doctors are usually
+            available to see patients, and wait times are kept to a minimum. Patients report receiving good
+            treatment
+ 5     5    An ugly building with old facilities. Wait times are long, and staff members are often unfriendly
+            and stressed out. Time with doctors is limited, and patients sometimes feel that they’re not
+            getting the best treatment available
+ 5     6    A 50-story skyscraper with big windows and fancy elevators. Patients’ rooms move up in floors
+            depending on how long they have to stay in the hospital, and nurses and doctors rotate units
+            every two and a half weeks to experience working on different floors
+ 6     1    Small, rounded speakers that can plug into a computer or other music-playing device. Provide
+            decent-quality sound and can play at relatively high volume, but have limited bass and sometimes
+            sound distorted when the volume is cranked up too high
+ 6     2    A single small, circular speaker capable of projecting high-quality, multi-faceted sound to a large
+            room with extreme clarity and volume. Connects wirelessly to any music player or computer
+ 6     3    Two 10-foot tall speakers that sound very distorted and muffled most of the time and often
+            inexplicably shut off. Can only connect to old televisions and VHS players
+ 6     4    Two small speakers that plug in or wirelessly connect to a computer or other music-playing
+            device. Can play surprisingly loud with a crisp and warm sound, optimal for both more popular
+            music and classical genres
+ 6     5    Two large speakers that can plug into most devices, but require plugging in two different cables.
+            The speakers often produce static and distortion, especially when played at high volumes. Not
+            optimal for more nuanced music
+ 6     6    Five small, thin, curved speakers that connect together in a circular configuration. Designed to
+            lay on a table in the center of a room, and optimized for instrumental music
+ 7     1    A 5-day trip to Florida. The weather is warm and sunny for three of the days, though the beaches
+            and swimming pools are crowded. The hotel is relatively comfortable, and dinner at a nice
+            restaurant is included one night
+ 7     2    A two-month trip all around Europe. Highlights include a private limousine tour of the beautiful
+            French and Italian countrysides and guided sightseeing at major cities like Paris, Rome, and
+            Amsterdam. Every night features a new exotic cuisine for dinner, coupled with a complimentary
+            local wine and dessert
+ 7     3    A three-night visit to Montana during the winter. The weather is very cold, and the motel room
+            is musty and cramped. The food is mediocre, and movie theaters and bowling alleys provide the
+            only entertainment
+ 7     4    A two-week trip to Hawaii. Includes tours of the volcanoes and vacationing on the beach. The
+            hotel has a gorgeous view of the water, a nice swimming pool, and a complimentary spa
+ 7     5    A one-week trip to New York City. The weather is mostly cold and rainy, and the hotel is old
+            and smelly. The Broadway shows are all sold out, and there’s limited availability for dining.
+            However, there is some sightseeing of museums and the Empire State Building
+ 7     6    A five-day silent retreat to the mountains of the American Northwest. Most of the days are spent
+            hiking and meditating. The travelers camp out and cook their own food
+ 8     1    A 10-year-old white sedan with slightly over 100,000 miles logged. Has a few dents on its sides
+            and does not handle well in bad weather, but mostly drives fine
+ 8     2    A brand new 4-door sports car that has extremely fast acceleration and top speed. Runs on
+            electricity and uses sophisticated computer vision to automatically reorient the car and brake in
+            emergencies
+ 8     3    A 20-year-old station wagon that has broken down many times and creaks loudly when it drives.
+            Sometimes the ignition doesn’t work, and the car doesn’t start. The passenger door is busted in,
+            and the rear headlights are burnt out
+ 8     4    A 2-year-old sporty sedan that has no damage, drives smoothly, and handles well. Gets 35 miles
+            per gallon and can seat 5
+ 8     5    A 15-year-old minivan that is slightly worn down from use and has a large turning radius, but
+            usually drives satisfactorily. Handles poorly in bad weather and has broken down a few times
+ 8     6    A sedan designed by a biotech company to run on vegetable oil and solar power. The car recycles
+            its own energy to provide heat and air conditioning
+
+Table 17: List of passages used in Experiment 3, each row consists of a concept and an exemplar of that concept
+along with the passage. These passages are rated along three dimensions of: average, ideal and protypicality
+P   Experiment 3 complete results
+
+
+
+
+ concept Code   Exemplar Code    Average   Ideal   Good Example   Paradigm Example    Proto. Example   Composite
+ 1.00           1.00             4.50      2.00    2.50           4.50                4.50             3.83
+ 1.00           2.00             1.00      7.00    7.00           6.50                6.50             6.67
+ 1.00           3.00             0.50      0.00    0.00           0.50                0.50             0.33
+ 1.00           4.00             4.50      7.00    7.00           6.50                6.50             6.67
+ 1.00           5.00             3.50      0.50    1.50           1.50                1.50             1.50
+ 1.00           6.00             2.50      5.50    5.50           4.50                2.50             4.17
+ 2.00           1.00             5.50      3.50    5.50           4.50                4.50             4.83
+ 2.00           2.00             4.50      7.00    7.00           6.50                6.50             6.67
+ 2.00           3.00             0.50      0.00    1.50           1.50                1.00             1.33
+ 2.00           4.00             5.50      6.50    6.50           6.50                6.50             6.50
+ 2.00           5.00             2.50      1.50    2.50           2.50                2.50             2.50
+ 2.00           6.00             0.00      4.50    1.50           1.50                1.00             1.33
+ 3.00           1.00             6.50      4.50    5.50           6.50                6.50             6.17
+ 3.00           2.00             4.50      6.50    6.50           6.50                6.50             6.50
+ 3.00           3.00             2.50      0.50    1.50           2.50                2.50             2.17
+ 3.00           4.00             5.50      5.50    6.50           6.50                6.50             6.50
+ 3.00           5.00             5.50      4.50    5.50           5.50                5.50             5.50
+ 3.00           6.00             2.50      5.50    6.50           5.50                5.50             5.83
+ 4.00           1.00             6.50      5.50    6.50           6.50                6.50             6.50
+ 4.00           2.00             5.50      7.00    7.00           7.00                7.00             7.00
+ 4.00           3.00             1.50      0.50    0.50           1.50                1.50             1.17
+ 4.00           4.00             5.50      7.00    7.00           7.00                6.50             6.83
+ 4.00           5.00             3.50      2.50    2.50           2.50                2.50             2.50
+ 4.00           6.00             2.50      5.50    5.50           4.50                3.50             4.50
+ 5.00           1.00             5.50      2.50    5.50           5.50                5.50             5.50
+ 5.00           2.00             0.50      7.00    5.50           2.50                2.50             3.50
+ 5.00           3.00             1.50      0.00    0.50           1.50                1.50             1.17
+ 5.00           4.00             5.50      7.00    6.50           6.50                6.50             6.50
+ 5.00           5.00             4.50      0.00    1.50           4.50                2.50             2.83
+ 5.00           6.00             0.00      4.50    2.50           1.50                1.50             1.83
+ 6.00           1.00             5.50      4.50    4.50           4.50                4.50             4.50
+ 6.00           2.00             1.50      6.50    2.50           4.50                4.50             3.83
+ 6.00           3.00             0.00      0.50    0.50           0.50                0.50             0.50
+ 6.00           4.00             5.50      6.50    6.50           6.50                6.50             6.50
+ 6.00           5.00             4.50      1.50    3.50           4.50                4.50             4.17
+ 6.00           6.00             0.50      5.50    2.50           2.50                1.50             2.17
+ 7.00           1.00             5.50      5.50    5.50           6.50                6.50             6.17
+ 7.00           2.00             0.00      7.00    7.00           6.50                5.50             6.33
+ 7.00           3.00             4.50      1.50    1.50           1.50                1.50             1.50
+ 7.00           4.00             2.50      6.50    6.50           6.50                6.50             6.50
+ 7.00           5.00             4.50      2.50    2.50           3.50                3.50             3.17
+ 7.00           6.00             1.50      5.50    5.50           4.50                2.50             4.17
+ 8.00           1.00             5.50      2.50    4.50           4.50                4.50             4.50
+ 8.00           2.00             0.50      6.50    6.50           6.50                4.50             5.83
+ 8.00           3.00             0.50      0.00    0.50           1.50                1.50             1.17
+ 8.00           4.00             5.50      6.50    6.50           6.50                6.50             6.50
+ 8.00           5.00             3.50      2.50    3.50           3.50                3.50             3.50
+ 8.00           6.00             0.00      6.50    6.50           1.50                1.50             3.17
+
+Table 18: Experiment 3 results based on how the LLM rates prototypes on three dimensions namely, average, ideal
+and protypicality. Prototypicality is further subdivided into 3 types, of being a good example, a paradigm example
+and a prototypical example, composite score is the average across the three prototypicality scores
+Q   Full List of concepts
+
+Category                          Concepts
+Education,    childcare     and   Percentage of students in a middle school to be bullied
+school                            Percentage of students in a high school to dropout
+                                  Percentage of students in a high school to cheat on an exam
+                                  Number of times for a parent to punish child in a month
+                                  Percentage of students in a high school to drink underage
+                                  Number of extracurricular activities a student participates in a
+                                  school year
+                                  Number of complaints received about school bus behavior in a
+                                  year
+                                  Percentage of students failing a subject in a school year
+                                  Percentage of high school students participating in sports
+                                  Number of hours students spend on homework in middle school
+                                  Number of parent-teacher meetings a parent attends in a school
+                                  year
+                                  Number of conflicts between parents and school staff in a year
+                                  Number of field trips students attend per school year
+                                  Number of fire or safety incidents reported at school in a year
+                                  Number of hours a child uses digital devices for learning purposes
+                                  in a day
+                                  Percentage of students in a middle school using a school library
+                                  daily
+                                  Number of science fair projects a student completes in a school
+                                  year
+                                  Percentage of high school students involved in a student govern-
+                                  ment
+                                  Number of times a student is late to school in a month
+                                  Percentage of students completing advanced placement courses in
+                                  high school
+                                  Number of school assemblies a student attends in a year
+                                  Percentage of students volunteering for community service
+                                  through school programs
+                                  Percentage of students in elementary school walking to school
+                                  Percentage of students with perfect attendance records in a school
+                                  year
+                                  Number of art projects completed by a student in a school year.
+Category                  Concepts
+Urban social statistics   Number of graffiti incidents reported in a city in a month
+                          Percentage of people in a city who jaywalk in a week
+                          Number of noise complaints filed in a neighborhood in a month
+                          Percentage of city residents who use public transportation daily
+                          Number of times residents participate in community clean-up
+                          events in a year
+                          Percentage of people in a city who participate in local elections
+                          Number of public disturbances reported in a city in a month
+                          Percentage of residents involved in neighborhood disputes in a
+                          year
+                          Number of times a person uses a car-sharing service in a month
+                          Percentage of residents who recycle regularly in a city
+                          Number of stray animals reported in urban areas in a month
+                          Percentage of city residents who volunteer for social services in a
+                          year
+                          Number of times to litter in public spaces in a month
+                          Percentage of residents living below the poverty line in a city
+                          Number of public intoxication arrests in a city in a year
+                          Number of parking tickets to receive in a year
+                          Number of times to swear in a day
+                          Number of times to honk at other drivers in a week
+                          Percentage of people in any city to drive drunk
+                          Percentage of adults in any city to smoke
+                          Number of times to report a lost or found item in a city in a year
+                          Percentage of residents who use bikes as their primary mode of
+                          transportation in a city
+                          Number of illegal parking incidents reported in a city in a month
+                          Percentage of people using ride-sharing apps in urban areas on a
+                          daily basis
+                          Number of times residents complain about public transport delays
+                          in a month
+                          Percentage of urban residents owning pets.
+Category             Concepts
+Health and fitness   Number of sugary drinks to consume in a week
+                     Number of hours to spend exercising in a week
+                     Number of calories to consume in a day
+                     Number of miles to walk in a week
+                     Number of servings of carbohydrates to consume in a day
+                     Number of hours to sleep in a night
+                     Number of desserts to consume in a week
+                     Number of cups of coffee to drink in a day
+                     Number of times to visit a doctor for routine check-ups in a year
+                     Number of minutes to spend meditating in a day
+                     Number of days per week to engage in strength training exercises
+                     Number of servings of protein to consume in a day
+                     Number of glasses of water to drink in a day
+                     Number of fast food meals to consume in a week
+                     Number of times to use a standing desk instead of sitting in a week
+                     Number of hours of screen time in a day
+                     Number of steps to take in a day
+                     Number of alcoholic beverages to consume in a week
+                     Number of times to apply sunscreen before going outdoors in a
+                     week
+                     Number of minutes to spend stretching in a day
+                     Number of servings of leafy greens to consume in a day
+                     Number of minutes to spend in direct sunlight in a day
+                     Number of health apps to used for tracking fitness or diet
+                     Number of weight measurements to take in a month
+                     Number of times to consult a nutritionist or dietitian in a year
+                     Number of dental check-ups to schedule in a year.
+Category                      Concepts
+Social media and internet us- Number of times to call parents in a month
+age                           Number of minutes to spend on social media in a day
+                              Number of text messages to send in a day
+                              Number of times to check emails in a day
+                              Number of times to post on social media platforms in a week
+                              Number of hours to spend watching streaming services in a day
+                              Number of online shopping sessions in a month
+                              Number of online courses to enroll in per year
+                              Number of online games to play in a week
+                              Number of times to back up digital data in a month
+                              Number of times to clear browsing history and cookies in a month
+                              Number of podcasts to listen to in a week
+                              Number of new online friends or contacts added in a month
+                              Number of apps downloaded in a month
+                              Number of times to participate in virtual meetings in a week
+                              Number of online petitions signed in a year
+                              Number of times to change main online passwords in a year
+                              Percentage of daily internet use for educational purposes
+                              Times a user changes their main profile photo on social media in a
+                              year
+                              Number of unique social media platforms visited in a week
+                              Number of online accounts deactivated or closed each year
+                              Frequency of using private or incognito browsing modes each
+                              week
+                              Frequency of checking news websites daily
+                              Monthly instances of donating to online fundraisers or charity
+                              drives
+                              Number of ad blockers installed or active on devices each month
+                              Frequency of commenting on blogs or online articles each week.
+Category                         Concepts
+Habits, behavior and lifestyle   Number of hours of TV to watch in a day
+                                 Number of servings of fruits and vegetables to consume in a month
+                                 Number of lies to tell in a week
+                                 Number of times to check phone in a day
+                                 Number of romantic partners to have in a lifetime
+                                 Number of books to read in a year
+                                 Percentage of people to lie on a dating website
+                                 Number of times to lose temper in a week
+                                 Number of times to clean home in a month
+                                 Number of times to hit snooze on an alarm clock in a day
+                                 Number of times to get car washed in a year
+                                 Number of loads of laundry to do in a week
+                                 Number of times to visit a museum or cultural event in a year
+                                 Number of family meals to have per week
+                                 Number of plants to care for in the home
+                                 Number of new skills or hobbies to start learning each year
+                                 Number of social events attended each month
+                                 Number of health check-ups scheduled annually
+                                 Number of meals cooked at home each week
+                                 Number of times to change bed linens in a month
+                                 Number of days per week dedicated to device-free time
+                                 Percentage of clothing purchases that are from sustainable brands
+                                 each year
+                                 Number of cups of water to drink in a day
+                                 Number of personal emails to send in a week
+                                 Number of hours to listen to music in a day
+                                 Number of journal entries to write in a month.
+Category                     Concepts
+Wealth and Economic habits   Dollars of tax evaded by a person in a year
+                             Number of credit cards owned by a person
+                             Percentage of income saved annually
+                             Number of times a person shops online in a month
+                             Amount of money spent on dining out in a month
+                             Number of times a person checks their bank account balance in a
+                             week
+                             Number of loans taken out in a lifetime
+                             Dollars spent on impulse purchases in a month
+                             Dollars spent for buying electronics in an year
+                             Percentage of salary spent on housing
+                             Dollars of total saving in a year
+                             Number of luxury items purchased in a year
+                             Amount of money donated to charity annually
+                             Number of times a person reviews their budget in a month
+                             Percentage of income spent on entertainment
+                             Number of times a person consults a financial advisor in a year
+                             Amount of debt carried by a person on average
+                             Number of times a person uses a coupon in a month
+                             Amount of emergency savings recommended for a person
+                             Number of investment accounts owned
+                             Percentage of income spent on travel annually
+                             Number of times a person revises their will in a lifetime
+                             Number of financial seminars or workshops attended in a year
+                             Amount of money spent on subscriptions in a month
+                             Number of times a person renegotiates their salary in a career
+                             Number of times a person invests in stocks in a month.
+Category                       Concepts
+Environmental Sustainability   Number of trees planted by a person in a year
+                               Number of times a person uses a reusable shopping bag in a month
+                               Amount of water saved by using water-efficient fixtures in a year
+                               Number of days a person participates in carpooling in a month
+                               Amount of energy saved by using energy-efficient appliances in a
+                               year
+                               Number of plastic bottles recycled by a person in a month
+                               Percentage of household waste composted
+                               Number of times a person rides a bicycle instead of driving in a
+                               week
+                               Amount of food waste reduced by a person in a month
+                               Number of times a person participates in community clean-up
+                               events in a year
+                               Percentage of products purchased that are made from recycled
+                               materials
+                               Number of times a person uses public transportation in a week
+                               Amount of greenhouse gas emissions reduced by using renewable
+                               energy sources in a year
+                               Percentage of clothing purchased that is second-hand or sustain-
+                               ably made
+                               Number of times a person participates in environmental advocacy
+                               or activism in a year
+                               Number of times a person chooses eco-friendly packaging options
+                               in a month
+                               Percentage of cleaning products used that are eco-friendly
+                               Number of times a person opts for plant-based meals in a week
+                               Amount of money spent on supporting environmental causes in a
+                               year
+                               Number of times a person uses single-use plastic in a week
+                               Amount of food waste thrown away in a month
+                               Number of times a person leaves lights on in empty rooms in a
+                               day
+                               Number of disposable coffee cups used in a month
+                               Amount of water wasted by leaving taps running in a month
+                               Amount of fuel wasted by idling a car in a week
+                               Number of times a person fails to separate recyclables from regular
+                               trash in a month.
+Category                         Concepts
+Politics and international rela- Number of international conflicts in a year
+tionships                        Number of treaties or agreements signed by a country in a year
+                                 Number of times a person votes in national elections in a lifetime
+                                 Number of diplomatic visits made by a country’s leaders in a year
+                                 Percentage of a country’s budget allocated to defense spending
+                                 Number of international organizations a country is a member of
+                                 Number of international trade agreements signed in a year
+                                 Percentage of foreign aid given by a country as a portion of GDP
+                                 Number of times a person participates in political protests in a
+                                 year
+                                 Number of bilateral meetings held between countries in a year
+                                 Number of sanctions imposed by a country in a year
+                                 Percentage of citizens who support international cooperation
+                                 Number of diplomatic embassies a country maintains worldwide
+                                 Number of refugees accepted by a country in a year
+                                 Number of international espionage incidents reported in a year
+                                 Number of military bases a country has abroad
+                                 Percentage of international agreements ratified by a country’s par-
+                                 liament
+                                 Number of international cultural exchange programs sponsored in
+                                 a year
+                                 Number of cyberattacks attributed to foreign governments in a
+                                 year
+                                 Number of international humanitarian missions a country partici-
+                                 pates in a year
+                                 Number of trade disputes resolved through international arbitra-
+                                 tion in a year
+                                 Number of international human rights organizations criticizing a
+                                 country’s policies in a year
+                                 Number of times a country is accused of violating international
+                                 law in a year
+                                 Number of military conflicts a country initiates in a year
+                                 Number of times a country faces international boycotts due to its
+                                 policies in a year
+                                 Percentage of the population living under undemocratic regimes.
+Category                    Concepts
+Technology and Innovation   Number of smartphone models that sold more than 10,000 pieces
+                            in a year
+                            Average number of hours people spend on social media per day
+                            Number of new technology products introduced to the market in a
+                            year
+                            Average age at which people purchase their first smartphone
+                            Percentage of households with smart home devices
+                            Average number of apps installed on a smartphone
+                            Number of electric vehicles sold in a country in a year
+                            Average number of hours people spend on online gaming per week
+                            Percentage of households with high-speed internet access
+                            Number of people using wearable fitness trackers in a country
+                            Average lifespan of a smartphone before being replaced
+                            Percentage of people using online banking services
+                            Number of streaming service subscriptions per household
+                            Average number of data breaches affecting consumers per year
+                            Percentage of consumers using mobile payment systems
+                            Average number of times people upgrade their tech devices in a
+                            year
+                            Number of people using telemedicine services in a country per
+                            year
+                            Percentage of market share held by electric vehicles
+                            Average amount of money spent by consumers on new technology
+                            annually
+                            Number of electric vehicle charging stations installed in a country
+                            per year
+                            Average number of hours people spend on virtual reality per week
+                            Percentage of consumers purchasing technology products online
+                            Number of broadband internet subscribers in a country
+                            Average number of new apps downloaded per person per year
+                            Number of households using renewable energy technology.
+Category                 Concepts
+Pet Care and Ownership   Number of animals rescued and adopted in a year
+                         Average number of pets owned per household
+                         Amount of money spent on pet food annually
+                         Number of veterinary visits per pet per year
+                         Percentage of households with at least one pet
+                         Number of pet grooming sessions per year
+                         Amount of money spent on pet healthcare annually
+                         Number of pet-related products purchased per month
+                         Percentage of pets that are spayed or neutered
+                         Average lifespan of different pet species
+                         Number of times a pet is walked per day
+                         Amount of money spent on pet toys annually
+                         Number of pet-friendly parks or areas in a city
+                         Percentage of pets with microchips
+                         Number of pet training sessions attended per year
+                         Amount of money spent on pet insurance annually
+                         Number of pets abandoned or surrendered per year
+                         Percentage of pet owners who travel with their pets
+                         Number of pet-related accidents or injuries per year
+                         Average cost of pet adoption fees
+                         Percentage of households with multiple pets
+                         Number of pet-related events or expos attended per year
+                         Amount of money spent on pet boarding or daycare annually
+                         Number of pet adoptions from shelters versus breeders
+                         Percentage of pet owners who feed their pets homemade food.
+Category                      Concepts
+Travel, Tourism and Hospital- Number of countries visited by a person in their lifetime
+ity                           Average number of vacations taken per year
+                              Percentage of vacations that are international trips
+                              Number of cultural or heritage sites visited per year
+                              Average amount of money spent on travel annually in dollars
+                              Number of luxury cruises taken in a lifetime
+                              Percentage of travel done for leisure versus business
+                              Number of times a person stays at eco-friendly accommodations
+                              per year
+                              Average duration of an international trip in days
+                              Number of languages a person learns basic phrases of for travel
+                              Number of travel blogs or reviews written by a person in a lifetime
+                              Number of adventure or extreme sports tried while traveling
+                              Average number of travel souvenirs collected per trip
+                              Percentage of travel plans made spontaneously versus planned in
+                              advance
+                              Number of times a person travels with family per year
+                              Number of times a person visits the same destination multiple
+                              times
+                              Number of travel cancellations or delays experienced in a year
+                              Amount of money lost due to travel scams or fraud in a lifetime
+                              Number of times a person experiences food poisoning while trav-
+                              eling
+                              Number of travel insurance claims filed in a year
+                              Percentage of vacations that end with dissatisfaction or complaints
+                              Number of countries visited where a person experiences signifi-
+                              cant cultural differences
+                              Number of travel destinations visited due to trending social media
+                              recommendations
+                              Number of times a person misses a flight or train in a lifetime
+                              Amount of money spent on unexpected travel expenses annually
+                              Number of positive travel reviews written in a year.
+
