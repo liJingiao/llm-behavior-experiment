@@ -1,0 +1,1252 @@
+    In-Context Analogical Reasoning with Pre-Trained Language Models
+
+                                  ∗                        ∗
+             Xiaoyang Hu12      Shane Storks1      Richard L. Lewis2†       Joyce Chai1†
+                1
+                  Computer Science and Engineering Division, University of Michigan
+                        2
+                          Department of Psychology, University of Michigan
+                    {nickhu, sstorks, rickl, chaijy}@umich.edu
+
+
+
+                          Abstract                                               8-Way Visual Raven’s Progressive Matrix (RPM)
+
+
+    Analogical reasoning is a fundamental capacity
+    of human cognition that allows us to reason
+    abstractly about novel situations by relating
+    them to past experiences. While it is thought
+    to be essential for robust reasoning in AI sys-
+    tems, conventional approaches require signif-
+    icant training and/or hard-coding of domain
+    knowledge to be applied to benchmark tasks.                                           Language-Based Abstractions
+    Inspired by cognitive science research that has                  Generated
+    found connections between human language                          Prompts
+    and analogy-making, we explore the use of in-                                         …                        …
+    tuitive language-based abstractions to support                                    Pre-Trained Language Model
+                                                                                      …                                 …
+    analogy in AI systems. Specifically, we apply                                         …                        …
+    large pre-trained language models (PLMs) to
+    visual Raven’s Progressive Matrices (RPM), a                    P(    |       )
+    common relational reasoning test. By simply
+    encoding the perceptual features of the problem
+    into language form, we find that PLMs exhibit a
+                                                                 Figure 1: Raven’s Progressive Matrices (Raven and
+    striking capacity for zero-shot relational reason-
+                                                                 Court, 1938; Zhang et al., 2019a) are an analogy-making
+    ing, exceeding human performance and nearing
+                                                                 task where one must infer the missing matrix item based
+    supervised vision-based methods. We explore
+                                                                 on abstract rules instantiated in the first two rows. To
+    different encodings that vary the level of ab-
+                                                                 demonstrate the potential analogical reasoning skills
+    straction over task features, finding that higher-
+                                                                 in pre-trained language models, we develop language-
+    level abstractions further strengthen PLMs’ ana-
+                                                                 based abstractions over their key perceptual features,
+    logical reasoning. Our detailed analysis reveals
+                                                                 then prompt them to select the completion of the matrix.
+    insights on the role of model complexity, in-
+    context learning, and prior knowledge in solv-
+    ing RPM tasks.                                               Sander, 2013), and thus it is believed to be prereq-
+                                                                 uisite in order to enable the same in AI systems.
+1   Introduction                                                 However, conventional approaches struggle with
+                                                                 analogy-making, and are trained on thousands of
+Humans are constantly presented with novel prob-                 examples to achieve any success on benchmark
+lems and circumstances. Rather than understand                   tasks. This is unsatisfying, as humans are capa-
+them in isolation, we try to connect them with past              ble of analogy-making without explicit training,
+experiences. With any luck, we might find an anal-               and such analogy-making should enable zero-shot
+ogy: a mapping between relevant aspects of this                  generalization to new situations (Mitchell, 2021).
+new situation and a past situation, which helps                     Interestingly, a body of work in cognitive sci-
+form abstractions that allow us to reason more ef-               ence suggests that analogy-making and relational
+fectively in the future (Holyoak, 1984). Analogy                 reasoning are connected to humans’ symbol sys-
+is thought to underpin humans’ robust reasoning                  tem and language capabilities (Gentner, 2010). For
+and problem solving capabilities (Hofstadter and                 example, Gordon (2004) finds that members of an
+    ∗
+        Authors contributed equally to this work.                Amazonian tribe that count only with words for
+    †
+        Equal advising contribution.                             “one,” “two,” and “many” struggle to make analo-
+                                                            1953
+                    Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics
+                                           Volume 1: Long Papers, pages 1953–1969
+                              July 9-14, 2023 ©2023 Association for Computational Linguistics
+gies with higher numbers. Further, Gentner et al.          approaches typically require hard-coding domain-
+(2013) find that deaf children whose sign language         specific concepts, and require substantial search
+does not involve spatial relations are outperformed        through domain knowledge to operate on their tar-
+by hearing children on a spatial relational reason-        get problems, thus making them unscalable. The
+ing task, while Christie and Gentner (2014) find           creation of large-scale image datasets for analogy
+that assigning even nonsensical names to relations         tasks here (Zhang et al., 2019a; Hu et al., 2021;
+enhances children’s relational reasoning. All of           Odouard and Mitchell, 2022) have enabled further
+this demonstrates that language serves as a power-         research with deep learning and neuro-symbolic
+ful way for humans to abstract and better reason           methods (Hill et al., 2019; Spratley et al., 2020;
+about the overwhelming and complex percepts we             Kim et al., 2020; Zhang et al., 2021), which bring
+encounter in the world.                                    the advantage of requiring less ad-hoc encoding of
+   In this work, we explore whether language may           domain knowledge, but require thousands of train-
+serve a similar purpose in AI systems. Specifically,       ing examples to learn the tasks, still limiting their
+we apply contemporary autoregressive pre-trained           generalization capability.
+language models (PLMs) to Raven’s Progressive                 Other work has explored AI systems’ analogy-
+Matrices (RPM), an example of which is shown in            making in real-world domains, including in natural
+Figure 1. RPM is a widely used psychometric test           images (Teney et al., 2020; Bitton et al., 2022) and
+for relational reasoning that requires inducing an         language (Li et al., 2020; Chen et al., 2022; Sul-
+abstract rule from just two examples of short se-          tan and Shahaf, 2022), especially lexical analogies
+quences of groups of shapes, and then applying the         (Turney et al., 2003; Turney, 2008; Speer et al.,
+rule to complete a new partial sequence (Raven and         2008; Mikolov et al., 2013b,a; Linzen, 2016; Lu
+Court, 1938). This task makes minimal assump-              et al., 2019). However, these domains make it diffi-
+tions about the test taker’s prior knowledge, and          cult to control the prior knowledge required to solve
+is thus thought to provide a good estimate for gen-        tasks (Mitchell, 2021), and in the context of recent
+eral intelligence (Holyoak, 2012). On the RAVEN            generative foundation models that are extensively
+dataset (Zhang et al., 2019a), we find that given          pre-trained on natural data, it becomes difficult to
+the ability to perceive key features of RPMs, large        separate analogy learning from distributional pat-
+PLMs exhibit a surprising capacity for zero-shot re-       terns that can be overfit. Unlike prior work, we
+lational reasoning, approaching that of supervised         apply such foundation models for language to ana-
+vision-based deep learning approaches and even hu-         logical reasoning in a zero-shot setting, bypassing
+mans. We propose three levels of abstraction over          the requirement of hard-coding domain knowledge
+the language features of the task using name assign-       or training models on task-specific data. Further-
+ment and task decomposition, and find that each            more, while contemporaneous work has applied
+abstraction further strengthens PLMs’ relational           PLMs to a variety of simpler relational reasoning
+reasoning. Our results and detailed analysis offer         tasks in language (Webb et al., 2022), we systemat-
+insights on PLM performance, including the role of         ically explore the advantage of using language to
+models’ complexity, in-context learning, and prior         abstract over complex visual features of the task,
+knowledge in emergent relational reasoning, and            opening questions about how the powerful sym-
+suggest that they could play an important role in          bol systems learned in PLMs may support robust,
+future cognitive architectures for analogy-making.2        perception-driven reasoning in future AI systems.
+
+2   Related Work                                           3   Raven’s Progressive Matrices
+Past work has studied analogy in AI across var-            Raven’s progressive matrices (RPM) are abstract
+ious domains. Mitchell (2021) provides a com-              relational reasoning tasks used in cognitive psy-
+prehensive overview of these efforts, especially           chology to test humans’ analogy-making (Raven
+those applied in idealized symbolic domains. Here,         and Court, 1938). Each instance of RPM is a ma-
+symbolic and probabilistic methods have tradition-         trix consisting of 9 items arranged in a square, the
+ally been applied (Gentner, 1983; Hofstadter and           last of which must be selected from a set of choices.
+Mitchell, 1994; Lake et al., 2015). However, these         Each item consists of several perceptual attributes,
+   2
+     Experiment code is available at https://github.com/   such as shape, color, or more abstract features.
+hxiaoyang/lm-raven.                                        Within each row of the matrix, a relation is applied
+                                                       1954
+                                                                              Component structures. Items may also be
+                                                                              composed of multiple sub-items or components;
+                                                                              RAVEN includes four sub-tasks that introduce this
+            Entity               Layout                                       even higher-level challenge: L-R, U-D, and O-IC,
+  Item
+  Type
+         Type Size Color    Position Number            Component              each of which consist of two single entities in dif-
+         ( , , )            (   X
+                                      , XXX)            Structure
+                                X X
+                                                                              ferent configurations, and O-IG, which consists of
+            Center         2x2Grid     3x3Grid   L-R   U-D   O-IC   O-IG      a 2-by-2 grid inside of a larger entity.
+ Sub-
+ Tasks                                                                        Relations. Following prior work on this task,
+                                                                              RAVEN applies four different relations to item
+Figure 2: Illustration of the compositional nature of                         attributes across rows of the matrix. These are
+entities, layouts, and component structures in RAVEN,
+                                                                              Constant, which does not modify an attribute,
+and their unique attributes. We provide example items
+from sub-tasks each item type appears in.                                     Progression, which increases or decreases the
+                                                                              value of an attribute by 1 or 2, Arithmetic,
+over these attributes, such as progression of numer-                          which performs addition or subtraction on the first
+ical values associated with these attributes. Given                           two attributes of the row to create the third, and
+the first two rows of the matrix, the challenge of                            Distribute Three, which distributes three
+the task is to identify the relations being applied to                        consistent values of an attribute across each row.
+items, and apply them analogously in the third row
+to infer the missing ninth item. Successfully solv-                           4       Methods
+ing an RPM requires tackling two sub-problems:                                In order to apply PLMs to RAVEN, we abstract
+perception of each item’s attributes, and reasoning                           the visual features of the task into language. Our
+over multiple items’ attributes to infer and apply                            abstractions are intentionally applied on a per-item
+relations.                                                                    basis to tackle the perception problem of the task
+                                                                              without giving the PLM explicit hints toward the
+3.1 RAVEN Dataset
+                                                                              reasoning problem (which requires capturing pat-
+We focus our study on RAVEN (Zhang et al.,                                    terns over multiple items). This allows us to focus
+2019a), which provides a large-scale benchmark                                on evaluating the reasoning capabilities of PLMs.3
+for RPM tasks for training and evaluation of AI sys-                             First, we introduce our multi-level abstractions
+tems. Each RPM has 8 possible candidate items to                              for the RAVEN dataset.4 Then we formally define
+complete it. As shown in Figure 2, each item may                              the interface between PLMs and the RPM task.
+consist of compositional entities, layouts, and/or
+component structures, and RAVEN provides a suite                              4.1      Abstractions in RAVEN
+of increasingly complex sub-tasks built from these                            We define abstractions for entity-level attributes,
+elements. We introduce their unique attributes be-                            layout-level attributes, and component structures
+low, as well as relations that may occur over them                            which convert the RPM task into one or more text
+across items in the matrix.                                                   prompts. We apply two kinds of abstractions: nam-
+Entities. A single entity has a type (i.e., shape),                           ing and decomposition. As discussed in Section 1,
+size, and color selected from a small number                                  assigning names to perceptual features strengthens
+of classes. Each of these attributes is associated                            humans’ analogy-making skills over them. Inspired
+with a number: type with the number of sides                                  by this, naming abstractions abstract over attributes
+in the entity’s shape, size with its diameter, and                            or combinations of attributes in the RPM by as-
+color with the darkness of its shading. The sim-                              signing a unique name to describe them. Mean-
+plest sub-task of RAVEN is Center, where each                                     3
+                                                                                    As the important features of RAVEN are simple, the per-
+item only consists of a single entity.                                        ception of an individual item is better performed by computer
+                                                                              vision models, and can already be done to fairly high accu-
+Layouts. Layouts of entities bring additional                                 racy (Zhang et al., 2021). For more general-purpose analogy-
+                                                                              making beyond idealized domains, the robust perception of
+higher-level attributes to items, specifically the                            key features that allow previous (source) experiences to be
+number (i.e., count) and position of entities                                 mapped to novel (target) experiences is a challenging unsolved
+within a layout. In the 2x2Grid and 3x3Grid                                   problem (Mitchell, 2021).
+                                                                                  4
+                                                                                    Some example PLM prompts using these abstractions are
+sub-tasks of RAVEN, each item consists of multi-                              shown in this section, while more examples are provided in
+ple entities arranged in a grid.                                              Appendix C.
+
+                                                                           1955
+                                                    type
+                                                                     4.1.2 Layout-Level Abstractions
+                                                row 1: 3, 5, 4;
+                                                row 2: 4, 3, 5;
+                                                                     As shown in Figure 4, we next propose abstractions
+                                                row 3: 5, 4, 3;      for layouts of entities (e.g., in grid-based sub-tasks
+                                                     size            of RAVEN). First, the number attribute of a layout
+                                                row 1: 8, 8, 8;
+                                                row 2: 4, 4, 4;
+                                                                     corresponds to the count of entities in it. Recogniz-
+                                                row 3: 3, 3, 3;
+                                                                     ing number requires implicitly counting entities
+                   (type, size, color)              color            within a layout, which may be difficult to disen-
+   row 1: (3,0.8,60), (5,0.8,70), (4,0.8,80);
+   row 2: (4,0.4,60), (3,0.4,70), (5,0.4,80);
+                                                row 1: 6, 7, 8;
+                                                row 2: 6, 7, 8;      tangle from other attributes. As such, we directly
+   row 3: (5,0.3,40), (4,0.3,50), (3,0.3,60);   row 3: 4, 5, 6;
+                                                                     expose this attribute by extracting this count and
+                                                                     encoding it in text. Since this layout attribute is
+Figure 3: Example generated prompts for a complete                   independent from other attributes, we can again
+RPM under entity attribute naming (left) and decompo-
+                                                                     decompose the task and consider it separately from
+sition (right) abstractions in the Center sub-task.
+                                                                     entity attributes.
+       position                                       type
+                                                                        The position attribute encodes even more
+                                                     [5,6,7]
+        [ 1,1,1,
+        0,0,1,
+                        X X X
+                            X                         size
+                                                                     complex information about a layout, and relations
+        0,0,1 ]             X
+                                                      [2,3]          over it may move entities around within the lay-
+       number                                         color          out. However, an occupancy map serves as a strong
+                        XXXXX
+           5                                        [0,4,6,8]        naming abstraction for position which omits
+                                                                     distracting details of specific entities while expos-
+Figure 4: Example of generated entity layout encodings               ing key information for detecting relations over it.
+when abstracting position and number, and sum-                       We generate the occupancy map as an array of text
+marizing redundant entity attributes within the layout.              representing the occupancy of the layout, and de-
+                                                                     compose this from other attributes. Notably, this
+while, jointly understanding and tracking the com-
+                                                                     abstraction provides a unique language description
+plex features of the task can become a burden even
+                                                                     for each possible global configuration of entities
+for humans. Inspired by humans’ capability to
+                                                                     within a layout, allowing the PLM to disentangle
+decompose complex tasks into independent sub-
+                                                                     global and local patterns in the problem, a help-
+tasks (Lee and Anderson, 2001), decomposition ab-
+                                                                     ful capability of humans (Robertson and Lamb,
+stractions split the RPM into multiple sub-matrices
+                                                                     1991).6
+by its independent features, then generate a sepa-
+                                                                        In RAVEN, relations are applied to specific at-
+rate prompt for each one. We can then prompt a
+                                                                     tributes consistently across all entities in a layout.
+PLM once for each sub-matrix, and aggregate PLM
+                                                                     As our layout-level abstractions make explicit the
+outputs to choose a candidate matrix completion.5
+                                                                     key features of layouts, we no longer need to track
+4.1.1 Entity-Level Abstractions                                      entity-level attributes for specific entities within
+                                                                     them. Specifically, rather than supply a PLM with
+As shown in Figure 3, we can abstract perceptual
+                                                                     a separate grid-like prompt for each entity-level
+entity attributes into language by assigning them
+                                                                     attribute, we simply provide a list of unique at-
+names, then generating prompts to represent the
+                                                                     tribute values. This reduces the complexity added
+full RPM using these names. As each of an en-
+                                                                     by layouts of multiple entities.
+tity’s attributes is numerical by nature, we assign
+each attribute an ordinal numerical name; type                       4.1.3 Structural Decomposition Abstractions
+is named by the number of sides of the associated                    In cases with multiple components in each item,
+shape (e.g., “3” for triangle), size is named by                     we may find that prompts become long and compli-
+a decimal representing its diameter, and color is                    cated with earlier approaches. Since each compo-
+named based on the darkness of the entity’s shade.                   nent’s attributes and relations are independent, we
+As each of an entity’s attributes is independent, i.e.,              can alternatively decompose the task by its com-
+a relation over one attribute has no connection to                   ponents. For each component, we can generate
+relations over other attributes, we can decompose                    a prompt through entity attribute naming abstrac-
+the RPM task by these attributes into three separate                 tions as shown in Figure 3 (left), or we can apply
+sub-tasks with their own prompts.
+                                                                         6
+                                                                         For example, we may recognize the grid of entities in
+   5
+    A more formal definition for decomposition is provided           Figure 2 to be in an “L” shape at the global level, while also
+in Section 4.2.                                                      recognizing that it is locally composed of triangles.
+
+                                                                  1956
+the higher-level abstractions over entity and lay-             After introducing some comparison approaches,
+out attributes shown in Figure 4, thus decomposing          we present the experimental results from our ap-
+each component’s prompts into prompts for each              plied abstractions on PLMs’ entity-level, layout-
+attribute. As this structural decomposition con-            level, and component-level relational reasoning.
+verts multi-component problems into several sim-            Afterward, we dive deeper with an analysis on how
+pler single-component, single-attribute problems,           both our abstractions and in-context learning con-
+the complexity added by multiple components is              tribute to model performance.
+abstracted away.
+                                                            5.1     Comparison Approaches
+4.2 Problem Definition
+                                                            To contextualize our findings, we provide results
+Formally, a complete RPM M consists of 9 matrix             from the human study in Zhang et al. (2019a), as
+items mij where row and column i, j ∈ {1, 2, 3}.            well as two supervised baselines from prior work.10
+As discussed in Section 3.1, an individual item mij         Additionally, to specifically evaluate the advantage
+in the RAVEN dataset is formalized by high-level            of the way we mapped the RPM task into language,
+components consisting of layout-level attributes            we include two simpler abstraction methods that
+and entity-level attributes. Given all items in M           encode task information less explicitly.
+except for m33 , the task is to identify m33 from
+a set Y of 8 choices by identifying abstract rules          Supervised baselines. While our goal is not to
+over the attributes within the first 2 rows of M , and      achieve the state of the art on RAVEN, we include
+selecting the candidate m33 that correctly applies          results from two state-of-the-art supervised base-
+these rules in the third row.                               lines for reference. Specifically, we select the
+                                                            two approaches with the top mean accuracy on
+Applying PLMs. We apply PLMs to RAVEN in                    RAVEN, as outlined in the survey by Małkiński and
+a zero-shot setting. In the absence of decomposi-           Mańdziuk (2022): Rel-AIR (Spratley et al., 2020)
+tion abstractions, we define L as the mapping of a          and CoPINet + ACL (Kim et al., 2020). Rel-AIR
+complete RPM to a text prompt. The PLM’s choice             combines a simple vision model with an unsuper-
+for m33 is given by                                         vised scene decomposition module, enabling more
+                    1                                       generalizable reasoning over entities in RAVEN.
+          arg max         log Pr (L (m11:32 , y))
+              y∈Y   |L|                                     CoPINet + ACL applies an analogy-centric con-
+                                                            trastive learning paradigm to CoPINet (Zhang et al.,
+where |L| denotes the number of tokens in the               2019b), a prior architecture proposed for percep-
+prompt. When decomposition is introduced, L                 tual inference trained through contrastive learning.
+instead returns multiple prompts, and the (token-           Both baselines have been trained on thousands of
+length normalized) log-probabilities of all sub-            examples from the RAVEN dataset, and incorpo-
+prompts are summed.7                                        rate task-specific inductive biases in their architec-
+                                                            ture. Meanwhile, we evaluate PLMs on RAVEN in
+5       Experimental Results                                a zero-shot setting with no supervised learning.
+Now, we can examine the impact each of these                Quasi-image abstraction. To evaluate the help-
+language-based abstractions has on the perfor-              fulness of naming abstractions over entity at-
+mance of transformer-based, autoregressive PLMs             tributes, we should compare to an approach that
+in relational reasoning on RAVEN. To further un-            does not have such abstraction. However, some
+derstand their impact with respect to model com-            mapping from the visual features of the RPM task
+plexity, we evaluate a range of model sizes:8 OPT           into langauge is needed in order for a PLM to inter-
+125M, 1.3B, and 13B (Zhang et al., 2022), along             face with it. While the limited context window of
+with GPT-3 (Brown et al., 2020).9 Models are eval-          PLMs restricts us from incorporating raw pixels di-
+uated on a random subset of 500 testing examples            rectly into our prompts, PLMs have recently been
+from each sub-task of RAVEN.                                demonstrated to capture spatial patterns in simi-
+    7
+      See Appendix C for examples of decomposing prompts.   lar inputs: text-based matrices (Patel and Pavlick,
+    8
+      Results on additional model sizes in Appendix A.
+    9                                                          10
+      Specifically, we use the text-davinci-002 variant          Since our approach is not evaluated on the exact same
+of InstructGPT (Ouyang et al., 2022) through a Microsoft    subset of RAVEN data, these results from prior work are not
+Azure OpenAI deployment.                                    directly comparable, but can be helpful reference points.
+
+                                                        1957
+                             [[ 2 .   .   . ],
+                                                             [[
+                                                              [
+                                                                  .
+                                                                  .
+                                                                      .
+                                                                      .
+                                                                          . 9
+                                                                          9 9
+                                                                                .
+                                                                                9
+                                                                                    . . ],
+                                                                                    . . ],       Impact of naming. Under the simplest abstrac-
+                                                              [   .   9   9 9   9   9 . ],
+                             [ 2 2 .
+                             [ 2 2 2 . ],
+                                          . ],
+                                                              [
+                                                              [
+                                                                  9
+                                                                  9
+                                                                      9
+                                                                      9
+                                                                          9 9
+                                                                          9 9
+                                                                                9
+                                                                                9
+                                                                                    9 9 ],
+                                                                                    9 9 ],
+                                                                                                 tion of naming the entity-level attributes, we see
+                             [ 2 2 2 2 ],]                    [
+                                                              [
+                                                                  9
+                                                                  9
+                                                                      9
+                                                                      9
+                                                                          9 9
+                                                                          9 9
+                                                                                9
+                                                                                9
+                                                                                    9 9 ],
+                                                                                    9 9 ],]      impressive zero-shot accuracies that monotonically
+                                                                                                 increase with model size up to 77.2% from GPT-
+Figure 5: Quasi-image abstractions for a triangle and                                            3 175B on Center, nearing human performance.
+pentagon of different size and color.
+                                                                                                 Further, we find that our choice to map attributes
+                       1
+                                                             Human
+                                                                                                 into numerical symbols is consistently advanta-
+                                                             Rel-AIR
+                                                             CoPINet + ACL                       geous over the quasi-image and random-naming
+
+
+    Center Accuracy
+                      0.8
+                                                             Random                              abstractions, which reach respective accuracies up
+                                                             Quasi-Image
+                      0.6
+                                                             Random Naming
+                                                                                                 to 28.2% and 51.8%. Meanwhile, we find that as
+                      0.4                                    Entity Naming                       model size increases, our ordinal naming approach
+                      0.2
+                                                             Entity Decomp.
+                                                                                                 outperforms the random naming baseline more and
+                       0                                                                         more, up to over 20% in larger model sizes. This
+                            10−1      100        101   102                                       suggests that PLMs of larger size can better capture
+                        Model Size (Billion Parameters)
+                                                                                                 and take advantage of implicit numerical relations
+Figure 6: Results on the RAVEN Center sub-task
+                                                                                                 in their vocabulary.
+under entity abstractions, compared to naïve and super-
+                                                                                                 Impact of decomposition. When applying de-
+vised baselines described in Section 5.1, and humans.
+                                                                                                 composition over entity attributes, we observe fur-
+2021). As such, we propose a quasi-image abstrac-                                                ther improvement of 2.8% accuracy in GPT-3 175B.
+tion which converts the visual RPM task into a                                                   Interestingly, we see a much sharper improvement
+matrix of ASCII characters. As shown in Figure 5,                                                from this abstraction in smaller models, with OPT
+an entity’s type can be expressed through a matrix                                               125M’s accuracy doubling from 22.2% to 45.6%,
+of characters; size can be expressed through the                                                 and OPT 1.3B’s accuracy rising from 47.2% to
+height and width of the matrix; and color can be                                                 72.0%. This may suggest that PLMs have a limited
+expressed through the actual characters making up                                                working memory which is related to the number
+the matrix. By converting instances of RAVEN’s                                                   of learned parameters in them. Large PLMs are
+Center sub-task into this pixel-like form, we have                                               more capable to handle complex reasoning tasks
+a lower-level abstraction of the task’s visual fea-                                              because of this, while smaller PLMs benefit from
+tures that can be compared to the higher-level ab-                                               decomposing tasks into more manageable parts.
+straction of naming entity attributes.
+                                                                                                 5.3   Layout-Level Reasoning
+Random naming abstraction. We would also                                                         In Figure 7, we evaluate PLMs’ capability to
+like to understand the advantage of the specific                                                 capture relations over layout attributes under our
+names we chose for entity attributes compared to                                                 abstractions introduced in the 2x2Grid and
+other possible choices. As such, we propose a sec-                                               3x3Grid sub-tasks. Without any decomposi-
+ond baseline where, instead of using ordinal labels                                              tion abstraction, model performance reaches up
+to describe entities’ type, size, and color, we                                                  to 78.0% and 86.4% accuracy respectively on
+choose random words from a large corpus. This                                                    2x2Grid and 3x3Grid. When adding naming
+removes numerical dependencies that may be uti-                                                  for layout-level attributes and decomposing all at-
+lized to recognize some relations, and can help us                                               tributes into separate prompts, we see further im-
+understand whether PLMs take advantage of this                                                   provements across the board, with accuracies reach-
+information when it is available.                                                                ing 87.8% on 2x2Grid and 93.2% on 3x3Grid.
+                                                                                                 The PLM exceeds human performance on both
+5.2 Entity-Level Reasoning
+                                                                                                 sub-tasks, despite them being arguably some of
+We first evaluate PLMs under our lowest level ab-                                                the most complex tasks in RAVEN, with the latter
+stractions over entity attributes. To isolate the im-                                            comprised of more entities than any other sub-task.
+provements from such abstraction, we focus on                                                    This suggests that our strong layout-level abstrac-
+the Center sub-task of RAVEN which only in-                                                      tions enable the PLM to tease apart the numerous
+cludes a single entity per item in the RPM, and thus                                             attributes in grids of entities and capture obscure
+only tests understanding of relations over entity at-                                            patterns, whereas humans may struggle with this
+tributes. The results are shown in Figure 6.                                                     as the task becomes more complex.
+                                                                                              1958
+                            Human              Rel-AIR                              CoPINet + ACL                        Distractor Values   Naming   Decomposition
+                            Random             Entity Naming                        Entity & Layout Decomp.
+                                                                                                                             RAVEN           76.0%       80.0%
+                     1                                                        1                                              Random          72.6%       77.8%
+
+
+
+
+ 2x2Grid Accuracy                                         3x3Grid Accuracy
+                    0.8                                                      0.8
+                                                                                                                 Table 1: GPT-3 accuracy on Center sub-task with dis-
+                    0.6                                                      0.6                                 tracting orientation attribute in language prompts,
+                    0.4                                                      0.4                                 under the naming and decomposition abstractions.
+                                                                                                                 orientation values are taken directly from RAVEN
+                    0.2                                                      0.2
+                                                                                                                 or randomly selected.
+                     0                                                        0
+                          10−1   100     101      102                              10−1   100    101    102
+                                                                                                                 we present GPT-3 175B’s accuracy over each at-
+                                       Model Size (Billion Parameters)
+                                                                                                                 tribute and relation. We find that number is the
+Figure 7: Results on grid-based sub-tasks of RAVEN                                                               best captured attribute even without any decompo-
+without and with decomposition abstractions. Com-                                                                sition abstractions, while the model struggles with
+pared to humans and supervised baselines.                                                                        position until we introduce decomposition of
+                                                                                                                 attributes, suggesting the occupancy map encoding
+5.4 Component-Level Reasoning                                                                                    used here indeed helped capture it. Meanwhile,
+Lastly, we apply our structural decomposition-                                                                   Arithmetic is the most difficult relation, with
+based abstractions on RAVEN sub-tasks which                                                                      consistently lower accuracy than other relations.
+have multiple components, i.e., L-R, U-D, O-IC,
+and O-IG. The results are shown in Figure 8. First,                                                              5.5.2     Robustness to Distracting Attributes
+just decomposing the task by its components im-
+                                                                                                                 Since our mappings from RAVEN attributes into
+proves the maximum accuracy on each task on
+                                                                                                                 language provide the key features over which rela-
+average by about 20%. Additionally decomposing
+                                                                                                                 tions occur, we may wonder how robust PLMs
+each component by its entity and layout attributes
+                                                                                                                 are to distracting or unimportant attributes. In
+brings further gains, with GPT-3 175B reaching
+                                                                                                                 fact, the RAVEN dataset includes one noise at-
+up to 77.6%, 78.0%, 82.8%, and 92.6% on L-R,
+                                                                                                                 tribute that we excluded from our mapping to
+U-D, O-IC, and O-IG respectively, and exceeding
+                                                                                                                 avoid unnecessarily increasing prompt lengths:
+humans and nearing supervised baselines on the
+                                                                                                                 orientation, i.e., the rotation of entities in the
+latter. The performance gain from this decompo-
+                                                                                                                 RPM. To begin exploring this issue, we incorpo-
+sition is again even more pronounced for smaller
+                                                                                                                 rate orientation into the problem as a fourth
+PLMs. Most significantly, OPT 1.3B improves
+                                                                                                                 entity-level attribute in addition to type, size,
+from 20-30% accuracy to over 70% accuracy, near-
+                                                                                                                 and color. For the best model (i.e., GPT-3) on the
+ing human performance. This demonstrates that
+                                                                                                                 Center sub-task, we compare two possible injec-
+not only is GPT-3 capable of very complex analog-
+                                                                                                                 tions of orientation values: using the values
+ical reasoning tasks, but even PLMs less than 100
+                                                                                                                 provided in RAVEN (which are mostly constant
+times its size can perform quite well here with the
+                                                                                                                 within each matrix row), and randomly selected
+proper abstractions.
+                                                                                                                 values (which could be more distracting).
+5.5 Fine-Grained Analysis                                                                                           As shown in Table 1, compared to GPT-3’s
+Finally, we analyze how model performance varies                                                                 Center accuracies of 77.2% and 80.0% with re-
+across different attributes and relations, as we in-                                                             spective naming and decomposition abstractions,
+troduce distracting attributes, and as we introduce                                                              the injection of orientation as a distraction
+rows into the matrix. In our analysis, we compare                                                                feature does not degrade the model performance
+three representative levels of abstraction: entity                                                               much, achieving accuracies of 76.0% and 80.0%
+attribute naming only (no decomposition into mul-                                                                when using values from RAVEN, and 72.6% and
+tiple prompts), decomposition of components, and                                                                 77.8% when using random values. This shows
+full decomposition of entity and layout attributes                                                               that PLMs exhibit some robustness to distracting
+and components.                                                                                                  attributes in language context, and have the capabil-
+                                                                                                                 ity to ignore them in analogical reasoning. Future
+5.5.1 Analysis of Attributes and Relations                                                                       work may consider more in-depth analysis to dis-
+We measure the impact of abstractions in capturing                                                               cover the extent of model robustness to distraction
+each attribute and relation in RAVEN. In Figure 9,                                                               features, and how it varies by model complexity.
+                                                                                                              1959
+                                                                                               Human                     Rel-AIR                                  CoPINet + ACL                 Random
+                                                                                               Attr. Naming              Comp. Decomp.                            Comp. & Attr. Decomp.
+
+                                 1                                                               1                                                           1                                                    1
+
+                                0.8                                                            0.8                                                          0.8                                                  0.8
+
+
+
+                 L-R Accuracy                                                   U-D Accuracy                                                O-IC Accuracy                                        O-IG Accuracy
+                                0.6                                                            0.6                                                          0.6                                                  0.6
+
+                                0.4                                                            0.4                                                          0.4                                                  0.4
+
+                                0.2                                                            0.2                                                          0.2                                                  0.2
+
+                                 0                                                               0                                                           0                                                    0
+                                      10−1   100        101            102                           10−1     100        101       102                            10−1    100     101     102                          10−1   100   101    102
+
+                                                                                                                          Model Size (Billion Parameters)
+
+
+  Figure 8: PLM accuracy on multi-component RAVEN sub-tasks with attribute naming only, component decomposi-
+  tion, and full component and attribute decomposition, compared to supervised baselines and humans.
+
+                                                   Attr. Naming Only         Component Decomp.                Component + Attr. Decomp.
+           1.0                                                                                                                                                    Sub-Task         1 Row        2 Rows                    3 Rows      Human
+           0.8                                                                                                                                                     Center          36.8%         69.2%                    77.2%           95.6%
+Accuracy
+           0.6                                                                                                                                                    2x2Grid          54.0%         71.0%                    78.0%           81.8%
+           0.4                                                                                                                                                    3x3Grid          73.0%         85.2%                    86.4%           79.6%
+           0.2                                                                                                                                                       L-R           14.0%         38.2%                    54.2%           86.4%
+           0.0                                                                                                                                                       U-D           12.4%         42.0%                    53.6%           81.8%
+                                  y
+                           Enttittr.    Num
+                                             ber
+                                                       Posit
+                                                              ion            tant                     on      tic        te
+                                                                                                 ressi Arithme Distrirbeue
+                            A                                           Cons            Prog                      Th
+                                                                                                                                                                    O-IC           19.6%         53.6%                    64.8%           86.4%
+                                                                                                                                                                    O-IG           32.0%         62.2%                    74.8%           81.8%
+  Figure 9: Comparison of accuracy on examples from all
+  sub-tasks, broken down by the types of attributes and                                                                                            Table 2: GPT-3 accuracy on RAVEN sub-tasks as rows
+  relations they require capturing.                                                                                                                are added to the RPM, under only naming abstractions.
+
+                                                                                                                                                   matrix (only the third, incomplete row). This may
+  5.5.3 In-Context Learning Over Rows
+                                                                                                                                                   suggest the PLM has a useful prior for this problem,
+ By design, RPM tasks are meant to require mini-                                                                                                   despite it being a visual problem and thus impossi-
+ mal background knowledge. They should be im-                                                                                                      ble to observe directly in pre-training. This raises
+ possible to solve without the first two rows of the                                                                                               questions about the objectivity of RAVEN and pos-
+ matrix, which provide essential context to com-                                                                                                   sibly the RPM task.11 Further, when decomposi-
+ plete the third row of the matrix. To understand                                                                                                  tion abstractions are applied, models achieve higher
+ whether PLMs capture relations specifically from                                                                                                  accuracies than when not, suggesting that decom-
+ in-context learning over the first two rows of the                                                                                                position encodes some of this prior knowledge for
+ matrix (as opposed to using prior knowledge from                                                                                                  the task. In Table 2, we take a closer look at GPT-3
+ pre-training), we measure the model performance                                                                                                   175B’s performance within sub-tasks. Surprisingly,
+ as we introduce rows to the matrices.                                                                                                             we find the highest accuracies on the grid-based
+    As shown in Figure 10, the average model per-                                                                                                  sub-tasks, despite them being the most difficult
+ formance increases across all sizes and abstractions                                                                                              tasks for humans.
+ as rows are added to the matrix. This suggests that                                                                                                  This motivates future work to compare human
+ in-context learning indeed contributes significantly                                                                                              and PLM performance on ablated analogy-making
+ to performance, even for smaller models. Larger                                                                                                   tasks like these to further evaluate their objective-
+ model sizes see the most significant improvements,                                                                                                ness and identify commonalities. Future work in AI
+ suggesting that larger PLMs are stronger in-context                                                                                               and analogy may also consider building diagnostic
+ learners than smaller ones. Further, larger PLMs                                                                                                  datasets to tease apart attribute and relation types
+ can achieve nearly the same accuracy with only                                                                                                    to better understand how they contribute to model
+ two rows of the matrix provided rather compared                                                                                                   performance and identify areas for improvement.
+ to having all three, suggesting that they pick up the
+                                                                                                                                                    In-context learning of attributes and relations.
+ task quite quickly from in-context learning.
+                                                                                                                                                       11
+    We also observe that in many cases, models                                                                                                            In Appendix B, we further explore this hypothesis on the
+                                                                                                                                                    Impartial-RAVEN dataset (Hu et al., 2021) that removes some
+ achieve accuracies above chance (12.5% accuracy)                                                                                                   superficial correlations in matrix completion choices, and still
+ without being provided any complete rows of the                                                                                                    see comparable results.
+
+                                                                                                                                          1960
+                                     Human              Rel-AIR                        CoPINet + ACL                 Random
+                                     1 Row              2 Rows                         3 Rows
+                                                                                                                                      6        Conclusion
+                          1                                                                 1
+                                                                                                                                      In this work, we explored the ability of large PLMs
+
+
+       Naming Accuracy                                                  Decomp. Accuracy
+                         0.8                                                               0.8
+                                                                                                                                      to perform zero-shot analogical reasoning in visual
+                         0.6                                                               0.6                                        Raven’s Progressive Matrices (RPM). Upon the
+                         0.4                                                               0.4                                        simplest mapping to language, they can achieve
+                         0.2                                                               0.2
+                                                                                                                                      striking results, while applying higher-level nam-
+                                                                                                                                      ing and decomposition abstractions over the task
+                          0                                                                 0
+                               10−1        100     101      102                                  10−1     100     101    102          features further raises performance to the level of
+                                                 Model Size (Billion Parameters)                                                      humans and supervised approaches in some cases.
+                                                                                                                                      We find that while ordinal naming abstractions are
+  Figure 10: Macro average accuracy over all RAVEN
+                                                                                                                                      a powerful way to enable analogical reasoning in
+  sub-tasks as we introduce rows to the matrix during in-
+  context learning, under naming abstractions only (left)                                                                             larger PLMs, decomposition abstractions that break
+  and all naming and decomposition abstractions (right).                                                                              the task down into atomic parts conserve their work-
+  In 1 Row, we include only the incomplete third row.                                                                                 ing memory such that even smaller PLMs under 1B
+                                                                                                                                      parameters can achieve competitive performance
+                                                                                                                                      on this challenging problem.
+                                                                                                  1 Row         2 Rows    3 Rows
+            1.0                                                                                                                          Our detailed analysis revealed insights about
+            0.8                                                                                                                       which features of the task PLMs best capture, their
+Accuracy                                                                                                                              robustness to distracting features, and the role of
+            0.6
+            0.4
+                                                                                                                                      in-context learning and prior knowledge in picking
+            0.2
+                                                                                                                                      up this complex task. Surprisingly, we find that
+            0.0
+                                      y
+                               Enttittr.     Num
+                                                  ber
+                                                         Posit
+                                                                 ion
+                                                                       Cons
+                                                                                     tant             on      tic        te
+                                                                                                 ressi Arithme Distrirbeue            even without two complete rows of prior context
+                                A                                                            Prog                 Th
+                                                                                                                                      from the matrix, GPT-3 175B and smaller mod-
+  Figure 11: Comparison of accuracy on examples from                                                                                  els can achieve above-chance performance on the
+  all RAVEN sub-tasks as rows are introduced to the ma-
+                                                                                                                                      task, raising questions about the objectivity and
+  trix, with only entity attribute naming abstractions.
+                                                                                                                                      true role of prior knowledge in RPM tasks, which
+                                                                                                                                      are assumed to require minimal prior knowledge.
+ We may wonder whether specific relations or at-                                                                                         These results also raise some questions about
+ tributes are easier to understand than others with                                                                                   the role PLMs may play in future AI systems capa-
+ less context. For example, the Progression or                                                                                        ble of analogy. While previously thought to be a
+ Constant relations may be possible to recognize                                                                                      difficult problem for AI systems, PLMs can solve
+ only from the first two items of the third row in an                                                                                 the reasoning step of analogy easily given strong
+ RPM, as we can easily observe patterns in attribute                                                                                  abstractions over visual perception. Many of these
+ values here, e.g., that entity size is increasing                                                                                    abstractions are intuitive and commonly researched
+ or color remains constant. In Figures 11 and                                                                                         in computer vision, including the detection of ob-
+ 12, we surprisingly observe only marginal differ-                                                                                    ject types, sizes, colors, counts, and global arrange-
+ ences here, except for the number attribute, which                                                                                   ments. As such, future work may dive deeper into
+ seems significantly better captured than other at-                                                                                   the challenging problem of generalized perception
+ tributes in this no-context setting.                                                                                                 across domains, where we must robustly tease apart
+                                                                                                                                      the key features of tasks and experiences that may
+                                                                                                                                      facilitate analogy-making, e.g., in recognizing the
+                                                                                                                                      commonalities between a physical bridge and the
+                                                                                                  1 Row         2 Rows    3 Rows
+            1.0                                                                                                                       bridge of a song (Mitchell, 2021). Recent efforts to-
+            0.8                                                                                                                       ward understanding how humans describe abstract
+Accuracy
+            0.6                                                                                                                       visual features in language by mapping them to nat-
+            0.4
+                                                                                                                                      ural concepts12 are a promising direction toward
+            0.2
+                                                                                                                                      this goal (Lachmy et al., 2022; Ji et al., 2022).
+            0.0
+                                      y
+                               Enttittr.          ber          ion nstant          on      tic        te
+                                                                              ressi Arithme Distrirbeue
+                                A            Num         Posit    Co      Prog                 Th                                         12
+                                                                                                                                          For example, when communicating about abstract shapes,
+  Figure 12: Comparison of accuracy on examples from                                                                                  we may make an analogy to refer to them as looking like more
+  all RAVEN sub-tasks as rows are introduced to the ma-                                                                               familiar natural concepts like flowers or dog bones.
+  trix, with all decomposition abstractions.
+                                                                                                                                   1961
+Acknowledgements                                        for RAVEN, given that experiments were zero-shot
+                                                        and the text data we generate is new and thus im-
+This work was supported in part by DARPA PTG            possible to appear directly in PLM pre-training.
+program HR00112220003. We would like to thank           This may give humans an advantage. Second, the
+the anonymous reviewers for their valuable com-         task is presented to PLMs in text form, not visually.
+ments and suggestions.                                  While the essential information from the task is
+                                                        preserved by our conversion, it is possible that this
+Limitations
+                                                        conversion would affect the difficulty of the task
+Perception and reasoning in text-based RAVEN.           for humans (making it easier or harder). As such,
+In this work, one limitation is that we do not at-      it becomes unclear how to contextualize our results
+tempt to solve the perception problem of analogy-       with these past human results. Future work may
+making in RPM, rather we apply perfect perception       carry out systematic human studies to compare the
+in solving the reasoning part, and assume the per-      analogical reasoning capabilities of humans and
+ception problem is simple. By doing so, we find         PLMs in different settings.
+that PLMs may be a strong solution to the reasoning
+problem here, which may better direct future efforts    Ethical Considerations
+toward AI and analogy. Obviously, the perception
+                                                        This work does not use any human subjects or
+problem for idealized domains is a lot different than
+                                                        human-generated data. Our work deals with ab-
+more natural domains, and identifying key features
+                                                        stract visual features that are described with nu-
+across many domains that can facilitate a mapping
+                                                        merical symbols, thus not strongly targeting any
+is still a challenging unsolved problem. We hope
+                                                        language. A possible ethical concern for this work
+that our work sparks more interest in this problem.
+                                                        is the amount of computational resources used in
+   Meanwhile, one may argue that our decomposi-
+                                                        evaluating PLMs. To reduce unnecessary computa-
+tion abstractions are too strong, and actually con-
+                                                        tion in our study, we chose to apply PLMs to only a
+tribute to the reasoning problem in RPM, as they
+                                                        subset of 500 testing examples from each sub-task
+make an independence assumption about which
+                                                        of the RAVEN dataset, while the full testing set is
+features of the task can be teased apart. Making
+                                                        four times as large.
+such an assumption requires an understanding of
+the problem that cannot be inferred by only see-
+ing one instance. However, we decomposed the
+                                                        References
+task based on very intuitive and common attributes,
+e.g., shapes, colors, sizes, and counts of items.       Yonatan Bitton, Ron Yosef, Eli Strugo, Dafna Shahaf,
+We believe that the strength of such an abstrac-          Roy Schwartz, and Gabriel Stanovsky. 2022. VASR:
+                                                          Visual analogies of situation recognition. In Proceed-
+tion, which could be applied in many problems,            ings of the AAAI Conference on Artificial Intelligence
+should not be understated. Nonetheless, we include        (AAAI).
+decomposition-free forms of results as much as
+possible throughout the paper to help compare the       Tom Brown, Benjamin Mann, Nick Ryder, Melanie
+contributions of decomposition versus naming ab-          Subbiah, Jared D Kaplan, Prafulla Dhariwal, Arvind
+                                                          Neelakantan, Pranav Shyam, Girish Sastry, Amanda
+stractions, which is more clearly only providing per-     Askell, et al. 2020. Language models are few-shot
+ceptual information. In fact, we find that without        learners. Advances in neural information processing
+any decomposition, PLMs still achieve very strong         systems, 33:1877–1901.
+performance in many cases, and performance gains
+from decomposition are not always large.                Jiangjie Chen, Rui Xu, Ziquan Fu, Wei Shi, Zhongqiao
+                                                           Li, Xinbo Zhang, Changzhi Sun, Lei Li, Yanghua
+                                                           Xiao, and Hao Zhou. 2022. E-KAR: A benchmark
+Human performance. Lastly, we note some lim-
+                                                           for rationalizing natural language analogical reason-
+itations in the human performance measurements             ing. In Findings of the Association for Computa-
+used as reference points. In Zhang et al. (2019a),         tional Linguistics: ACL 2022, pages 3941–3955,
+human performance on RAVEN was measured by                 Dublin, Ireland. Association for Computational Lin-
+giving subjects some task-specific training, then          guistics.
+evaluating them on the original visual form of          Stella Christie and Dedre Gentner. 2014. Language
+the task. This differs from our results in two             helps children succeed on a classic analogy task.
+ways. First, PLMs had no task-specific training           Cognitive Science, 38(2):383–397.
+
+                                                    1962
+Dedre Gentner. 1983. Structure-mapping: A theoretical       Brenden M Lake, Ruslan Salakhutdinov, and Joshua B
+  framework for analogy. Cognitive Science, 7(2):155–         Tenenbaum. 2015. Human-level concept learning
+  170.                                                        through probabilistic program induction. Science,
+                                                              350(6266):1332–1338.
+Dedre Gentner. 2010. Bootstrapping the mind: Ana-
+  logical processes and symbol systems. Cognitive           Frank J Lee and John R Anderson. 2001. Does learn-
+  Science, 34(5):752–775.                                     ing a complex task have to be complex?: A study
+                                                              in learning decomposition. Cognitive Psychology,
+Dedre Gentner, Asli Özyürek, Özge Gürcanli, and Susan         42(3):267–316.
+  Goldin-Meadow. 2013. Spatial language facilitates
+  spatial cognition: Evidence from children who lack        Peng-Hsuan Li, Tsan-Yu Yang, and Wei-Yun Ma. 2020.
+  language input. Cognition, 127(3):318–330.                  CA-EHN: Commonsense analogy from E-HowNet.
+                                                              In Proceedings of the Twelfth Language Resources
+Peter Gordon. 2004.   Numerical cognition with-               and Evaluation Conference, pages 2984–2990, Mar-
+  out words: Evidence from Amazonia. Science,                 seille, France. European Language Resources Asso-
+  306(5695):496–499.                                          ciation.
+
+Felix Hill, Adam Santoro, David GT Barrett, Ari S Mor-      Tal Linzen. 2016. Issues in evaluating semantic spaces
+  cos, and Timothy Lillicrap. 2019. Learning to make          using word analogies. In Proceedings of the 1st Work-
+  analogies by contrasting abstract relational structure.     shop on Evaluating Vector-Space Representations for
+  In 7th International Conference on Learning Repre-          NLP, pages 13–18, Berlin, Germany. Association for
+  sentations (ICLR).                                          Computational Linguistics.
+
+Douglas R Hofstadter and Melanie Mitchell. 1994. The        Hongjing Lu, Ying Nian Wu, and Keith J Holyoak.
+  Copycat project: A model of mental fluidity and             2019. Emergence of analogy from relation learning.
+  analogy-making, pages 31–112. Ablex Publishing.             Proceedings of the National Academy of Sciences,
+                                                              116(10):4176–4181.
+Douglas R Hofstadter and Emmanuel Sander. 2013. Sur-
+  faces and essences: Analogy as the fuel and fire of       Mikołaj Małkiński and Jacek Mańdziuk. 2022. Deep
+  thinking. Basic Books.                                      learning methods for abstract visual reasoning: A sur-
+                                                              vey on Raven’s Progressive Matrices. arXiv preprint
+Keith J Holyoak. 1984. Analogical thinking and human          arXiv:2201.12382.
+  intelligence. Advances in the psychology of human
+                                                            Tomas Mikolov, Ilya Sutskever, Kai Chen, Greg S Cor-
+  intelligence, 2:199–230.
+                                                              rado, and Jeff Dean. 2013a. Distributed representa-
+Keith J Holyoak. 2012. Analogy and relational reason-         tions of words and phrases and their compositionality.
+  ing. The Oxford Handbook of Thinking and Reason-            Advances in Neural Information Processing Systems,
+  ing.                                                        26.
+                                                            Tomas Mikolov, Wen-tau Yih, and Geoffrey Zweig.
+Sheng Hu, Yuqing Ma, Xianglong Liu, Yanlu Wei, and
+                                                              2013b. Linguistic regularities in continuous space
+  Shihao Bai. 2021. Stratified rule-aware network for
+                                                              word representations. In Proceedings of the 2013
+  abstract visual reasoning. In Proceedings of the
+                                                              Conference of the North American Chapter of the
+  AAAI Conference on Artificial Intelligence (AAAI),
+                                                              Association for Computational Linguistics: Human
+  volume 35, pages 1567–1574.
+                                                              Language Technologies, pages 746–751, Atlanta,
+Anya Ji, Noriyuki Kojima, Noah Rush, Alane Suhr,              Georgia. Association for Computational Linguistics.
+  Wai Keen Vong, Robert Hawkins, and Yoav Artzi.            Melanie Mitchell. 2021. Abstraction and analogy-
+  2022. Abstract visual reasoning with tangram shapes.       making in artificial intelligence. Annals of the New
+  In Proceedings of the 2022 Conference on Empiri-           York Academy of Sciences, 1505(1):79–101.
+  cal Methods in Natural Language Processing, Abu
+  Dhabi, United Arab Emirates. Association for Com-         Victor Vikram Odouard and Melanie Mitchell. 2022.
+  putational Linguistics.                                     Evaluating understanding on conceptual abstraction
+                                                              benchmarks. In Proceedings of the AI Evaluation Be-
+Youngsung Kim, Jinwoo Shin, Eunho Yang, and                   yond Metrics at IJCAI-ECAI 2022, Vienna, Austria.
+  Sung Ju Hwang. 2020. Few-shot visual reasoning
+  with meta-analogical contrastive learning. In Ad-         Long Ouyang, Jeff Wu, Xu Jiang, Diogo Almeida, Car-
+  vances in Neural Information Processing Systems,            roll L Wainwright, Pamela Mishkin, Chong Zhang,
+  volume 33, pages 16846–16856. Curran Associates,            Sandhini Agarwal, Katarina Slama, Alex Ray, et al.
+  Inc.                                                        2022. Training language models to follow in-
+                                                              structions with human feedback. arXiv preprint
+Royi Lachmy, Valentina Pyatkin, Avshalom Manevich,            arXiv:2203.02155.
+  and Reut Tsarfaty. 2022. Draw Me a Flower: Process-
+  ing and Grounding Abstraction in Natural Language.        Roma Patel and Ellie Pavlick. 2021. Mapping language
+  Transactions of the Association for Computational           models to grounded conceptual spaces. In Interna-
+  Linguistics, 10:1341–1356.                                  tional Conference on Learning Representations.
+
+                                                        1963
+John C Raven and JH Court. 1938. Raven’s progres-            probabilistic abduction and execution. In Proceed-
+  sive matrices. Western Psychological Services Los          ings of the IEEE/CVF Conference on Computer Vi-
+  Angeles.                                                   sion and Pattern Recognition (CVPR), pages 9736–
+                                                             9746.
+Lynn C Robertson and Marvin R Lamb. 1991.
+  Neuropsychological contributions to theories of         Susan Zhang, Stephen Roller, Naman Goyal, Mikel
+  part/whole organization. Cognitive Psychology,            Artetxe, Moya Chen, Shuohui Chen, Christopher De-
+  23(2):299–330.                                            wan, Mona Diab, Xian Li, Xi Victoria Lin, et al. 2022.
+                                                            OPT: Open pre-trained transformer language models.
+Robyn Speer, Catherine Havasi, and Henry Lieberman.         arXiv preprint arXiv:2205.01068.
+  2008. Analogyspace: Reducing the dimensionality
+  of common sense knowledge. In AAAI, volume 8,
+  pages 548–553.
+
+Steven Spratley, Krista Ehinger, and Tim Miller. 2020.
+  A closer look at generalisation in raven. In Computer
+  Vision – ECCV 2020: 16th European Conference,
+  Glasgow, UK, August 23–28, 2020, Proceedings, Part
+   XXVII, page 601–616, Berlin, Heidelberg. Springer-
+  Verlag.
+
+Oren Sultan and Dafna Shahaf. 2022. Life is a circus
+  and we are the clowns: Automatically finding analo-
+  gies between situations and processes. In Proceed-
+  ings of the 2022 Conference on Empirical Methods
+  in Natural Language Processing, Abu Dhabi, United
+  Arab Emirates. Association for Computational Lin-
+  guistics.
+
+Damien Teney, Peng Wang, Jiewei Cao, Lingqiao Liu,
+  Chunhua Shen, and Anton van den Hengel. 2020. V-
+  prom: A benchmark for visual reasoning using visual
+  progressive matrices. In Proceedings of the AAAI
+  Conference on Artificial Intelligence, volume 34,
+  pages 12071–12078.
+
+Peter D Turney. 2008. The latent relation mapping
+  engine: Algorithm and experiments. Journal of Arti-
+  ficial Intelligence Research, 33:615–655.
+
+Peter D Turney, Michael L Littman, Jeffrey Bigham,
+  and Victor Shnayder. 2003. Combining independent
+  modules in lexical multiple-choice problems. Re-
+  cent Advances in Natural Language Processing III:
+  Selected Papers from RANLP, 2003:101–110.
+
+Taylor Webb, Keith J Holyoak, and Hongjing Lu. 2022.
+  Emergent analogical reasoning in large language
+  models. arXiv preprint arXiv:2212.09196.
+
+Chi Zhang, Feng Gao, Baoxiong Jia, Yixin Zhu, and
+  Song-Chun Zhu. 2019a. RAVEN: A dataset for rela-
+  tional and analogical visual reasoning. In Proceed-
+  ings of the IEEE Conference on Computer Vision and
+  Pattern Recognition (CVPR).
+
+Chi Zhang, Baoxiong Jia, Feng Gao, Yixin Zhu,
+  HongJing Lu, and Song-Chun Zhu. 2019b. Learning
+  perceptual inference by contrasting. In Advances in
+  Neural Information Processing Systems, volume 32.
+  Curran Associates, Inc.
+
+Chi Zhang, Baoxiong Jia, Song-Chun Zhu, and Yixin
+  Zhu. 2021. Abstract spatial-temporal reasoning via
+
+                                                      1964
+A                     Expanded Results                                                                         I-OC are isomorphic to L-R, and therefore share
+                                                                                                               the same prompt format.
+In Table 3, we present additional results with a
+wider range of OPT model sizes (Zhang et al.,
+2022). We observe similar mostly monotonic in-
+creases of accuracy with model size.
+
+B                     Results and Analysis with I-RAVEN
+As the generation strategy for the negative choices
+in RAVEN can introduce distributional bias that is
+problematic for supervised learning and leads to
+artificially high performance (Hu et al., 2021), this
+could be a possible reason behind PLMs’ strong
+performance on the task even without any com-
+plete rows of context. As such, in Table 4 and
+Figure 13, we include some supplementary anal-
+ysis on the Impartial-RAVEN (I-RAVEN) dataset
+from Hu et al., which introduces more variation in
+negative choices. However, we observe similar per-
+formance trends in I-RAVEN. Performance mostly
+monotonically increases with model sizes and more
+abstraction. Further, PLMs achieve above-chance
+performance again without any rows of context
+provided, even with no decomposition abstractions.
+This provides further evidence that RPM, at least
+formulated in this way, is in part addressed by
+PLMs’ prior knowledge, despite the assumptions
+of minimal background knowledge that the task
+makes.
+                                                 Random                          1 Row
+                                                 2 Rows                          3 Rows
+
+                      1                                                     1
+
+
+
+
+ Accuracy - Naming
+                     0.8                                                   0.8
+
+
+
+                                                          Accuracy - All
+                     0.6                                                   0.6
+
+                     0.4                                                   0.4
+
+                     0.2                                                   0.2
+
+                      0                                                     0
+                           10−1   100     101    102                             10−1     100   101   102
+
+                                        Model Size (Billion Parameters)
+Figure 13: Macro average accuracy over all Impartial-
+RAVEN sub-tasks as we introduce rows to the matrix
+during in-context learning, under naming abstractions
+only (left) and all naming and decomposition abstrac-
+tions (right). In 1 Row, we include only the incomplete
+third row.
+
+
+
+C                     Example Prompts
+In Figure 14, we include example prompts for
+2x2Grid, 3x3Grid, L-R and I-OG subtasks
+under different abstractions. Note that U-D and
+                                                                                                            1965
+                                                                                          Complete
+                                         row 1: [-, (7,0.2,40), (7,0.2,40), (7,0.2,40)], [(5,0.5,20), (5,0.5,20), (5,0.5,20), -], [-, -, -, (3,0.1,60)];
+                                         row 2: [(7,0.1,20), (7,0.1,20), -, (7,0.1,20)], [(5,0.2,40), (5,0.2,40), -, -], [-, -, -, (3,0.5,60)];
+                                         row 3: [-, (7,0.5,50), (7,0.5,50), (7,0.5,50)], [(5,0.1,10), -, (5,0.1,10), -], [-, (3,0.2,60), -, (3,0.2,60)];
+
+
+
+                          Position: (Set) Arith.                              Number: -          Type: Prog.               Size: Distr.                Color: Arith.
+                          row 1: [0, 1, 1, 1], [1, 1, 1, 0], [0, 0, 0, 1];    row 1: 3, 3, 1;    row 1: [7], [5], [3];     row 1: [2], [5], [1];       row 1: [4], [2], [6];
+                          row 2: [1, 1, 0, 1], [1, 1, 0, 0], [0, 0, 0, 1];    row 2: 3, 2, 1;    row 2: [7], [5], [3];     row 2: [1], [2], [5];       row 2: [2], [4], [6];
+                          row 3: [0, 1, 1, 1], [1, 0, 1, 0], [0, 1, 0, 1];    row 3: 3, 2, 2;    row 3: [7], [5], [3];     row 3: [5], [1], [2];       row 3: [5], [1], [6];
+
+
+
+
+          2x2Grid
+
+
+                                                                                             Complete
+                                                    row 1: [(5,0.6,60), -, -, (6,0.4,60), (6,0.5,60), -, (5,0.3,60), (6,0.3,60), (6,0.4,60)],
+                                                           [(6,0.4,10), (5,0.6,10), -, -, (6,0.4,10), (6,0.5,10), -, (5,0.3,10), (6,0.3,10)],
+                                                           [(6,0.3,70), (6,0.4,70), (5,0.6,70), -, -, (6,0.4,70), (6,0.5,70), -, (5,0.3,70)];
+                                                    row 2: [-, (7,0.5,80), -, (4,0.3,80), (7,0.2,80), -, (6,0.2,80), (5,0.3,80), (4,0.5,80)],
+                                                           [(4,0.5,0), -, (7,0.5,0), -, (4,0.3,0), (7,0.2,0), -, (6,0.2,0), (5,0.3,0)],
+                                                           [(5,0.3,80), (4,0.5,80), -, (7,0.5,80), -, (4,0.3,80), (7,0.2,80), -, (6,0.2,80)];
+                                                    row 3: [-, (5,0.5,40), -, -, (4,0.4,40), -, -, (4,0.1,40), -],
+                                                           [-, -, (5,0.5,30), -, -, (4,0.4,30), -, -, (4,0.1,30)],
+                                                           [(4,0.1,70), -, -, (5,0.5,70), -, -, (4,0.4,70), -, -];
+
+
+
+                                 Position: Prog.                                                                                               Number: -
+                                 row 1: [1, 0, 0, 1, 1, 0, 1, 1, 1], [1, 1, 0, 0, 1, 1, 0, 1, 1], [1, 1, 1, 0, 0, 1, 1, 0, 1];                 row 1: 6, 6, 6;
+          3x3Grid                row 2: [0, 1, 0, 1, 1, 0, 1, 1, 1], [1, 0, 1, 0, 1, 1, 0, 1, 1], [1, 1, 0, 1, 0, 1, 1, 0, 1];                 row 2: 6, 6, 6;
+                                 row 3: [0, 1, 0, 0, 1, 0, 0, 1, 0], [0, 0, 1, 0, 0, 1, 0, 0, 1], [1, 0, 0, 1, 0, 0, 1, 0, 0];                 row 3: 3, 3, 3;
+
+                                 Type: Const.                                          Size: Const.                                            Color: Arith.
+                                 row 1: [5, 6], [5, 6], [5, 6];                        row 1: [3, 4, 5, 6], [3, 4, 5, 6], [3, 4, 5, 6];        row 1: [6], [1], [7];
+                                 row 2: [4, 5, 6, 7], [4, 5, 6, 7], [4, 5, 6, 7];      row 2: [2, 3, 5], [2, 3, 5], [2, 3, 5];                 row 2: [8], [0], [8];
+                                 row 3: [4, 5], [4, 5], [4, 5];                        row 3: [1, 4, 5], [1, 4, 5], [1, 4, 5];                 row 3: [4], [3], [7];
+
+
+
+                                                                                         Complete
+                                                row 1: A (3,0.1,40) / B (5,0.3,30), A (7,0.2,40) / B (4,0.3,50), A (5,0.6,40) / B (3,0.3,70);
+                                                row 2: A (7,0.6,10) / B (4,0.6,40), A (5,0.1,10) / B (3,0.6,60), A (3,0.2,10) / B (5,0.6,80);
+                                                row 3: A (5,0.2,10) / B (3,0.4,50), A (3,0.6,10) / B (5,0.4,70), A (7,0.1,10) / B (4,0.4,90);
+
+
+
+                                                               Left Comp.                                            Right Comp.
+                                                row 1: (3,0.1,40), (7,0.2,40), (5,0.6,40);             row 1: (5,0.3,30), (4,0.3,50), (3,0.3,70);
+                                                row 2: (7,0.6,10), (5,0.1,10), (3,0.2,10);             row 2: (4,0.6,40), (3,0.6,60), (5,0.6,80);
+                                                row 3: (5,0.2,10), (3,0.6,10), (7,0.1,10);             row 3: (3,0.4,50), (5,0.4,70), (4,0.4,90);
+
+
+
+                                Type: Distr.           Size: Distr.            Color: Const.         Type: Distr.            Size: Const.            Color: Prog.
+            L-R                 row 1: 3, 7, 5;        row 1: 1, 2, 6;         row 1: 4, 4, 4;       row 1: 5, 4, 3;         row 1: 3, 3, 3;         row 1: 3, 5, 7;
+                                row 2: 7, 5, 3;        row 2: 6, 1, 2;         row 2: 1, 1, 1;       row 2: 4, 3, 5;         row 2: 6, 6, 6;         row 2: 4, 6, 8;
+                                row 3: 5, 3, 7;        row 3: 2, 6, 1;         row 3: 1, 1, 1;       row 3: 3, 5, 4;         row 3: 4, 4, 4;         row 3: 5, 7, 9;
+
+
+
+                                                                                          Complete
+                                                          row 1: A (5,0.6,0) / B [(4,0.4,60), (4,0.4,60), (4,0.6,60), (4,0.6,60)],
+                                                                 A (6,0.5,0) / B [(6,0.6,30), (6,0.6,30), -, -],
+                                                                 A (7,0.4,0) / B [-, (5,0.5,90), -, (5,0.4,90)];
+                                                          row 2: A (4,0.4,0) / B [-, (5,0.5,80), (5,0.3,80), (5,0.3,80)],
+                                                                 A (5,0.6,0) / B [(4,0.4,10), -, -, -],
+                                                                 A (6,0.5,0) / B [-, (6,0.5,90), (6,0.3,90), -];
+                                                          row 3: A (4,0.5,0) / B [(6,0.4,40), (6,0.4,40), (6,0.4,40), (6,0.3,40)],
+                                                                 A (5,0.4,0) / B [-, (5,0.5,50), -, -],
+                                                                 A (6,0.6,0) / B [(4,0.4,90), (4,0.4,90), (4,0.5,90), -];
+
+
+                                                              In Comp.                                                           Out Comp.
+                                     row 1: [(4,0.4,60), (4,0.4,60), (4,0.6,60), (4,0.6,60)],                       row 1: (5,0.6,0), (6,0.5,0), (7,0.4,0);
+           I-OG                             [(6,0.6,30), (6,0.6,30), -, -],                                         row 2: (4,0.4,0), (5,0.6,0), (6,0.5,0);
+                                            [-, (5,0.5,90), -, (5,0.4,90)];                                         row 3: (4,0.5,0), (5,0.4,0), (6,0.6,0);
+                                     row 2: [-, (5,0.5,80), (5,0.3,80), (5,0.3,80)],
+                                            [(4,0.4,10), -, -, -],
+                                            [-, (6,0.5,90), (6,0.3,90), -];
+                                     row 3: [(6,0.4,40), (6,0.4,40), (6,0.4,40), (6,0.3,40)],
+                                            [-, (5,0.5,50), -, -],
+                                            [(4,0.4,90), (4,0.4,90), (4,0.5,90), -];
+
+
+
+                           Position: -                                               Number: Arith.
+                           row 1: [1, 1, 1, 1], [1, 1, 0, 0], [0, 1, 0, 1];          row 1: 4, 2, 2;
+                           row 2: [0, 1, 1, 1], [1, 0, 0, 0], [0, 1, 1, 0];          row 2: 3, 1, 2;
+                                                                                                               Type: Prog.         Size: Distr.          Color: Const.
+                           row 3: [1, 1, 1, 1], [0, 1, 0, 0], [1, 1, 1, 0];          row 3: 4, 1, 3;
+                                                                                                               row 1: 5, 6, 7;     row 1: 6, 5, 4;       row 1: 0, 0, 0;
+                                                                                                               row 2: 4, 5, 6;     row 2: 4, 6, 5;       row 2: 0, 0, 0;
+                           Type: Distr.              Size: Const.                    Color: Arith.             row 3: 4, 5, 6;     row 3: 5, 4, 6;       row 3: 0, 0, 0;
+                           row 1: [4], [6], [5];     row 1: [4, 6], [6], [4, 5];     row 1: [6], [3], [9];
+                           row 2: [5], [4], [6];     row 2: [3, 5], [4], [3, 5];     row 2: [8], [1], [9];
+                           row 3: [6], [5], [4];     row 3: [3, 4], [5], [4, 5];     row 3: [4], [5], [9];
+
+
+
+
+Figure 14: Example prompts for 2x2Grid, 3x3Grid, L-R and I-OG subtasks under different abstractions.
+
+
+
+                                                                      1966
+                    Abstractions        Center     2x2      3x3    L-R     U-D     O-IC    O-IG    Avg.
+                 Attr. Naming Only       0.222     0.420   0.606   0.076   0.098   0.122   0.194   0.248
+       125M       Comp. Decomp.          0.222     0.420   0.606   0.136   0.154   0.162   0.222   0.275
+               Comp. + Attr. Decomp.     0.456     0.620   0.724   0.378   0.408   0.374   0.520   0.497
+                 Attr. Naming Only       0.302     0.510   0.684   0.104   0.134   0.120   0.250   0.301
+       350M       Comp. Decomp.          0.302     0.510   0.684   0.186   0.232   0.254   0.344   0.359
+               Comp. + Attr. Decomp.     0.436     0.588   0.788   0.280   0.346   0.290   0.408   0.448
+                 Attr. Naming Only       0.472     0.584   0.710   0.146   0.158    0.2    0.322   0.370
+        1.3B      Comp. Decomp.          0.472     0.584   0.710   0.410   0.426   0.434   0.494   0.504
+               Comp. + Attr. Decomp.     0.720     0.714   0.794   0.672   0.680   0.744   0.744   0.724
+                 Attr. Naming Only       0.534     0.572   0.746   0.216    0.2    0.268   0.336   0.410
+        2.7B      Comp. Decomp.          0.534     0.572   0.746   0.420   0.468   0.484   0.532   0.537
+               Comp. + Attr. Decomp.     0.706     0.738   0.826   0.658   0.664   0.704   0.784   0.726
+                 Attr. Naming Only       0.618     0.590   0.752   0.196   0.228   0.284   0.396   0.438
+        6.7B      Comp. Decomp.          0.618     0.590   0.752   0.492   0.528   0.548   0.584   0.587
+               Comp. + Attr. Decomp.     0.704     0.750   0.826   0.682   0.690   0.748   0.834   0.748
+                 Attr. Naming Only       0.644     0.610   0.754   0.220   0.268   0.358   0.452   0.472
+        13B       Comp. Decomp.          0.644     0.610   0.754   0.566   0.602   0.586   0.576   0.620
+               Comp. + Attr. Decomp.     0.746     0.794   0.830   0.710   0.702   0.770   0.840   0.770
+                 Attr. Naming Only       0.680     0.596   0.748   0.264   0.328   0.420   0.482   0.503
+        30B       Comp. Decomp.          0.680     0.596   0.748   0.582   0.618   0.664   0.638   0.647
+               Comp. + Attr. Decomp.     0.762     0.818   0.828   0.738   0.714   0.786   0.860   0.787
+                 Attr. Naming Only       0.772     0.780   0.864   0.542   0.536   0.648   0.748   0.699
+       175B       Comp. Decomp.          0.772     0.780   0.864   0.738   0.732   0.780   0.840   0.787
+               Comp. + Attr. Decomp.     0.800     0.878   0.932   0.776   0.780   0.828   0.926   0.846
+
+
+Table 3: Performance on RAVEN sub-tasks under our abstractions across a wider set of model sizes. 175B refers to
+text-davinci-002 while the rest are corresponding OPT models.
+
+
+
+
+                    Abstractions        Center     2x2      3x3    L-R     U-D     O-IC    O-IG    Avg.
+                 Attr. Naming Only       0.376     0.172   0.208   0.246   0.230   0.262   0.202   0.242
+       125M       Comp. Decomp.          0.376     0.172   0.208   0.336   0.344   0.354   0.224   0.288
+               Comp. + Attr. Decomp.     0.608     0.514   0.602   0.612   0.624   0.638   0.594   0.600
+                 Attr. Naming Only       0.594     0.290   0.310   0.348   0.370   0.388   0.334   0.376
+        1.3B      Comp. Decomp.          0.594     0.290   0.310   0.586   0.574   0.618   0.466   0.491
+               Comp. + Attr. Decomp.     0.810     0.676   0.730   0.822   0.802   0.882   0.818   0.791
+                 Attr. Naming Only       0.756     0.384   0.382   0.456   0.498   0.538   0.432   0.492
+        13B       Comp. Decomp.          0.756     0.384   0.382   0.750    0.74   0.766   0.564   0.620
+               Comp. + Attr. Decomp.     0.836     0.748   0.728   0.824   0.826   0.906   0.868   0.819
+                 Attr. Naming Only       0.808     0.564   0.566   0.656   0.676   0.818   0.714   0.686
+       175B       Comp. Decomp.          0.808     0.564   0.566   0.822   0.812   0.896   0.742   0.744
+               Comp. + Attr. Decomp.     0.864     0.832   0.818   0.834   0.846   0.928   0.930   0.865
+
+
+Table 4: Performance on I-RAVEN sub-tasks under our abstractions across different model sizes. 175B refers to
+text-davinci-002 while the rest are corresponding OPT models.
+
+
+
+
+                                                     1967
+  ACL 2023 Responsible NLP Checklist
+A For every submission:
+  3 A1. Did you describe the limitations of your work?
+  
+    Limitations discussed after Section 6.
+
+   A2. Did you discuss any potential risks of your work?
+    Not applicable. Left blank.
+  3 A3. Do the abstract and introduction summarize the paper’s main claims?
+  
+    Section 1.
+
+  
+  7 A4. Have you used AI writing assistants when working on this paper?
+    Left blank.
+  3 Did you use or create scientific artifacts?
+B 
+  Dataset introduced in Section 3.
+  3 B1. Did you cite the creators of artifacts you used?
+  
+    We cited the authors of the RAVEN dataset when introducing it in Section 3 (and other sections). We
+    also cited the authors of the I-RAVEN dataset in appendices involving it.
+
+  
+  7 B2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+    We were unable to find license information for the RAVEN dataset we used, although it is publicly
+    available. We will not be re-distributing the dataset.
+  3 B3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+  
+    that it was specified? For the artifacts you create, do you specify intended use and whether that is
+    compatible with the original access conditions (in particular, derivatives of data accessed for research
+    purposes should not be used outside of research contexts)?
+    Our method of adapting the vision-based RAVEN dataset to language is described in Section 4.
+
+   B4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+    information that names or uniquely identifies individual people or offensive content, and the steps
+    taken to protect / anonymize it?
+    Not applicable. Left blank.
+  3 B5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+  
+    linguistic phenomena, demographic groups represented, etc.?
+    We describe the dataset in detail in Section 3; it is idealized abstract data which doesn’t pertain to
+    specific languages or demographic groups.
+  3 B6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+  
+    etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+    number of examples in train / validation / test splits, as these provide necessary context for a reader
+    to understand experimental results. For example, small differences in accuracy on large test sets may
+    be significant, while on small test sets they may not be.
+    Discussed at beginning of Section 5.
+The Responsible NLP Checklist used at ACL 2023 is adopted from NAACL 2022, with the addition of a question on AI writing
+assistance.
+
+
+
+
+                                                         1968
+C     3 Did you run computational experiments?
+      
+    Section 5.
+    3 C1. Did you report the number of parameters in the models used, the total computational budget
+    
+      (e.g., GPU hours), and computing infrastructure used?
+      In Section 5, we reported all model complexities. When it comes to compute budget, this is difficult
+      to report as experiments were run on several different platforms (OpenAI cloud API, institutional
+      computing cluster, and more). However, we provided the number of examples experiments were run
+      on, allowing a fair estimate of this.
+
+     C2. Did you discuss the experimental setup, including hyperparameter search and best-found
+      hyperparameter values?
+      Not applicable. Left blank.
+
+    
+    7 C3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+      statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+      etc. or just a single run?
+      All evaluations occur in a greedy setting where PLMs choose the most probable answer. Since this
+      makes modal predictions consistent, we cannot report such summary statistics. In analyses in Section
+      5.5, we report some mean performance measurements, and make it clear how such calculations are
+      done.
+
+     C4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+      you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+      etc.)?
+      Not applicable. Left blank.
+
+D     
+      7 Did you use human annotators (e.g., crowdworkers) or research with human participants?
+    Left blank.
+
+     D1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+      disclaimers of any risks to participants or annotators, etc.?
+      No response.
+
+     D2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+      and paid participants, and discuss if such payment is adequate given the participants’ demographic
+      (e.g., country of residence)?
+      No response.
+
+     D3. Did you discuss whether and how consent was obtained from people whose data you’re
+      using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+      crowdworkers explain how the data would be used?
+      No response.
+
+     D4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+      No response.
+
+     D5. Did you report the basic demographic and geographic characteristics of the annotator population
+      that is the source of the data?
+      No response.
+
+
+
+
+                                                    1969
+

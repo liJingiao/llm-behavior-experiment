@@ -1,0 +1,1433 @@
+   Self-Contrast: Better Reflection Through Inconsistent Solving Perspectives
+
+                                 Wenqi Zhang1 , Yongliang Shen1 , Linjuan Wu1
+                          Qiuying Peng2 , Jun Wang2 , Yueting Zhuang1 , Weiming Lu1†
+                       1
+                         College of Computer Science and Technology, Zhejiang University
+                                        2
+                                          OPPO Research Institute, China
+                                      {zhangwenqi, luwm}@zju.edu.cn
+
+
+
+                             Abstract                                        Standard Self-Reflection
+                                                                            Request          Initial Response              Self-Evaluate                         Revision
+           The reflection capacity of Large Language                For Incorrect Initial Response:
+                                                                    Error->Right Cases           Feedback Statistic                        Overconfident Feedback:
+           Model (LLM) has garnered extensive atten-                            15.1%
+                                                                                           46.70% Overconfident                            I think previous solution is correct
+                                                                                                                                           Inconsistent Feedback
+           tion. A post-hoc prompting strategy, e.g., re-                                        45.70%   Inconsistent                     When repeatedly generating multiple times
+                                                                                                                                           1st: Step1 is correct …
+           flexion and self-refine, refines LLM’s response              Error -> Error           6.90%    Correctly Identify Error
+                                                                                                                                           2nd: Step1 is wrong …
+                                                                                                 0.70%    Other                            3rd: Step2 contains an error …
+           based on self-evaluated or external feedback.                            Self-Contrast
+           However, recent research indicates without                        Explore Diverse Solving Perspectives   Contrast Difference   Summarize Checklist         Reflection
+
+           external feedback, LLM’s intrinsic reflection                         Prompt1           Solution1             Difference          Checklist              Revision
+           is unstable. Our investigation unveils that
+                                                                  Request
+                                                                                 Prompt2            Solution2            Difference           Checklist:
+           the key bottleneck is the quality of the self-                                …                …                    …
+                                                                                                                                            p Please re-examine the intent
+                                                                                                                                              of the question ….
+           evaluated feedback. We find LLMs often ex-                            PromptN           SolutionN             Difference         p Please check for calculation
+                                                                                                                                              errors in response 1..
+           hibit overconfidence or high randomness when                 Differences Between Solution1 and Solution2 :
+                                                                   Two solutions solve different goals. The solution1 solve for …., but solution2 solve for another…
+           self-evaluate, offering stubborn or inconsistent        Besides, for step2, both solutions have the same solving process, but the answers are different ….
+
+           feedback, which causes poor reflection. To rem-
+                                                                  Figure 1: LLMs evaluate the initial response and pro-
+           edy this, we advocate Self-Contrast: It adap-
+                                                                  vide feedback for revision. However, most erroneous
+           tively explores diverse solving perspectives tai-
+                                                                  responses remain uncorrected after reflection as the feed-
+           lored to the request, contrasts the differences,
+                                                                  back is either overconfident (46.7%) or inconsistent
+           and summarizes these discrepancies into a
+                                                                  (45.7%). Bottom: Self-Contrast explores multiple solv-
+           checklist which could be used to re-examine
+                                                                  ing perspectives, and contrast their differences, and sum-
+           and eliminate discrepancies. Our method pro-
+                                                                  marize them into insightful checklist for self-correction.
+           vides LLM with diverse perspectives to allevi-
+           ate stubborn biases. Moreover, their discrepan-
+           cies indicate potential errors or inherent uncer-
+           tainties that LLM often overlooks. Reflecting          Kojima et al., 2022), ReAct (Yao et al., 2022), Tree-
+           upon these can prompt more accurate and stable         of-Thought (Yao et al., 2023) and other prompting
+           reflection. Experiments conducted on a series          techniques (Gao et al., 2022; Wang et al., 2023d;
+           of reasoning and translation tasks with differ-        Zhou et al., 2022; Besta et al., 2023).
+           ent LLMs serve to underscore the effectiveness
+           and generality of our strategy.
+                                                                     Despite these advancements, LLMs are not en-
+                                                                  tirely reliable (Zheng et al., 2023c; Frieder et al.,
+   1       Introduction                                           2023; Yuan et al., 2023b) since they frequently pro-
+                                                                  duce inaccuracies results, such as misunderstand-
+   Mastering reasoning and decision-making capabili-              ing a key concept, overlooking some crucial details.
+   ties is of utmost importance to paving the way for             A post-hoc prompting strategy, e.g., self-reflection,
+   artificial general intelligence. Recently, large lan-          garnered considerable attention (Shinn et al., 2023;
+   guage models (LLMs) (Brown et al., 2020; Chowd-                Madaan et al., 2023; Paul et al., 2023). It first gen-
+   hery et al., 2022; Zhang et al., 2022a; Zeng et al.,           erates an initial response (Initial Response), then
+   2023; Touvron et al., 2023a; OpenAI, 2022, 2023;               gathers external feedback or self-evaluated feed-
+   Touvron et al., 2023b) and applications built on               back (Evaluation Phase) to refine prior response
+   them (Schick et al., 2023; Wu et al., 2023a; Shen              (Revision) (Welleck et al., 2022; Kadavath et al.,
+   et al., 2023; Zhang et al., 2023a) demonstrate im-             2022; Chen et al., 2023d; Liang et al., 2023; Kim
+   pressive capabilities in various domains, especially           et al., 2023; Zheng et al., 2023a; Du et al., 2023; Xi
+   combined with Chain-of-Thought (Wei et al., 2022;              et al., 2023; Ganguli et al., 2023; Pan et al., 2023).
+       †
+           Corresponding author.                                  Numerous studies proclaim this three-stage strategy
+                                                               3602
+Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pages 3602–3622
+                              August 11-16, 2024 ©2024 Association for Computational Linguistics
+(Initial Response→Evaluation→Revision), can en-           prompts and then select different results with sig-
+dow LLMs with the potential to self-correct pre-          nificant discrepancies for comparison. Then LLM
+vious imperfect responses. For a time, this belief        reflects on the reasons behind these discrepancies
+appeared to dominate the community.                       and generates multiple re-examining instructions,
+   However, recent studies (Huang et al., 2023b;          i.e., checklist, for reflection. Our experiments show
+Stechly et al., 2023; Liang et al., 2023; Valmeekam       that by creating diverse perspectives adaptively,
+et al., 2023) have cast doubt on LLM’s inherent re-       Self-Contrast can mitigate biases introduced by
+flection capability. Their research indicates that        specific prompts. Moreover, contrasting the dis-
+without external feedback, LLMs have difficul-            crepancies between perspectives inspires deeper
+ties in amending prior responses. It implies self-        reflection, thereby enhancing the likelihood of ac-
+correction is unreliable when relying only on LLM         curate self-correction.
+itself and simple post-hoc prompting strategies.             Our contributions can be summarized as:
+   We are also intrigued by LLM’s internal reflec-
+                                                              • Our comprehensive experiments unveil that
+tion ability, as external feedback is not available
+                                                                the bottleneck for poor reflection performance
+in most scenarios. Our initial experiments (§ 2.1)
+                                                                lies in the LLM’s inability to accurately evalu-
+indicate that intrinsic reflection has limited effect.
+                                                                ate prior responses. It often manifests as over-
+Across various LLMs and tasks, the performance
+                                                                confident or inconsistent feedback, hindering
+gains from reflection are not significant, and oc-
+                                                                the effectiveness of self-reflection.
+casionally detrimental. In cases of incorrect ini-
+tial responses, only 15.1% of incorrect responses             • We advocate Self-Contrast: the LLMs create
+are corrected through reflection. To ascertain the              multiple solving perspectives for diverse re-
+reasons for that, we further analyze the feedback               sults, mitigating overconfident biases of a sin-
+generated by the self-evaluate process. As shown                gular prompt. Then drawing inspiration from
+in Figure 1, LLMs often provide two unexpected                  contrasting different perspectives, the LLMs
+feedback: 1) Overconfidence (46.7%): Stubbornly                 summarize more accurate checking instruc-
+insisting that the previous solution is correct. 2) In-         tions to resolve discrepancies and enhance
+consistency (45.7%): The feedback is highly incon-              reflection.
+sistent when self-evaluating the same response mul-           • Empirically, compared with vanilla reflection,
+tiple times. These two feedbacks seriously under-               Self-Contrast shows significant improvements
+mine the effectiveness of reflection. It reveals that           and stability in both mathematical reasoning
+such a simple self-evaluate strategy faces difficulty           and challenging translation scenarios.
+in accurately identifying errors and consistently
+generating high-quality feedback for reflection.
+                                                          2     Evaluation of Intrinsic Reflection
+   As a remedy, we propose a contrastive strategy         We first comprehensively investigate the intrinsic
+as an alternative to the direct evaluation: we ex-        reflection capability of LLMs, i.e., LLMs self-
+amine the differences among multiple responses            evaluate the initial response without external feed-
+and draw inspiration to derive feedbacks from their       back and then refine it. Subsequently, we methodi-
+disparities for reflection. The insight is that while     cally investigate the factors influencing reflection.
+generating accurate feedback directly may be chal-
+lenging, identifying contrasts between various re-        2.1    Performance Pre- and Post-Reflection
+sponses is often more feasible. More importantly,         We evaluate the reflection capabilities of multiple
+these discrepancies often indicate some potential         LLMs across a variety of benchmarks, including
+errors, easily overlooked details or pitfalls. As         math reasoning and creative translation tasks. We
+shown in Figure 1, by contrasting two solutions,          report average accuracy for math reasoning and
+LLM finds they have different solving objectives,         the BLEURT score between predicted sentences
+and suggests re-examining the intent of the orig-         and references for the translation task (see § 4.1
+inal request in the checklist. This contrasting           for detail). Each result is evaluated multiple times
+paradigm can also be seen in some contempora-             on different prompts. Besides, we also report the
+neous work (Wan et al., 2023; Yuan et al., 2024).         significance level (one-tailed t-test) of the accuracy
+   Embracing this philosophy, we advocate Self-           change pre- and post-reflection.
+Contrast, which steers LLM to autonomously cre-              As shown in Table 1, we observe no significant
+ate diverse solving perspectives by self-curated          accuracy changes before and after reflection. For
+                                                      3603
+                    Math Reasoning         Translation      the accuracy of translation results before and after
+                 GSM8K       SVAMP         CommonMT         reflection. Step 2: We manually assess the qual-
+ GPT4           93.9⇒95.1 93.0⇒91.5         70.1⇒69.8
+ P for ∆ > 0      0.1933      0.5846          0.5426        ity of the feedback generated in each reflection
+ GPT3.5         76.6⇒75.8 79.8⇒80.5         69.1⇒69.3       case (Invalid, Valid, and Toxic). Based on the cor-
+ P for ∆ > 0      0.6613      0.4306          0.4420        rectness and consistency of these feedbacks, we
+ davinci-003    51.1⇒49.6    63⇒63.5        62.4⇒63.8
+ P for ∆ > 0      0.6988      0.4729          0.2009        categorize them into four cases (inconsistent, over-
+ Llama2-70B     52.6⇒49.3    66⇒63.0        63.2⇒62.2       confident, etc.). The detailed results are as follows:
+ P for ∆ > 0      0.8416      0.9521          0.7723           Fail to Correct the Wrong Initial Response.
+ Llama2-13B     28.3⇒29.8 42.2⇒42.5         62.5⇒61.5
+ P for ∆ > 0      0.3855      0.2508          0.4690        As shown in Table 2, we observe the number of
+ Llama2-7B      19.8⇒17.0 37.5⇒36.1         53.7⇒48.8       Toxic Reflection (✓⇒✗: 52) and Valid Reflection
+ P for ∆ > 0      0.9578      0.5770          0.7492        (✗⇒✓: 48) are nearly similar. This explains why
+                                                            there is no discernible difference in performance
+Table 1: We calculate the average accuracy of the ten ex-
+periments for pre- and post-reflection: Pre Acc. ⇒ Post     pre- and post-reflection. Besides, considering the
+Acc. We also report the accuracy change’s significance      scenario when the initial response is erroneous, we
+level (P-value) for ten trials, where ∆ = P ost − P re. A   observe the number of Invalid Reflection (✗⇒✗:
+larger P indicates a less significant improvement.          269) is significantly larger than Valid Reflection
+                                                            (✗⇒✓: 48), which indicates LLM fails to correct
+                                                            errors in the initial responses for most cases.
+instance, the performance of GPT-3.5 on GSM8K                  Often Provide Overconfident or Inconsistent
+and SVAMP exhibit marginal changes of -0.8% and             Feedback. We examine whether LLMs could gen-
++0.7% after reflection respectively, both statistically     erate feedback accurately and consistently. For
+insignificant. This negligible performance fluctu-          each sample, we instruct the LLM to evaluate its
+ation can be validated across multiple LLMs and             initial response multiple times and record multiple
+various benchmarks, far from expectations. Specif-          feedbacks. We manually assess the consistency and
+ically, most reasoning cases suffer from a slight           correctness of these feedbacks and then summarize
+decrease, while the translation task shows little           each sample into 4 cases: I. Accurately identifies
+impact. Additionally, smaller LLMs (e.g., Llama2-           errors: In multiple repeated evaluations, the LLM
+7B) demonstrate poorer reflection ability, occasion-        identifies errors and provides accurate and consis-
+ally even exhibiting negative impacts. These exper-         tent feedback. II. Stubbornly offers erroneous feed-
+iments collectively suggest that LLMs appear to be          back: The majority of evaluations provide incorrect
+incapable of self-correction through reflection.            feedback with specific errors. III. Can not output
+                                                            consistent feedback: Unable to assess consistently,
+2.2 Feedback Analysis
+                                                            as most feedback is different and quite random for
+To investigate the reasons behind the failure of re-        a same initial response. V. Overconfidence, no revi-
+flection, we further analyze the feedback generated         sion required: LLM is overconfident and believes
+during the self-evaluate process. We classify all           no revision is necessary. The detailed evaluation
+samples in GSM8K into four categories based on              criteria are provided in Appendix A.1.
+their correctness of the pre- and post-reflection: 1)          As shown in Table 2, for the majority of Invalid
+Invalid Reflection (✗⇒✗) means the results before           Reflection, their feedback is either overconfident
+and after reflection are both incorrect. 2) Valid           (53.5%) or highly inconsistent (45.3%), making it
+Reflection (✗⇒✓) means a wrong solution is re-              difficult to prompt reliable reflection. Similarly, in
+vised to correct through reflection. 3) Toxic Reflec-       Toxic Reflection scenarios, 65.4% of the evaluation
+tion (✓⇒✗) represents that an originally correct            processes are highly inconsistent, leading to many
+response is changed to incorrect after reflection.          correct answers being erroneously modified.
+4) Others counts the number of correct ⇒ correct.
+Automatic statistics for the reflection category.           2.3   From Self-Evaluate to Self-Contrast
+   Step 1: We categorize the reflection into the            The aforementioned experiments indicate that feed-
+above four categories. This process can be auto-            back generated by the self-evaluate process is either
+mated for mathematical benchmarks by comparing              highly random or excessively confident. This unsta-
+whether the answers are correct before and after            ble self-evaluate may severely impact the reflection
+reflection. For the translation task, we leverage           performance of LLMs.
+GPT-4 along with annotated answers to evaluate                 As a remedy, we propose a contrastive strategy
+                                                         3604
+                 #Invalid: 269              Reflection Behavior        3     Self-Contrast
+                 #Valid: 48              Invalid    Valid   Toxic
+                 #Toxic: 52               ✗⇒✗      ✗⇒✓      ✓⇒✗        Prior sections illustrate the challenges LLMs en-
+                 I. Accurately
+                 identifies errors
+                                         0.4%     43.3%     0%         counter in accurately evaluating previous solutions,
+
+
+ Feedback Type
+                 II. Stubbornly offers                                 often resulting in overconfident or inconsistent
+                                         0.8%      0%      31.1%
+                 erroneous feedback                                    feedback. Concurrently, we observe that leveraging
+                 III. Can not output
+                 consistent feedback
+                                         45.3%    47.5%    65.4%       the discrepancies between two different solutions
+                 IV. Overconfidence
+                                         53.5%    9.2%      3.5%
+                                                                       can inspire a more efficacious reflection, notably re-
+                 No revision required                                  ducing the uncertainty during the reflection. Build-
+                                                                       ing upon this insight, we propose a more diverse
+Table 2: We consider three reflection behaviors based on
+the correctness of the pre- and post-reflection: Invalid,
+                                                                       inter-perspective Self-Contrast, facilitating more
+Valid, and Toxic. Besides, we summarize each sample’s                  reliable self-reflection.
+feedback into four categories when self-evaluation.                       Self-Contrast consists of three procedures: Cre-
+                                                                       ate Diverse Perspectives, Contrast Inter-Perspective
+                                                                       Discrepancies, and Eliminate Discrepancies. In
+ Strategy               GSM8K SVAMP CommonMT
+ Self-Evaluate w/ top-1   -0.8    0.7    0.2                           Create Diverse Perspectives (§ 3.1), we encour-
+ P for ∆ > 0             0.6613 0.4306 0.4420                          age LLMs to autonomously create a variety of
+ Self-Evaluate w/ top-2   0.12    0.8   0.16                           prompts tailored to the user’s request, each of-
+ P for ∆ > 0             0.4192 0.3457 0.3745
+ Self-Contrast w/ top-2    0.9    2.5   0.45                           fering a unique perspective for problem-solving,
+ P for ∆ > 0             0.0933 0.0118 0.0457                          e.g., different thinking styles, diverse identities,
+                                                                       personalities, or preferences. These diverse per-
+Table 3: We report the accuracy change (∆) between                     spectives prompt the LLM to generate different re-
+post- and pre-reflection for 3 settings and t-test value
+                                                                       sponses. In the second stage (§ 3.2), LLM contrasts
+for ∆>0. Self-evaluate: Directly evaluate the initial
+response. Self-contrast: Contrast the difference between               the differences between each pair of responses.
+two responses and generate a checklist for reflection.                 Lastly (§ 3.3), to eliminate discrepancies, we ab-
+                                                                       stract these differences into a detailed checklist for
+                                                                       re-examining. This checklist guides the LLM to
+for reflection. Instead of directly evaluating a re-                   meticulously examine the causes of discrepancies,
+sponse, which can be challenging and inconsistent,                     including random errors or intrinsic biases, which
+we instruct the LLM to initially contrast the dif-                     result in inconsistent results among perspectives.
+ferences between various solutions, and identify                          As shown in Figure 2, LLM designs five different
+their discrepancies and the reasons behind them.                       prompts and their translation results based on the
+As shown in Figure 1 (bottom), we sample Top-2                         user’s request ("这个计划被枪毙") . From a literal
+responses from LLM and then prompt LLM to con-                         perspective, the phrase "被枪毙" is translated as
+trast their differences in detail, rethink the reasons                 "shot to death". This rigid translation fails to grasp
+that caused the discrepancies, and summarize the                       the metaphor embedded in the military term. Con-
+checklist for re-examining and resolving the dis-                      versely, from a liberal perspective, it is translated
+crepancy. As shown in Table 3, we compare three                        as "This plan was axed". After contrasting two
+scenarios: self-evaluate w/ top-1 response, self-                      different translations, LLMs believe they should
+evaluate w/ top-2 responses, and self-contrast w/                      scrutinize the source sentence for metaphors and
+top-2. Our new strategy achieves a modest improve-                     ensure the translation aligns with the conventions
+ment over standard reflection using self-evaluate.                     of English expression.
+Notably, it significantly enhances the significance
+levels (p-value: 0.6613 to 0.0933), suggesting it                      3.1    Create Diverse Perspectives
+can greatly mitigate the self-evaluation process’s                     Self-Curated Prompts First, it is imperative to de-
+uncertainty.                                                           fine the concept of "solving perspective". It refers
+   In this section, we validate the concept of con-                    to deliberate prompting with a unique role, person-
+trastive evaluation. For the next section, we ex-                      ality, thought style, etc., which prompts LLMs to
+pand this contrastive concept into full-version self-                  solve user requests from a specific perspective. Di-
+contrast, which involves creating multiple perspec-                    verse solving perspectives can endow LLMs with
+tives, and contrasting their differences, summariz-                    a broader range of thoughts for problem-solving,
+ing the checklist for deeper reflection.                               e.g., different angles and methodologies, thereby
+                                                                    3605
+           Creative Translation Task
+           User Request: 这个计划被枪毙了                                                                       Stage 1 Create Diverse Perspectives
+     Literal Perspective:                     Liberal Perspective:                       Military Perspective:               Cultural Perspective:
+ Prompt: You are a rigorous translator,    Prompt: You are a creative                 Prompt: The source sentence         Prompt: You are a native of China
+ skilled in literal translation and very   translator, your translation style is      involves some military              and have a great understanding of
+ attentive to details. When translating    flexible and liberal, and you like to      terminology. Please interpret   ... local idioms. You specialize in
+ you emphasize the exact expression        reinterpret the meaning of the             the underlying meaning from a       translating Chinese slang into
+ of the original text.                     original text using your language.         military perspective….              contextualized English expressions.
+ Result1: This plan was shot to death      Result2: This plan was axed                Result3: The plan was chopped      Result5: The plan was aborted
+
+                                                                                                          Stage 2 Contrast Discrepancies
+
+      Selecting From All Candidates:          Result1                              Result2                        Result5
+
+      Contrasting
+ Difference For Result1 and Result2:                    Difference For Result1 and Result5:                   Difference For Result2 and Result5:
+ The phrase "shot to death" could be misinterpreted     The phrase “shot to death” may carry a more           Both “axed” and “aborted” are common
+ as hyperbolic or excessively dramatic in English,      dramatic and violent connotation, potentially         idioms…. However, "axed" is often used in
+ possibly detracting from the seriousness of the        overemphasizing the original sentiment and            more dramatic or serious contexts, while
+ situation. "Axed" however, clearly communicates        seems to be more akin to a metaphor. "Aborted" is     “aborted ” can be perceived as more neutral
+ the end of the plan without the risk of being taken    a common English idiom for discarding plans,          or mundane. Besides, There is a slight
+ too literally or causing undue alarm.                  more closely aligning with English expressions.       difference in the meanings of "this" and "the”.
+
+                                                                                                       Stage 3 Eliminate Discrepancies
+   Checklist:
+ p Please verify whether the term "枪毙" in the original text is metaphorical and if the translation accurately conveys this meaning.
+ p Please evaluate which term is more idiomatic in this context, "axed" or "aborted" to express the forced termination of a plan.
+ p Please assess whether "this" or "the" is more appropriate to convey "这个" from the original text.
+   Reflection:
+ Resut1: This plan was shot to death                    This plan was aborted
+ Resut2: This plan was axed                             This plan was aborted
+ Resut5: The plan was aborted                           This plan was aborted
+
+          Math Reasoning Task
+          User Request: A family of 6 (2 adults and 4 kids) are to divide a watermelon such that each adult gets a slice that is twice as big as that of
+          each kid. What percentage of the watermelon does each adult get?
+ Top-down Perspective:                               Bottom-up Perspective: :                                    Analogical Perspective :
+ Please solve the problem with a top-down            Using a bottom-up approach, you should focus on the Think of this problem like dividing money in
+ approach. First, you need to solve for what         relations between each number and then construct the an estate. Suppose you have $100 to
+ proportion of all adults share in total. Then you entire calculation. For this problem, assume that each distribute.…. It can help you intuitively
+ should calculate what proportion of each adult's child gets a share of x. Then, …as 2x ….                       understand how to divide the the watermelon.
+ Result1: The answer is 25%. Adults and children each get half of the watermelon (50%). Then two adults get a total of 50% and one adult gets 25%.
+ Result2: The answer is 12.5%. Let’s denote the size of each kid gets as x.…, watermelon is divided into 4x (kids’ portion)+4x (adults) =100. x=12.5%.
+ Difference: Node1 calculates the adult’s share is 25%. Node2 calculates each kid’s share is 12.5%, which actually represents kid's share.
+ Checklist: Please verify the intention in the question: is it to determine the share for each adult or for the children?
+            Please check whether the figure 12.5% obtained in Result 2 represents the share for adults or for children.
+
+Figure 2: Self-Contrast designs diverse prompts for different solving perspectives and generates corresponding
+results. Then we filter out similar results and select those that are significantly different. To inspire reflection, we
+contrast the differences between selected results and prompt LLM to summarize a checklist. This checklist can be
+used to re-examine and eliminate discrepancies. Lastly, LLM revises each response to achieve a consistent result.
+
+
+mitigating biases introduced by singular prompts.                                   3.2      Contrast Inter-Perspective Discrepancies
+                                                                                    The LLM generates diverse responses based on self-
+                                                                                    curated prompts, each representing a specific per-
+   To achieve this, we adopt a self-curated prompt                                  spective. Considering that some responses may be
+strategy, where the LLM itself adaptively generates                                 highly similar or even identical, we first filter these
+multiple different prompts for each request, each                                   similar responses. Then, we select the responses
+signifying a tailored perspective, then samples cor-                                with significant discrepancies for comparison.
+responding responses based on these prompts. It                                        Selecting To filter out similar responses, we em-
+is noteworthy that the number of perspectives to                                    ploy the K-Medoids clustering algorithm based
+be created, and the design of each perspective are                                  on their semantic similarity. We categorize all re-
+entirely determined by LLMs, endowing them with                                     sponses into k clusters, each encompassing a set
+more flexibility to address complex tasks. The de-                                  of similar results. Then we select the centroids of
+tails of the prompt are provided in Appendix D.1.                                   each cluster as representative responses and discard
+In Figure 3, we present statistics on the number of                                 the remaining ones. It ensures the selected results
+prompts generated in self-curated prompt process.                                   exhibit substantial differences from each other.
+                                                                           3606
+   Contrasting After selecting k responses from all     4       Experiments
+candidates, we feed these responses concurrently
+into LLM and then instruct LLM to autonomously          4.1      Settings
+contrast the differences for each pair of responses     Benchmarks We evaluate our method within two
+in a single pass. When contrasting, LLMs need           testbeds: mathematical reasoning and translation
+to explicitly answer these questions: Whether the       using GSM8K, SVAMP, and CommonMT bench-
+two responses are different, Where the differences      marks. Please see Appendix B.1 for details.
+lie, and Which factors contributed to these incon-         Evaluation Metrics For mathematical reason-
+sistent results. These questions guide the LLM to       ing, we evaluate the precision of the final answer
+methodically explore the underlying reasons be-         after their step-by-step reasoning, similar to the
+hind discrepancies, identifying potential errors and    previous methodologies. For the translation task,
+often overlooked details. As shown in Figure 2, for     we employ BLEURT1 score as automatic metrics.
+translation tasks, the LLM compares results 1, 2,          LLM Models and Prompts We conduct experi-
+and 5, and identifies that their primary differences    ments using the GPT-3.5-Turbo-0613 and GPT-4-
+lie in the use of different verbs to express "被枪毙".     0613, alongside the Llama2-Chat model with three
+The detailed prompts are shown in Appendix D.2.         parameter scales (7B, 13B, and 70B). To make a
+                                                        fair comparison, we uniformly set the temperature
+3.3 Eliminate Discrepancies                             to 0.2 for all experiments. For standard prompts
+                                                        and self-reflection baseline, we evaluate them 10
+We abstract insightful checklists from these pair-
+                                                        times using different prompts and average their re-
+wise contrastive differences and then use them to
+                                                        sults under zero-shot scenes. Prompts and other
+resolve the inconsistencies across various perspec-
+                                                        details can be found in Appendices B.2, C and D.
+tives for a consensus.
+   Summarizing Checklist To ascertain the truth         4.2      Baselines
+and resolve discrepancies, the LLM is encouraged
+to summarize a detailed checklist for re-examining      We compare Self-Contrast with the following base-
+the user’s request and candidate responses. This        lines: Standard CoT Prompt (Kojima et al., 2022).
+checklist contains multiple specialized checking        Self-Reflection (Shinn et al., 2023). Multi-Agent
+instructions, such as verifying alignment with the      Debate (Du et al., 2023; Liang et al., 2023; He
+user’s intent, identifying contradictions in LLM’s      et al., 2020). ExpertPrompt (Xu et al., 2023a). Hint-
+responses, checking for miscalculations, etc. It ex-    Prompt (Zheng et al., 2023a). Math-Prompt (Imani
+plicitly points out some potential issues, e.g., pre-   et al., 2023). Moreover, for various task scenarios,
+viously overlooked details, logical pitfalls, or un-    we consider three forms of Self-Consistency (Wang
+reasonable steps, and compels LLM to re-examine         et al., 2023d; Chen et al., 2023c): SC-Vote: The
+them. Compared to conventional reflection instruc-      original Self-Consistency version, which samples
+tion, e.g., Please check your previous response, our    K decoding results, followed by a voting process.
+checklist is more precise and informative.              SC-Select: Instead of voting, LLM also samples
+                                                        Top-K responses but then selects the most appro-
+   Reflection For Consensus Lastly, we employ
+                                                        priate answer from K candidates by itself. SC-
+the checklist and identified discrepancies to prompt
+                                                        Reflect: After sampling Top-K responses, LLM
+reflection. LLM can revise the inconsistent per-
+                                                        reflects on these candidates and regenerates a new
+spectives and output k consistent responses.
+                                                        response as the final answer.
+   Concretely, we use a JSON format for the
+revision prompt: Request: {{request}}, Candi-           4.3      Main Results
+date: {{result1}, {result2}, {result3}..}, Discrep-
+                                                        In Tables 4 and 5, we report the accuracy and the
+ancy: {{difference1-2}, {difference1-3}..}, Check-
+                                                        average number of API/LLM calls (#Call), which
+list: {{instruction1},{instruction2},..}. To elimi-
+                                                        serves as a proxy for the computational cost.
+nate discrepancies, we instruct LLM to revise the
+inconsistent steps of each candidate and output k          Consistent improvement over vanilla reflec-
+revised responses with consistent answers. When         tion. Compared to vanilla reflection, Self-Contrast
+revising, LLM should require careful and compre-        brings significant and stable improvement. For
+hensive consideration, as any minor modifications           1
+                                                            https://github.com/google-research/bleurt,
+may lead to new discrepancies with others.              BLEURT-20
+
+                                                    3607
+                                            GSM8K                                               SVAMP                           #Call
+                                                                                                                                Avg.
+                    GPT3.5 GPT4             L-7B     L-13B      L-70B       GPT3.5 GPT4        L-7b      L-13B      L-70B
+ CoT Prompt         76.6      93.9      19.8      28.3      52.6            79.8      93.0      37.5      40.2      66           1
+ ExpertPrompt       77.3 ↑0.7 93.8 ↓0.1 21.6 ↑1.8 30.5 ↑2.2 53.1 ↑0.5       80.2 ↑0.4 93.3 ↑0.3 37.7 ↑0.2 41.9 ↑1.7 65.6 ↑0.4    2
+ Self-Reflection    75.8 ↓0.8 95.1 ↑1.2 17.0 ↓2.8 31.8 ↑3.5 49.3 ↓3.3       80.5 ↑0.7 91.5 ↓1.5 36.1 ↓1.4 42.5 ↑2.3 63.0 ↓3      3
+ Self-Consistency
+ – SC-Vote          83.5 ↑6.9 94.2 ↑0.3 21.4 ↑1.6 37.6 ↑9.3 61.1 ↑8.5       84.6 ↑4.8 92.5 ↓0.5 45.2 ↑7.7 53.7 ↑13.5 72 ↑6        8
+ – SC-Select        76.3 ↓0.3 93.1 ↓0.8 16.2 ↓3.6 28.6 ↑0.3 54.6 ↑2.0       81.2 ↑1.4 93.2 ↑0.2 35.1 ↓2.4 38.9 ↓1.3 66.5 ↑0.5     9
+ – SC-Reflect       75.8 ↓0.8 93.3 ↓0.6 19.2 ↓0.6 29.1 ↓0.8 53.7 ↑1.1       81.1 ↑1.3 93.4 ↑0.4 32.5 ↓5 34.2 ↓6 67.5 ↑1.5         9
+ Multi-Agent        83.8 ↑7.2 93.5 ↓0.4 23.8 ↑4 34.9 ↑6.6 59.6 ↑7.0         84.1 ↑4.3 93.2 ↑0.2 42.5 ↑5 49.2 ↑9.0 70.1 ↑4.1       9
+ Hint-Prompt        78.8 ↑2.2 93.7 ↓0.2 18.3 ↓1.5 27.8 ↓0.5 59.6 ↑7         79.3 ↓0.5 93.1 ↑0.1 38.8 ↑1.3 40.6 ↑0.4 67.6 ↑1.6    6.7
+ Math-Prompt        79.6 ↑3.0 93.9 ↓0.0 19.5 ↓0.3 30.6 ↑2.3 59.8 ↑7.2       81.2 ↑1.4 93.6 ↑0.6 37.2 ↓0.3 41.5 ↑1.3 68.7 ↑0.5    4.5
+ Self-Contrast      84.4 ↑7.8 95.4 ↑1.5 20.5 ↑0.7 42.3 ↑9.2 64.2 ↑11.6      89.0 ↑9.2 94.0 ↑1 44.5 ↑7 54.6 ↑14.4 75.3 ↑9.3       7.8
+
+Table 4: The performance on mathematical reasoning. Self-Consistency (SC-Vote, -Select, -Reflect) samples eight
+responses and then performs voting, selecting, or reflection. For the Multi-Agent, we configure three agents to
+engage in a three-round debate. ↑ and ↓ means accuracy changes over the CoT prompt. L- denotes Llama2-chat.
+
+
+                    GPT3.5     L-7B      L-13B     L-70B                wise, Self-Contrast applies to various task types,
+ CoT Prompt           69.1      53.7      62.5      63.2                demonstrating high versatility. In contrast, Self-
+ ExpertPrompt       69.6 ↑0.5 53.8 ↑0.1 62.9 ↑0.4 63.4 ↑0.2
+ Self-Reflection    69.3 ↑0.2 48.8 ↓4.9 61.5 ↓1.0 62.2 ↓1.0             Consistency can not handle non-numerical tasks
+ Self-Consistency                                                       directly, e.g., translation, due to its voting mech-
+ – SC-Vote             –           –             –          –           anism (Table 5). Its variant strategies, SC-Select
+ – SC-Select        68.6 ↓0.5   52.1 ↓1.6    62.8 ↑0.3   63.0 ↓0.2
+ – SC-Reflect       69.0 ↓0.1   54.0 ↑0.3    62.2 ↓0.3   63.2 ↑0        and SC-Reflect, lag significantly behind ours.
+ Multi-Agent        69.9 ↑0.8   51.9 ↓1.8    63.1 ↑0.6   65.8 ↑2.6         Fewer manual efforts and more reasonable
+ Hint-Prompt        69.6 ↑0.5   54.2 ↑0.5     62.5 ↑0    64.6 ↑1.4      call overheads. Compared to the multi-agent de-
+ Self-Contrast      70.7 ↑1.6   52.1 ↓1.6    62.8 ↑0.3   66.7 ↑3.5
+                                                                        bate, Self-Contrast gains more significant improve-
+  Table 5: The performance on Creative Translation.                     ments with less call overhead (>10% reduction).
+                                                                        From a unified perspective, it can be viewed as
+                                                                        a multi-agent contrastive mechanism. Instead of
+mathematical reasoning, we achieve an average im-                       a free-form debate among multiple agents, our
+provement of +7.2%. In contrast, the original self-                     strategy fosters a more explicit and purposeful de-
+reflection shows no clear improvement (-0.51%). A                       bate by contrasting the differences between agents
+similar phenomenon is observed in creative trans-                       and summarizing the reasons for their disagree-
+lation, where Self-Contrast achieves a +0.95 im-                        ments. Moreover, Self-Contrast is flexible, dynam-
+provement, whereas self-reflection results in a de-                     ically designing multiple perspectives tailored to
+crease of -1.6. Besides, compared to multi-agent                        user requests, without the need for manually pre-
+and ensemble baselines, our improvement is also                         configuring agent roles and quantities.
+pronounced and consistent.
+                                                                        5   The Effect of the Different Components
+   Better generality across different LLMs and
+tasks. From commercial LLMs (e.g., GPT4) to                             The above results show that Self-Contrast inspires
+open-source models (Llama-2), and from reason-                          reflection more accurately and stably than direct
+ing to generative tasks, our strategy exhibits robust                   evaluation. It encompasses a self-curated prompt
+generalizability. Concretely, from the perspective                      process, which fosters diverse solving perspectives
+of LLM, Self-Contrast achieves the best results on                      to mitigate self-evaluation biases. Besides, it in-
+most models except Llama-2-7B. For instance, for                        volves a checklist generation process to facilitate
+GPT-3.5, the improvements are 7.8% on GSM8K                             re-examination. We analyze their effect as follows:
+and 9.2% on SVAMP, while for Llama-2-70B, the                              Self-curated Prompt Vs. Sampling Multiple
+improvements are 11.6% and 9.3% respectively. As                        Responses. Instead of self-curated prompt process,
+for Llama-2-7B, our performance is slightly lower                       we directly sample multiple responses from LLMs
+than Self-consistency and Multi-Agent. This might                       for subsequent contrast and reflection. Figure A2
+be due to the weaker instruction-following capabil-                     shows that the final accuracy improves as the num-
+ities of the Llama2-7B, making it challenging to                        ber of sampled responses increases, yet it is still
+contrast two inconsistent solutions. Besides task-                      lower than Self-Contrast with self-curated prompts
+                                                                     3608
+                               Invalid ✗⇒✗   Toxic ✓⇒✗          Strategy                                       Acc.(%)
+    LLMs     Strategy
+                               Cases ↓       Cases ↓            Self-Evaluate - An Incorrect Solution           70.1
+             Self-Reflection   269           52                 Self-Contrast
+    GPT3.5   SC-Reflect        245           73                 - A Correct and an Incorrect Solutions          83.6
+             Self-Contrast     186 ↓30.8%    11 ↓78.9%          - Two Incorrect Solutions with Similar Error    70.9
+             Self-Reflection   528           140                - Two Incorrect Solutions with Different Error  75.5
+    L-70B    SC-Reflect        468           127
+             Self-Contrast     401 ↓24.8%    71 ↓49.2%      Table 7: We conduct comparisons across four cases on a
+                                                            subset of GSM8K. LLM self-evaluates or self-contrasts
+     Table 6: Self-Contrast is evaluated on two cases.      different initial responses and reflects on their results.
+
+
+process, where full strategy achieves 84.4% com-
+pared to the maximum of 81.8% when sampling
+5 responses. We find that the top-n responses are
+sometimes strikingly similar, diminishing the effec-
+tiveness of the contrastive strategy.
+   Reflection Without Checklist. We eliminate
+the checklist generation process, i.e., directly in-
+struct the LLM to reflect on the differences among
+perspectives. In Table A1, it brings a significant          Figure 3: Left: The distribution of the prompt number
+impact on mathematical reasoning (-3.5%), but a             generated when Self-curated. Right: We visualize the
+slight impact on translation (-0.1%), since trans-          top-20 keywords and frequencies in the prompt name.
+lation tasks tend to focus more on local features.
+Even without a checklist, the LLM also can reflect          each manually annotated with a correct solution,
+based on the comparisons of lexical, syntactic.             two incorrect solutions with similar errors (e.g.,
+                                                            Error1), and an incorrect solution with a differ-
+6     Analysis
+                                                            ent error (Error2). We design four experiments:
+6.1 Reducing Invalid and Toxic Reflections                  1. Self-evaluate one incorrect solution followed
+As mentioned in Table 2, due to overly confident or         by reflection. 2. Self-Contrast a correct and an
+highly random in the self-evaluate process, vanilla         incorrect solution. 3. Self-Contrast two similar in-
+self-reflection contains a large amount of invalid          correct solutions. 4. Self-Contrast two dissimilar
+(✗→ ✗: 20.3%) or toxic reflections (✓→ ✗: 4%).              incorrect solutions. Table 7 shows that contrasting
+Therefore we investigate how Self-Contrast im-              a correct and an erroneous solution, or contrasting
+proves these two scenarios on GSM8K. As shown               two incorrect solutions with different errors both
+in Table 6, we observe that with Self-Contrast, the         yield significant enhancements of 13.5% and 5.4%.
+occurrences of invalid and toxic cases significantly        In contrast, comparing two solutions with similar
+reduced. In particular toxic cases decreased by             errors does not result in perceptible changes.
+78.9% and invalid cases by 30.8% using GPT3.5.                 This result aptly explains that the improvement
+In contrast, the SC-Reflect does not significantly          of Self-Contrast stems from contrasting the dif-
+mitigate either of these scenarios.                         ferences between dissimilar solutions. Therefore,
+   The results indicate that through exploration,           even if candidate solutions are both incorrect, as
+comparison, and summarization, the uncertainty in           long as their errors are different, Self-Contrast has
+the reflection process is greatly reduced, thereby en-      the potential to eliminate errors. In other words,
+hancing the error-correction capability of the LLM.         Self-Contrast can mitigate the random errors aris-
+                                                            ing from the inherent uncertainty of the LLM.
+6.2 Contrasting Incorrect Solutions is also
+    Instructive                                             6.3     Diverse Solving Perspectives Maximize
+Self-Contrast inspires reflection by contrasting the                Contrast Effect
+differences. An intuitive explanation is that the           Prior analysis indicates that only contrasting dis-
+errors in different responses are dissimilar or ran-        similar solutions can foster reflection. Reviewing
+domized, so they can be used to compare with each           our strategy, we employ a self-curated prompt pro-
+other and eliminate uncertainties or biases. To ver-        cess to create multiple solving perspectives (§ 3.1),
+ify this, we sample 200 questions from GSM8K,               thereby providing diverse solutions for subsequent
+                                                         3609
+comparison. Here, we analyze the distribution of        ings reveal a notable challenge: in the absence of
+perspectives generated by this process in Figure 3.     external feedback, LLMs struggle to correct errors
+For most requests, the LLM generates four prompts.      in previous responses on their own. After analyzing
+We also analyze the frequency of keywords within        their self-evaluate process, we discover that LLMs
+these perspective’s names. For mathematical rea-        are unable to accurately evaluate prior solutions and
+soning, the LLM indeed adaptively designs numer-        often provide overconfident or inconsistent feed-
+ous unique solving perspectives, then generating        back, which impedes reflection. To mitigate this,
+a variety of results. These dissimilar results can      we introduce Self-Contrast, a contrastive strategy
+maximize the efficacy of our contrastive strategy.      that inspires reflection by contrasting the differ-
+                                                        ences between multiple perspectives, providing an
+7   Discussions                                         informative checklist for reflection. Our experi-
+                                                        ments show that Self-Contrast performs well across
+Self-contrast switches the critique objective
+                                                        a variety of scenarios and with different LLMs.
+into a contrastive task. We transform the self-
+evaluation into a process of comparing differences,     Limitations
+explicitly altering the attention distribution of the
+LLM. The LLM is required only to identify the           For some smaller-scale LLMs, their instruction-
+differences between two solutions, without judging      following capability is weaker, hindering their po-
+right or wrong. This process is less influenced by      tential to conduct precise comparisons and reflec-
+the biases inherent in LLMs, as the objective is        tion. In such scenarios, the effectiveness of Self-
+contrasting rather than evaluation. Besides, in Ta-     Contrast might be slightly inferior to ensemble
+ble 7, LLMs are instructed to contrast two incorrect    strategies. For instance, the performance of Self-
+solutions with different errors which also improves     Contrast with Llama2-7B is marginally lower than
+reflection results.                                     self-consistency. A viable approach is to utilize an
+   The results in Section 2.3 also precisely verify     external tool to compare differences between mul-
+this conjecture. By simply transforming from di-        tiple perspectives, rather than LLM itself. For in-
+rect evaluation to contrastive evaluation, we en-       stance, we explore utilizing sequences comparison
+hance the effectiveness of reflection (75.8 to 77.5     library difflib2 to contrast two generated equations
+on GSM8K), with more significant results (0.66 to       (e.g., differ.compare(a+b÷c, a-b÷c)) or some rule-
+0.09). In Tables 4 and 5, our self-contrast approach    based strategy to compare two responses. It can
+achieved more significant improvements.                 provide us with more accurate and flexible compar-
+   Contrasting results can help LLMs notice             isons at different granularity (e.g., character level).
+overlooked details and biases. After contrasting        We leave this as future work.
+the differences between the two solutions, we sum-
+marize these differences into a checklist, thereby      Acknowledgments
+explicitly prompting the LLM to focus on the log-       This work is supported by the National Natural Sci-
+ical pitfalls and other issues underlying these dif-    ence Foundation of China (No. 62376245), the Key
+ferences. This allows LLMs to engage in reflection      Research and Development Program of Zhejiang
+more clearly and purposefully.                          Province, China (No. 2024C01034), the Funda-
+   As shown in Figure 2, LLM generates differ-          mental Research Funds for the Central Universi-
+ent translations for the user’s request: "This plan     ties, and National Key Research and Development
+was shot to death", and "This plan was axed". The       Project of China (No. 2018AAA0101900).
+former is a rigid translation that fails to grasp the
+metaphor embedded in the military term. After
+contrasting two different translations, LLMs be-        References
+lieve they should scrutinize the source sentence for    Maciej Besta, Nils Blach, Ales Kubicek, Robert Ger-
+metaphors and ensure the translation aligns with         stenberger, Lukas Gianinazzi, Joanna Gajda, Tomasz
+the conventions of English expression.                   Lehmann, Michal Podstawski, Hubert Niewiadomski,
+                                                         Piotr Nyczyk, et al. 2023. Graph of thoughts: Solv-
+                                                         ing elaborate problems with large language models.
+8   Conclusion                                           arXiv preprint arXiv:2308.09687.
+We conduct a comprehensive investigation into the          2
+                                                            https://docs.python.org/3/library/difflib.
+inherent reflection capabilities of LLMs. Our find-     html
+
+                                                    3610
+Tom B. Brown, Benjamin Mann, Nick Ryder, Melanie          A. Deshpande, Vishvak S. Murahari, Tanmay Rajpuro-
+  Subbiah, Jared Kaplan, Prafulla Dhariwal, Arvind          hit, A. Kalyan, and Karthik Narasimhan. 2023. Toxi-
+  Neelakantan, Pranav Shyam, Girish Sastry, Amanda          city in chatgpt: Analyzing persona-assigned language
+  Askell, Sandhini Agarwal, Ariel Herbert-Voss,             models. ArXiv, abs/2304.05335.
+  Gretchen Krueger, Tom Henighan, Rewon Child,
+  Aditya Ramesh, Daniel M. Ziegler, Jeffrey Wu,           Yihong Dong, Xue Jiang, Zhi Jin, and Ge Li. 2023. Self-
+  Clemens Winter, Christopher Hesse, Mark Chen, Eric        collaboration code generation via chatgpt. ArXiv,
+  Sigler, Mateusz Litwin, Scott Gray, Benjamin Chess,       abs/2304.07590.
+  Jack Clark, Christopher Berner, Sam McCandlish,
+  Alec Radford, Ilya Sutskever, and Dario Amodei.         Yilun Du, Shuang Li, Antonio Torralba, Joshua B.
+  2020. Language Models are Few-Shot Learners. In           Tenenbaum, and Igor Mordatch. 2023. Improving
+  NeurIPS.                                                  factuality and reasoning in language models through
+                                                            multiagent debate. ArXiv, abs/2305.14325.
+Chi-Min Chan, Weize Chen, Yusheng Su, Jianxuan            Sergey Edunov, Myle Ott, Michael Auli, and David
+  Yu, Wei Xue, Shan Zhang, Jie Fu, and Zhiyuan Liu.         Grangier. 2018. Understanding back-translation at
+  2023. Chateval: Towards better llm-based evaluators       scale. arXiv preprint arXiv:1808.09381.
+  through multi-agent debate. ArXiv, abs/2308.07201.
+                                                          Simon Frieder, Luca Pinchetti, Ryan-Rhys Grif-
+Guangyao Chen, Siwei Dong, Yu Shu, Ge Zhang,                fiths, Tommaso Salvatori, Thomas Lukasiewicz,
+  Jaward Sesay, Börje F Karlsson, Jie Fu, and Yemin         Philipp Christian Petersen, Alexis Chevalier, and J J
+  Shi. 2023a. Autoagents: A framework for automatic         Berner. 2023. Mathematical capabilities of chatgpt.
+  agent generation. arXiv preprint arXiv:2309.17288.        ArXiv, abs/2301.13867.
+Weize Chen, Yusheng Su, Jingwei Zuo, Cheng Yang,          Yao Fu, Hao-Chun Peng, Tushar Khot, and Mirella La-
+ Chenfei Yuan, Cheng Qian, Chi-Min Chan, Yujia Qin,         pata. 2023. Improving language model negotiation
+ Ya-Ting Lu, Ruobing Xie, Zhiyuan Liu, Maosong              with self-play and in-context learning from ai feed-
+ Sun, and Jie Zhou. 2023b. Agentverse: Facilitating         back. ArXiv, abs/2305.10142.
+ multi-agent collaboration and exploring emergent
+ behaviors in agents. ArXiv, abs/2308.10848.              Yao Fu, Hao-Chun Peng, Ashish Sabharwal, Peter Clark,
+                                                            and Tushar Khot. 2022. Complexity-based prompt-
+Wenhu Chen, Xueguang Ma, Xinyi Wang, and                    ing for multi-step reasoning. ArXiv, abs/2210.00720.
+ William W. Cohen. 2022. Program of thoughts
+ prompting: Disentangling computation from rea-           Deep Ganguli, Amanda Askell, Nicholas Schiefer,
+ soning for numerical reasoning tasks.   ArXiv,             Thomas Liao, Kamil.e Lukovsiut.e, Anna Chen,
+ abs/2211.12588.                                            Anna Goldie, Azalia Mirhoseini, Catherine Olsson,
+                                                            Danny Hernandez, Dawn Drain, Dustin Li, Eli Tran-
+Xinyun Chen, Renat Aksitov, Uri Alon, Jie Ren, Ke-          Johnson, Ethan Perez, John Kernion, Jamie Kerr,
+  fan Xiao, Pengcheng Yin, Sushant Prakash, Charles         Jared Mueller, Joshua D. Landau, Kamal Ndousse,
+  Sutton, Xuezhi Wang, and Denny Zhou. 2023c. Uni-          Karina Nguyen, Liane Lovitt, Michael Sellitto, Nel-
+  versal self-consistency for large language model gen-     son Elhage, Noem’i Mercado, Nova DasSarma,
+  eration.                                                  Robert Lasenby, Robin Larson, Sam Ringer, Sandi-
+                                                            pan Kundu, Saurav Kadavath, Scott Johnston, Shauna
+Xinyun Chen, Maxwell Lin, Nathanael Schärli, and            Kravec, Sheer El Showk, Tamera Lanham, Timo-
+  Denny Zhou. 2023d. Teaching large language mod-           thy Telleen-Lawton, T. J. Henighan, Tristan Hume,
+  els to self-debug. ArXiv, abs/2304.05128.                 Yuntao Bai, Zac Hatfield-Dodds, Benjamin Mann,
+                                                            Dario Amodei, Nicholas Joseph, Sam McCandlish,
+Aakanksha Chowdhery, Sharan Narang, Jacob Devlin,           Tom B. Brown, Christopher Olah, Jack Clark, Sam
+  Maarten Bosma, Gaurav Mishra, Adam Roberts,               Bowman, and Jared Kaplan. 2023. The capacity
+  Paul Barham, Hyung Won Chung, Charles Sut-                for moral self-correction in large language models.
+  ton, Sebastian Gehrmann, and others. 2022. Palm:          ArXiv, abs/2302.07459.
+  Scaling language modeling with pathways. ArXiv,         Luyu Gao, Aman Madaan, Shuyan Zhou, Uri Alon,
+  abs/2204.02311.                                           Pengfei Liu, Yiming Yang, Jamie Callan, and Gra-
+                                                            ham Neubig. 2022. Pal: Program-aided Language
+Karl Cobbe, Vineet Kosaraju, Mohammad Bavarian,             Models. ArXiv, abs/2211.10435.
+  Mark Chen, Heewoo Jun, Lukasz Kaiser, Matthias
+  Plappert, Jerry Tworek, Jacob Hilton, Reiichiro         Zhibin Gou, Zhihong Shao, Yeyun Gong, Yelong Shen,
+  Nakano, Christopher Hesse, and John Schulman.             Yujiu Yang, Minlie Huang, Nan Duan, and Weizhu
+  2021. Training verifiers to solve math word prob-         Chen. 2023. Tora: A tool-integrated reasoning
+  lems. ArXiv, abs/2110.14168.                              agent for mathematical problem solving. ArXiv,
+                                                            abs/2309.17452.
+Roi Cohen, May Hamri, Mor Geva, and Amir Glober-
+  son. 2023. Lm vs lm: Detecting factual errors via       Jie He, Tao Wang, Deyi Xiong, and Qun Liu. 2020.
+  cross examination. In Conference on Empirical Meth-        The box is in the pen: Evaluating commonsense rea-
+  ods in Natural Language Processing.                        soning in neural machine translation. In Findings
+                                                      3611
+  of the Association for Computational Linguistics:       Takeshi Kojima, Shixiang (Shane) Gu, Machel Reid,
+  EMNLP 2020, pages 3662–3672, Online. Association          Yutaka Matsuo, and Yusuke Iwasawa. 2022. Large
+  for Computational Linguistics.                            Language Models are Zero-Shot Reasoners. In Con-
+                                                            ference on Neural Information Processing Systems
+Dan Hendrycks, Collin Burns, Saurav Kadavath, Akul          (NeurIPS).
+  Arora, Steven Basart, Eric Tang, Dawn Xiaodong
+  Song, and Jacob Steinhardt. 2021. Measuring math-       Guohao Li, Hasan Abed Al Kader Hammoud, Hani
+  ematical problem solving with the math dataset.           Itani, Dmitrii Khizbullin, and Bernard Ghanem. 2023.
+  ArXiv, abs/2103.03874.                                    Camel: Communicative agents for "mind" explo-
+                                                            ration of large language model society. In Thirty-
+Sirui Hong, Xiawu Zheng, Jonathan P. Chen, Yuheng           seventh Conference on Neural Information Process-
+   Cheng, Ceyao Zhang, Zili Wang, Steven Ka Shing           ing Systems.
+   Yau, Zi Hen Lin, Liyang Zhou, Chenyu Ran,
+   Lingfeng Xiao, and Chenglin Wu. 2023. Metagpt:         Tian Liang, Zhiwei He, Wenxiang Jiao, Xing Wang,
+   Meta programming for multi-agent collaborative           Yan Wang, Rui Wang, Yujiu Yang, Zhaopeng Tu, and
+   framework. ArXiv, abs/2308.00352.                        Shuming Shi. 2023. Encouraging divergent thinking
+                                                            in large language models through multi-agent debate.
+Baizhou Huang, Shuai Lu, Weizhu Chen, Xiaojun Wan,          ArXiv, abs/2305.19118.
+  and Nan Duan. 2023a. Enhancing large language
+  models in coding through multi-perspective self-        Hunter Lightman, Vineet Kosaraju, Yura Burda, Har-
+  consistency. ArXiv, abs/2309.17272.                       rison Edwards, Bowen Baker, Teddy Lee, Jan
+                                                            Leike, John Schulman, Ilya Sutskever, and Karl
+Jiaxin Huang, Shixiang Shane Gu, Le Hou, Yuexin Wu,         Cobbe. 2023. Let’s verify step by step. ArXiv,
+   Xuezhi Wang, Hongkun Yu, and Jiawei Han. 2022.           abs/2305.20050.
+   Large language models can self-improve. ArXiv,
+   abs/2210.11610.                                        Zijun Liu, Yanzhe Zhang, Peng Li, Yang Liu, and Diyi
+                                                             Yang. 2023. Dynamic llm-agent network: An llm-
+                                                             agent collaboration framework with agent team opti-
+Jie Huang, Xinyun Chen, Swaroop Mishra,
+                                                             mization. ArXiv, abs/2310.02170.
+   Huaixiu Steven Zheng, Adams Wei Yu, Xiny-
+   ing Song, and Denny Zhou. 2023b. Large language
+                                                          Haipeng Luo, Qingfeng Sun, Can Xu, Pu Zhao, Jian-
+   models cannot self-correct reasoning yet.
+                                                            Guang Lou, Chongyang Tao, Xiubo Geng, Qingwei
+                                                            Lin, Shifeng Chen, and Dongmei Zhang. 2023. Wiz-
+Shima Imani, Liang Du, and H. Shrivastava. 2023.            ardmath: Empowering mathematical reasoning for
+  Mathprompter: Mathematical reasoning using large          large language models via reinforced evol-instruct.
+  language models. ArXiv, abs/2303.05398.                   ArXiv, abs/2308.09583.
+Siddhartha Jain, Xiaofei Ma, Anoop Deoras, and Bing       Aman Madaan, Niket Tandon, Prakhar Gupta, Skyler
+  Xiang. 2023. Self-consistency for open-ended gener-      Hallinan, Luyu Gao, Sarah Wiegreffe, Uri Alon,
+   ations. ArXiv, abs/2307.06857.                          Nouha Dziri, Shrimai Prabhumoye, Yiming Yang,
+                                                           Sean Welleck, Bodhisattwa Prasad Majumder,
+Zhanming Jie, Jierui Li, and Wei Lu. 2022. Learning        Shashank Gupta, Amir Yazdanbakhsh, and Peter
+  to reason deductively: Math word problem solving         Clark. 2023. Self-refine: Iterative refinement with
+  as complex relation extraction. In Proceedings of the    self-feedback. ArXiv, abs/2303.17651.
+  60th Annual Meeting of the Association for Compu-
+  tational Linguistics (Volume 1: Long Papers).           Niels Mündler, Jingxuan He, Slobodan Jenko, and Mar-
+                                                            tin T. Vechev. 2023. Self-contradictory hallucinations
+Saurav Kadavath, Tom Conerly, Amanda Askell, T. J.          of large language models: Evaluation, detection and
+  Henighan, Dawn Drain, Ethan Perez, Nicholas               mitigation. ArXiv, abs/2305.15852.
+  Schiefer, Zachary Dodds, Nova DasSarma, Eli Tran-
+  Johnson, Scott Johnston, Sheer El-Showk, Andy           Deepak Nathani, David Wang, Liangming Pan, and
+  Jones, Nelson Elhage, Tristan Hume, Anna Chen,            William Yang Wang. 2023. Maf: Multi-aspect feed-
+  Yuntao Bai, Sam Bowman, Stanislav Fort, Deep              back for improving reasoning in large language mod-
+  Ganguli, Danny Hernandez, Josh Jacobson, John             els. ArXiv, abs/2310.12426.
+  Kernion, Shauna Kravec, Liane Lovitt, Kamal
+  Ndousse, Catherine Olsson, Sam Ringer, Dario            OpenAI. 2022. Chatgpt.
+  Amodei, Tom B. Brown, Jack Clark, Nicholas Joseph,
+  Benjamin Mann, Sam McCandlish, Christopher Olah,        OpenAI. 2023. Gpt-4 technical report.
+  and Jared Kaplan. 2022. Language models (mostly)
+  know what they know. ArXiv, abs/2207.05221.             Liangming Pan, Michael Stephen Saxon, Wenda Xu,
+                                                            Deepak Nathani, Xinyi Wang, and William Yang
+Geunwoo Kim, Pierre Baldi, and Stephen McAleer.             Wang. 2023. Automatically correcting large lan-
+  2023. Language models can solve computer tasks.           guage models: Surveying the landscape of diverse
+  ArXiv, abs/2303.17491.                                    self-correction strategies. ArXiv, abs/2308.03188.
+                                                      3612
+Joon Sung Park, Joseph C. O’Brien, Carrie J. Cai,             and Efficient Foundation Language Models. ArXiv,
+  Meredith Ringel Morris, Percy Liang, and Michael S.         abs/2302.13971.
+  Bernstein. 2023. Generative agents: Interactive sim-
+  ulacra of human behavior. ArXiv, abs/2304.03442.         Hugo Touvron, Louis Martin, Kevin R. Stone, Peter
+                                                             Albert, Amjad Almahairi, Yasmine Babaei, Niko-
+Arkil Patel, Satwik Bhattamishra, and Navin Goyal.           lay Bashlykov, Soumya Batra, Prajjwal Bhargava,
+  2021. Are NLP models really able to solve simple           Shruti Bhosale, Daniel M. Bikel, Lukas Blecher, Cris-
+  math word problems? In Proceedings of the 2021             tian Cantón Ferrer, Moya Chen, Guillem Cucurull,
+  Conference of the North American Chapter of the            David Esiobu, Jude Fernandes, Jeremy Fu, Wenyin
+  Association for Computational Linguistics: Human           Fu, Brian Fuller, Cynthia Gao, Vedanuj Goswami,
+  Language Technologies, pages 2080–2094, Online.            Naman Goyal, Anthony S. Hartshorn, Saghar Hos-
+  Association for Computational Linguistics.                 seini, Rui Hou, Hakan Inan, Marcin Kardas, Viktor
+                                                             Kerkez, Madian Khabsa, Isabel M. Kloumann, A. V.
+Debjit Paul, Mete Ismayilzada, Maxime Peyrard, Beat-         Korenev, Punit Singh Koura, Marie-Anne Lachaux,
+  riz Borges, Antoine Bosselut, Robert West, and Boi         Thibaut Lavril, Jenya Lee, Diana Liskovich, Yinghai
+  Faltings. 2023. Refiner: Reasoning feedback on in-         Lu, Yuning Mao, Xavier Martinet, Todor Mihaylov,
+  termediate representations. ArXiv, abs/2304.01904.         Pushkar Mishra, Igor Molybog, Yixin Nie, Andrew
+                                                             Poulton, Jeremy Reizenstein, Rashi Rungta, Kalyan
+Silviu Pitis, Michael Ruogu Zhang, Andrew Wang, and          Saladi, Alan Schelten, Ruan Silva, Eric Michael
+   Jimmy Ba. 2023. Boosted prompt ensembles for              Smith, R. Subramanian, Xia Tan, Binh Tang, Ross
+   large language models. ArXiv, abs/2304.05970.             Taylor, Adina Williams, Jian Xiang Kuan, Puxin
+                                                             Xu, Zhengxu Yan, Iliyan Zarov, Yuchen Zhang, An-
+Timo Schick, Jane Dwivedi-Yu, Roberto Dessì, Roberta
+                                                             gela Fan, Melanie Kambadur, Sharan Narang, Aure-
+  Raileanu, M. Lomeli, Luke Zettlemoyer, Nicola Can-
+                                                             lien Rodriguez, Robert Stojnic, Sergey Edunov, and
+  cedda, and Thomas Scialom. 2023. Toolformer: Lan-
+                                                             Thomas Scialom. 2023b. Llama 2: Open foundation
+  guage Models Can Teach Themselves to Use Tools.
+                                                             and fine-tuned chat models. ArXiv, abs/2307.09288.
+  ArXiv, abs/2302.04761.
+                                                           Karthik Valmeekam, Matthew Marquez, and Subbarao
+Timo Schick, Jane Dwivedi-Yu, Zhengbao Jiang, Fabio          Kambhampati. 2023. Can large language models
+  Petroni, Patrick Lewis, Gautier Izacard, Qingfei You,      really improve by self-critiquing their own plans?
+  Christoforos Nalmpantis, Edouard Grave, and Sebas-         ArXiv, abs/2310.08118.
+  tian Riedel. 2022. Peer: A collaborative language
+  model. ArXiv, abs/2208.11663.                            Yixin Wan, Fanyou Wu, Weijie Xu, and Srinivasan H
+                                                             Sengamedu. 2023. Sequence-level certainty reduces
+Zhihong Shao, Yeyun Gong, Yelong Shen, Min-                  hallucination in knowledge-grounded dialogue gen-
+  lie Huang, Nan Duan, and Weizhu Chen. 2023.                eration. arXiv preprint arXiv:2310.18794.
+  Synthetic prompting: Generating chain-of-thought
+  demonstrations for large language models. ArXiv,         Lei Wang, Wanyu Xu, Yihuai Lan, Zhiqiang Hu,
+  abs/2302.00618.                                            Yunshi Lan, Roy Ka-Wei Lee, and Ee-Peng Lim.
+                                                             2023a. Plan-and-solve prompting: Improving zero-
+Yongliang Shen, Kaitao Song, Xu Tan, Dongsheng Li,           shot chain-of-thought reasoning by large language
+  Weiming Lu, and Yueting Zhuang. 2023. Hugging-             models. ArXiv, abs/2305.04091.
+  gpt: Solving ai tasks with chatgpt and its friends in
+  hugging face. In Advances in Neural Information          Peiyi Wang, Lei Li, Liang Chen, Feifan Song, Binghuai
+  Processing Systems.                                        Lin, Yunbo Cao, Tianyu Liu, and Zhifang Sui. 2023b.
+                                                             Making large language models better reasoners with
+Noah Shinn, Beck Labash, and Ashwin Gopinath. 2023.          alignment. ArXiv, abs/2309.02144.
+  Reflexion: an autonomous agent with dynamic mem-
+  ory and self-reflection. ArXiv, abs/2303.11366.          Peiyi Wang, Lei Li, Zhihong Shao, R. X. Xu, Damai
+                                                             Dai, Yifei Li, Deli Chen, Y.Wu, and Zhifang Sui.
+Kumar Shridhar, Koustuv Sinha, Andrew Cohen, Tianlu          2023c. Math-shepherd: Verify and reinforce llms
+  Wang, Ping Yu, Ram Pasunuru, Mrinmaya Sachan,              step-by-step without human annotations.
+  Jason Weston, and Asli Celikyilmaz. 2023. The art of
+  llm refinement: Ask, refine, and trust. arXiv preprint   Xuezhi Wang, Jason Wei, Dale Schuurmans, Quoc V Le,
+  arXiv:2311.07961.                                          Ed H. Chi, Sharan Narang, Aakanksha Chowdhery,
+                                                             and Denny Zhou. 2023d. Self-Consistency Improves
+Kaya Stechly, Matthew Marquez, and Subbarao Kamb-            Chain of Thought Reasoning in Language Models.
+  hampati. 2023. Gpt-4 doesn’t know it’s wrong: An           ICLR 2023 poster, abs/2203.11171.
+  analysis of iterative prompting for reasoning prob-
+  lems.                                                    Zhenhailong Wang, Shaoguang Mao, Wenshan Wu, Tao
+                                                             Ge, Furu Wei, and Heng Ji. 2023e. Unleashing cogni-
+Hugo Touvron, Thibaut Lavril, Gautier Izacard, Xavier        tive synergy in large language models: A task-solving
+  Martinet, Marie-Anne Lachaux, Timothée Lacroix,            agent through multi-persona self-collaboration.
+  Baptiste Rozière, Naman Goyal, Eric Hambro, Faisal
+  Azhar, Aur’elien Rodriguez, Armand Joulin, Edouard       Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten
+  Grave, and Guillaume Lample. 2023a. Llama: Open             Bosma, brian ichter, Fei Xia, Ed Chi, Quoc V Le,
+                                                       3613
+  and Denny Zhou. 2022. Chain of Thought Prompt-         Shunyu Yao, Jeffrey Zhao, Dian Yu, Nan Du, Izhak
+  ing Elicits Reasoning in Large Language Models. In       Shafran, Karthik Narasimhan, and Yuan Cao. 2022.
+  Conference on Neural Information Processing Sys-         React: Synergizing reasoning and acting in language
+  tems (NeurIPS).                                          models. ArXiv, abs/2210.03629.
+
+Sean Welleck, Ximing Lu, Peter West, Faeze Brah-         Ori Yoran, Tomer Wolfson, Ben Bogin, Uri Katz, Daniel
+  man, Tianxiao Shen, Daniel Khashabi, and Yejin           Deutch, and Jonathan Berant. 2023. Answering
+  Choi. 2022. Generating sequences by learning to          questions by meta-reasoning over multiple chains
+  self-correct. ArXiv, abs/2211.00053.                     of thought. ArXiv, abs/2304.13007.
+
+Yixuan Weng, Minjun Zhu, Shizhu He, Kang Liu, and        Long Long Yu, Weisen Jiang, Han Shi, Jincheng Yu,
+  Jun Zhao. 2022. Large language models are reason-        Zhengying Liu, Yu Zhang, James T. Kwok, Zheng Li,
+  ers with self-verification. ArXiv, abs/2212.09561.       Adrian Weller, and Weiyang Liu. 2023. Metamath:
+                                                           Bootstrap your own mathematical questions for large
+                                                           language models. ArXiv, abs/2309.12284.
+Chenfei Wu, Shengming Yin, Weizhen Qi, Xiaodong
+  Wang, Zecheng Tang, and Nan Duan. 2023a.               Weizhe Yuan, Richard Yuanzhe Pang, Kyunghyun Cho,
+  Visual chatgpt: Talking, drawing and editing             Sainbayar Sukhbaatar, Jing Xu, and Jason Weston.
+  with visual foundation models. arXiv preprint            2024. Self-rewarding language models. arXiv
+  arXiv:2303.04671.                                        preprint arXiv:2401.10020.
+Qingyun Wu, Gagan Bansal, Jieyu Zhang, Yiran Wu,         Zheng Yuan, Hongyi Yuan, Cheng Li, Guanting Dong,
+  Shaokun Zhang, Erkang Zhu, Beibin Li, Li Jiang,          Chuanqi Tan, and Chang Zhou. 2023a. Scaling re-
+  Xiaoyun Zhang, and Chi Wang. 2023b. Autogen:             lationship on learning mathematical reasoning with
+  Enabling next-gen llm applications via multi-agent       large language models. ArXiv, abs/2308.01825.
+  conversation framework. ArXiv, abs/2308.08155.
+                                                         Zheng Yuan, Hongyi Yuan, Chuanqi Tan, Wei Wang,
+Zhiheng Xi, Senjie Jin, Yuhao Zhou, Rui Zheng,             and Songfang Huang. 2023b. How well do large
+  Songyang Gao, Tao Gui, Qi Zhang, and Xuan-               language models perform in arithmetic tasks? ArXiv,
+  jing Huang. 2023. Self-polish: Enhance reasoning         abs/2304.02015.
+  in large language models via problem refinement.
+  ArXiv, abs/2305.14497.                                 Xiang Yue, Xingwei Qu, Ge Zhang, Yao Fu, Wenhao
+                                                           Huang, Huan Sun, Yu Su, and Wenhu Chen. 2023.
+Yuxi Xie, Kenji Kawaguchi, Yiran Zhao, Xu Zhao,            Mammoth: Building math generalist models through
+  MingSung Kan, Junxian He, and Qizhe Xie.                 hybrid instruction tuning. ArXiv, abs/2309.05653.
+  2023. Decomposition enhances reasoning via self-
+  evaluation guided decoding. ArXiv, abs/2305.00633.     Aohan Zeng, Xiao Liu, Zhengxiao Du, Zihan Wang,
+                                                           Hanyu Lai, Ming Ding, Zhuoyi Yang, Yifan Xu,
+Zhipeng Xie and Shichao Sun. 2019. A goal-driven           Wendi Zheng, Xiao Xia, Weng Lam Tam, Zixuan Ma,
+  tree-structured neural model for math word problems.     Yufei Xue, Jidong Zhai, Wenguang Chen, Zhiyuan
+  In IJCAI, pages 5299–5305.                               Liu, Peng Zhang, Yuxiao Dong, and Jie Tang. 2023.
+                                                           Glm-130b: An Open Bilingual Pre-trained Model.
+Kai Xiong, Xiao Ding, Yixin Cao, Ting Liu, and Bing        ICLR 2023 poster.
+  Qin. 2023. Examining inter-consistency of large lan-
+                                                         Susan Zhang, Stephen Roller, Naman Goyal, Mikel
+  guage models collaboration: An in-depth analysis
+                                                           Artetxe, Moya Chen, Shuohui Chen, Christopher De-
+  via debate. In Conference on Empirical Methods in
+                                                           wan, Mona Diab, Xian Li, Xi Victoria Lin, Todor Mi-
+  Natural Language Processing.
+                                                           haylov, Myle Ott, Sam Shleifer, Kurt Shuster, Daniel
+                                                           Simig, Punit Singh Koura, Anjali Sridhar, Tianlu
+Benfeng Xu, An Yang, Junyang Lin, Quang Wang,              Wang, and Luke Zettlemoyer. 2022a. Opt: Open
+  Chang Zhou, Yongdong Zhang, and Zhendong Mao.            Pre-trained Transformer Language Models. ArXiv,
+  2023a. Expertprompting: Instructing large lan-           abs/2205.01068.
+  guage models to be distinguished experts. ArXiv,
+  abs/2305.14688.                                        Wenqi Zhang, Yongliang Shen, Weiming Lu, and Yuet-
+                                                           ing Zhuang. 2023a. Data-copilot: Bridging bil-
+Xiaohan Xu, Chongyang Tao, Tao Shen, Can Xu,               lions of data and humans with autonomous workflow.
+  Hongbo Xu, Guodong Long, and Jian-Guang Lou.             arXiv preprint arXiv:2306.07209.
+  2023b. Re-reading improves reasoning in language
+  models. ArXiv, abs/2309.06275.                         Wenqi Zhang, Yongliang Shen, Yanna Ma, Xiaoxia
+                                                          Cheng, Zeqi Tan, Qingpeng Nong, and Weiming Lu.
+Shunyu Yao, Dian Yu, Jeffrey Zhao, Izhak Shafran,         2022b. Multi-view reasoning: Consistent contrastive
+  Thomas L. Griffiths, Yuan Cao, and Karthik              learning for math word problem. In Findings of the
+  Narasimhan. 2023. Tree of thoughts: Deliberate          Association for Computational Linguistics: EMNLP
+  problem solving with large language models. ArXiv,      2022, pages 1103–1116, Abu Dhabi, United Arab
+  abs/2305.10601.                                         Emirates. Association for Computational Linguistics.
+                                                     3614
+Wenqi Zhang, Yongliang Shen, Qingpeng Nong, Zeqi
+ Tan, Yanna Ma, and Weiming Lu. 2023b. An expres-
+ sion tree decoding strategy for mathematical equation
+ generation. In Proceedings of the 2023 Conference
+ on Empirical Methods in Natural Language Process-
+ ing, pages 439–456, Singapore. Association for Com-
+ putational Linguistics.
+Wenqi Zhang, Kai Zhao, Peng Li, Xiao Zhu, Yongliang
+  Shen, Yanna Ma, Yingfeng Chen, and Weiming Lu.
+  2022c. A closed-loop perception, decision-making
+  and reasoning mechanism for human-like naviga-
+  tion. In Proceedings of the Thirty-First International
+ Joint Conference on Artificial Intelligence, IJCAI-22,
+  pages 4717–4724. International Joint Conferences on
+ Artificial Intelligence Organization. Main Track.
+
+Wenqi Zhang, Kai Zhao, Peng Li, Xiaochun Zhu, Fap-
+ ing Ye, Wei Jiang, Huiqiao Fu, and Tao Wang. 2021.
+ Learning to navigate in a vuca environment: Hierar-
+ chical multi-expert approach. 2021 IEEE/RSJ Inter-
+ national Conference on Intelligent Robots and Sys-
+ tems (IROS), pages 9254–9261.
+Zhuosheng Zhang, Aston Zhang, Mu Li, and Alexan-
+  der J. Smola. 2022d. Automatic chain of thought
+  prompting in large language models.       ArXiv,
+  abs/2210.03493.
+Xu Zhao, Yuxi Xie, Kenji Kawaguchi, Junxian He,
+  and Qizhe Xie. 2023. Automatic model selection
+  with large language models for reasoning. ArXiv,
+  abs/2305.14333.
+Chuanyang Zheng, Zhengying Liu, Enze Xie, Zhenguo
+  Li, and Yu Li. 2023a. Progressive-hint prompting
+  improves reasoning in large language models. ArXiv,
+  abs/2304.09797.
+Huaixiu Steven Zheng, Swaroop Mishra, Xinyun Chen,
+  Heng-Tze Cheng, Ed Huai hsin Chi, Quoc V Le, and
+  Denny Zhou. 2023b. Take a step back: Evoking
+  reasoning via abstraction in large language models.
+  ArXiv, abs/2310.06117.
+Shen Zheng, Jie Huang, and Kevin Chen-Chuan Chang.
+  2023c. Why does chatgpt fall short in answering
+  questions faithfully? ArXiv, abs/2304.10513.
+Denny Zhou, Nathanael Scharli, Le Hou, Jason Wei,
+  Nathan Scales, Xuezhi Wang, Dale Schuurmans,
+  Olivier Bousquet, Quoc Le, and Ed Huai hsin
+  Chi. 2022. Least-to-most prompting enables com-
+  plex reasoning in large language models. ArXiv,
+  abs/2205.10625.
+Xinyu Zhu, Junjie Wang, Lin Zhang, Yuxiang Zhang,
+  Yongfeng Huang, Ruyi Gan, Jiaxing Zhang, and Yu-
+  jiu Yang. 2023. Solving math word problems via
+  cooperative reasoning induced language models. In
+  Proceedings of the 61st Annual Meeting of the Associ-
+  ation for Computational Linguistics (Volume 1: Long
+  Papers), Toronto, Canada. Association for Computa-
+  tional Linguistics.
+
+
+                                                       3615
+Appendix                                                  rather than meticulously examining and rectify-
+                                                          ing errors. Typically, self-reflection often contains
+A    Complementary Experiments                            three stages, i.e., initial response, self-evaluate,
+A.1 Detail For Manual Feedback Evaluation                 and revision stage. We employ different LLMs
+                                                          to provide a poorer quality response as the initial
+We provide the details of manual evaluation in Ta-        response for the subsequent two stages. We observe
+ble 2. Specifically, we categorize reflection results     whether this affects the results of the reflection, e.g.,
+into four categories: Invalid (wrong -> wrong),           we replace gpt3.5→gpt3.5→gpt3.5 with Llama-2-
+Valid (wrong -> right), Toxic (right -> wrong),           70b→gpt3.5→gpt3.5. If LLMs tend to place undue
+and Other (right -> right) based on their answer.         trust in prior responses, the efficacy of the final re-
+Subsequently, we manually assess the quality of           flective process will be adversely impacted.
+feedback within each reflection category. For in-            However, as shown in Figure A1, the reflection
+stance, for a Toxic reflection case, we devise ten        results are severely impacted by the quality of the
+self-evaluation prompts, prompting LLMs to con-           initial response. E.g., compared with using gpt3.5
+duct a self-evaluation on their initial response, gen-    for three phases, Llama2-70b→gpt3.5→gpt3.5 ex-
+erating ten feedbacks. These feedbacks are manu-          hibits a marked decrease (-8.4% for GSM8K). Fur-
+ally checked for correctness and consistency. The         thermore, we also observe the weaker the LLM
+criteria for classification are as follows:               replaced, the poorer the performance after reflec-
+    • If more than seven feedbacks accurately iden-       tion. It suggests that LLMs tend to trust the initial
+      tify the errors in the initial response, we clas-   solution rather than detect and revise the errors
+      sify it into the first category: I. Accurately      during the self-evaluate phase.
+      Identifies Errors. Please note that the feed-       Request          Initial LLM
+                                                                                                       Initial Response
+                                                                                                                             Evaluating LLM
+                                                                                                                                                              Feedback
+                                                                                                                                                                                   Revising LLM
+                                                                                                                                                                                                         Final Response
+
+      back only needs to accurately identify the er-                [Initial LLM]                                             [Initial LLM]                                              [Initial LLM]
+
+      rors without necessarily correcting them.                     Evaluating LLM: GPT3.5
+                                                                    Revising LLM: GPT3.5
+                                                                                                                              Evaluating LLM: Llama70b
+                                                                                                                              Revising LLM: Llama70b
+                                                                                                                                                                                         Evaluating LLM: Llama13b
+                                                                                                                                                                                         Revising LLM:Llama13b
+                                                                                                                                                                                           55
+                                                          85                                                                85
+                                                                                                 GSM8k                                      GSM8k                                                    GSM8k
+
+    • If more than seven feedbacks indicate that the                                             SVAMP                                                  SVAMP                                            SVAMP
+                                                          80                                                                80                                                             50
+
+      initial response has no errors, we categorize it                                                                                                                                     45
+                                                          75                                                                75
+      into the fourth category: IV. Overconfidence -
+      No Revision Required.                               70                                                                70                                                             40
+
+
+
+                                                          65                                                                65                                                             35
+    • If, among the ten feedbacks, there are more
+      than three different opinions, e.g., the first      60
+                                                               GP
+                                                                 T35
+                                                                          Lla
+                                                                                ma
+                                                                                     70b
+                                                                                           Lla
+                                                                                                 ma
+                                                                                                      13b
+                                                                                                            Lla
+                                                                                                                  ma
+                                                                                                                       7b
+                                                                                                                            60   Lla
+                                                                                                                                       ma
+                                                                                                                                                  Lla
+                                                                                                                                                        ma
+                                                                                                                                                             13b
+                                                                                                                                                                   Lla
+                                                                                                                                                                         ma
+                                                                                                                                                                              7b
+                                                                                                                                                                                           30     Lla
+                                                                                                                                                                                                        ma
+                                                                                                                                                                                                             13b
+                                                                                                                                                                                                                   Lla
+                                                                                                                                                                                                                         ma
+                                                                                                                                                                                                                              7b
+                                                                                                                                            70b
+      feedback suggesting there are no errors, an-                      Initial LLM                                                          Initial LLM                                           Initial LLM
+
+      other identifying error-1, and yet another
+                                                          Figure A1: The Reflection Accuracy with Different
+      pointing out error-2.... For this scenario, we
+                                                          LLM for Initial Response. Left: different LLMs provide
+      classify it into the third category: III. Can-      initial responses when GPT3.5 is utilized for Evaluation
+      not Output Consistent Feedback. In this sce-        and Revision. Center: different LLMs provide initial
+      nario, self-evaluation exhibits significant ran-    responses when Llama2-70B is utilized for Evaluation
+      domness.                                            and Revision. Right: different LLMs provide initial
+                                                          responses when Llama2-13B is utilized for Evaluation
+    • The remaining cases are classified into the sec-    and Revision. The results indicate that LLMs are easily
+      ond category: II. Stubbornly Offers Erroneous       influenced during reflection. LLM is predisposed to
+      Feedback.                                           trust previous responses over diligently examining and
+                                                          correcting errors.
+   The entire human evaluation process is con-
+ducted by two senior PhD students. One is respon-
+sible for categorization, while the other verifies the    A.3          Self-Evaluate Vs. Self-Contrast
+categorization again.                                     Self-Contrast inspires reflection by contrasting the
+                                                          differences, rather than evaluating directly. The
+A.2 LLM is More Likely to Trust Previous                  underlying assumption is contrast is more accurate
+    Response                                              and stable than direct evaluation for LLM. To val-
+We investigate whether LLMs are prone to uncriti-         idate this, we conduct an experiment using 200
+cally trusting previous responses during reflection,      samples from GSM8K, each containing a correct
+                                                      3616
+                            Self-curated Prompt Process Vs. Sampling Top-N Responses                                                                 Evaluating Correct Only:     Contrasting Result:
+                    86                                                                                                             Both Incorrect:   8 Samples                    171(Correct) 29(Incorrect)
+                                                          Self-Contrast With Self-curated prompts: 84.4                            21 Samples
+                    84
+                                                                                                                                                                                  Evaluating Result:
+                                                          Self-Contrast With Sampling Top-N Responses                                                                             140(Correct) 60(Incorrect)
+                                                                                                                   Contrasting
+
+
+
+
+ ACC. On GSM8K(%)
+                    82                                             81.8                                            Correct Only:
+                                                                                                                   39 Samples
+                    80                             80.2                                         80.1
+                                                                                  79.8
+
+                                     78.9
+                    78
+                         77.5
+
+
+                    76                                                                                                                                                          Both Correct:
+                                                                                    Self-Reflection: 75.8                                                                       132 Samples
+
+                    74
+                                2           3             4               5              8             10
+                                                Number of Sampling Responses
+
+
+Figure A2: We replace the self-curated prompt pro-                                                             Figure A3: We compare the results of the Evaluating
+cess with a simple strategy: directly sampling top-n                                                           and Contrasting using two pie charts. It shows Contrast-
+responses for contrast. We observe that as N increases,                                                        ing is more accurate and stable than direct Evaluating.
+the performance also improves, yet it still remains lower
+than self-contrast with the self-curated prompts. All
+results are conducted on GSM8K using GPT-3.5.                                                                  A.4          Ablation Study For Selection Strategy
+                                                            As introduced in Section 3.2, we cluster multiple
+                                                            responses generated by the self-curated process and
+ Strategy                            GSM8K CommonMT
+ Self-reflection                       75.8         69.3
+                                                            then select the cluster center from each category for
+ Self-Contrast                         84.4         70.7    contrast. We design four different selection strate-
+ - w/o Checklist Generation          80.9 ↓3.5    70.6 ↓0.1 gies. 1) Random Selecting: We randomly choose K
+ Selecting Strategies
+ - Random Selecting                   76.4 ↓8     69.5 ↓1.2 responses from all candidates. 2) Clustering + Ran-
+ - Clustering + Random Selecting     81.2 ↓3.2    69.7 ↓1.0 dom Selecting: We first cluster all responses into
+ - Clustering + LLM Selecting        82.6 ↓1.8    69.9 ↓0.8 k categories, then randomly select one from each
+ - Clustering + Negative Perspective 83.9 ↓0.5    70.8 ↑0.1
+                                                            category. 3) Clustering + LLM Selecting: Simi-
+Table A1: We eliminate the checklist generation process,    larly, we first cluster all responses into k categories,
+instructing the LLM to directly reflect on the differences  then instruct the LLM to choose a potentially cor-
+from contrasting multiple perspectives. Besides, we also    rect response from each category. 4) Clustering +
+analyze the impact of different selecting strategies.       Negative Perspective: We first instruct the LLM
+                                                            to consider what are common errors for the user
+                                                            request. Then LLM should intentionally generate
+                                                            an imperfect solution based on these common er-
+and an incorrect solution. We design two tasks:
+                                                            rors. Finally, we instruct the LLM to select one
+Taks 1: Contrasting two solutions. Task 2: Eval-
+                                                            response from each category that is least similar to
+uating the incorrect solution. We manually check
+                                                            the intentionally generated imperfect solution. As
+the results of two tasks, i.e., whether LLM can per-
+                                                            shown in Table A1, we observe that compared to
+form contrast or evaluate correctly. As shown in
+                                                            Self-Contrast, the performance of several selection
+Figure A3, we observe contrasting is more accu-
+                                                            strategies experiences a certain degree of decline.
+rate than direct evaluating (171 correct Vs. 140
+incorrect).
+                                                                                                               B         Experiments Details
+   Further, we divide all samples into four cases:
+                                                                                                               B.1         Benchmarks
+1. both tasks are correct. 2. Contrasting: correct,
+Evaluating: wrong. 3. Contrasting: wrong, Evalu-                                                               Mathematical Reasoning: We leverage multi-
+ating: correct. 4. Both are wrong. In Figure A3, the                                                           ple datasets with different complexity and lan-
+results show that when LLM can correctly evaluate                                                              guages, including GSM8K (Cobbe et al., 2021),
+a solution, it is often able to contrast correctly, with                                                       SVAMP (Patel et al., 2021) as benchmarks to evalu-
+few exceptions (only 8 samples for Evaluating Cor-                                                             ate performance. Notably, GSM8K presents higher
+rect Only). Notably, in 39 cases, the LLM fails in                                                             levels of difficulty, encompassing complex mathe-
+direct evaluation but succeeds in contrast. These re-                                                          matical operations, while SVAMP is slightly sim-
+sults indicate that contrasting two solutions is more                                                          pler and consists of combinations of addition, sub-
+accurate and stable than direct evaluation, leading                                                            traction, multiplication, and division.
+to more reliable results.                                                                                         Creative Translation In addition to mathemat-
+                                                                                                            3617
+ical reasoning tasks, we introduce a generation          Evaluation: Please carefully examine the
+task: creative translation. We utilize the Com-          previous responses for correctness , and
+                                                         provide detailed feedback .
+monMT (He et al., 2020), which includes a vast
+body of Chinese-to-English pair examples. Un-            Revision: Please refine the previous
+like conventional translations, most samples con-        response based on the feedback .
+                                                         2:
+tain non-standard expressions such as idioms and         Evaluation: Please review your previous
+metaphors, necessitating an understanding of local       responses for any errors , and provide
+                                                         detailed feedback .
+cultural and linguistic habits for accurate transla-
+tion. Following the Multi-agent debate (Liang et al.,    Revision: Please refine the previous
+2023), we adopt the samples with "hard" categories       response based on the feedback . If there
+                                                          are no questions , you can repeat the
+from CommonMT as testing benchmarks.                     previous solution
+                                                         3:
+B.2    Other Details                                     Evaluation: Do you think the previous
+                                                         response is correct or not , and if not
+In the Self-Curated Prompt phase, we limit LLMs          please point out where is wrong .
+to design at least two different prompts and a max-
+                                                         Revision: Please refine the previous
+imum of nine prompts for each request. In se-            response .
+lecting stage (Section 3.2), we set k to 3, which        4:
+means that all perspective results are divided into      Evaluation: Please carefully evaluate the
+                                                         quality of the previous response and
+three categories, and then we select a result from       point out if you feel something is not
+each category. We instruct LLM sequentially out-         appropriate
+put comparisons among three results, subsequently
+                                                         Revision: Please carefully consider the
+synthesizing these differences into a comprehen-         comments in the feedback and re - generate
+sive checklist in a single pass, eliminating the need     the answer .
+for multiple prompts. Besides, due to the diversity      5:
+                                                         Evaluation: Please double - check the
+of translation tasks, we also introduce a negative       previous response for any errors . If
+perspective for translation. Specifically, we instruct   there are any errors , please point them
+                                                         out .
+LLMs to consider what common errors might be
+made for the user request, then actively adopt a         Revision: Please read the feedback
+careless persona to generate an incorrect response       carefully , and improve your answer .
+                                                         6:
+with some common mistakes. The result of this            Evaluation: There may have been some
+negative perspective serves as a negative demon-         mistakes with your previous response , so
+stration for subsequent selection and reflection.         please double - check and find out the
+                                                         mistake . If you think there are no
+                                                         errors at all , please just reply , "
+C     Baseline Prompts                                   Exactly correct ".
+
+Standard Prompt We use a simple prompt for               Revision: Please refine your response . If
+CoT Prompt and self-consistency baselines. For            you think it ’s acceptable , then just
+                                                         repeat your last response .
+each experiment, we run 10 times and averaged            7:
+their results.                                           Evaluation: Please check that your
+                                                         previous response matches the question .
+Math Reasoning: You are a math teacher .                 Please point out if it does not fit
+Let us solve the math question step by
+step . The question is {input}.                          Revision: Please refine your response
+                                                         based on the feedback . If the feedback
+Creative Translation: You are an expert                  points out something that is not perfect
+translator , please translate Chinese                     please fix it !
+into English accurately . The Chinese                    8:
+sentence is {input}.                                     Evaluation: Please consider whether your
+                                                         response addresses the problem . If not
+Reflection Prompts We designed 10 prompts for            or if there is an error please point it
+                                                         out
+the self-reflection baseline. Each experiment fol-
+lows Initial response-Evaluation-Revision pattern.       Revision: Please reflect based on the
+The prompt for the Initial response remains consis-      feedback and improve your response .
+                                                         9:
+tent with previous experiments (Standard Prompt).        Evaluation: Please assess in detail
+1:                                                       whether your previous response solves
+
+                                                     3618
+the problem and provide feedback .
+
+Revision: Please refine your response
+based on the feedback .                               Here is an example :
+10:                                                   The input Chinese sentence is : 他想拉同村
+Evaluation: Please check your previous                的干部一起下水去贩毒. Please generate the
+response for correctness and whether it               most suitable prompts .
+can be further enhanced .                             Output :
+                                                      Literal Perspective : ### You are a
+Revision: Please further refine your                  meticulous translator , proficient in
+response based on the feedback . If you               direct translation , and highly focused
+don ’ t feel it is necessary then restate             on specifics . Your translation approach
+the previous response                                 prioritizes precise replication of the
+                                                      original text ’s expression .
+D   Our Prompt                                        Liberal Perspective : ### You are an
+D.1 Prompt for Self-Curated Process                   inventive translator , characterized by a
+                                                       dynamic and liberal translation
+Different requests may require some unique solving    approach , often reimagining the original
+                                                       text ’s meaning in your own linguistic
+perspectives. We design a self-curated prompts        style .
+process, enabling LLMs to design their prompts
+based on specific user requests. The prompt for the   The input Chinese sentence is {input}.
+                                                      Please generate the most suitable
+self-curated process is as follows:                   prompts :
+Translation Task:
+You are a translation specialist who                  Reasoning Task:
+specializes in translating from diverse               You are a math specialist who
+perspectives . Given a Chinese source                 specializes in math solving from diverse
+sentence , you need to carefully analyze               perspectives . Given a math question ,
+the source sentence and dynamically                   you need to carefully analyze the
+generate several useful prompt                        question and dynamically generate
+instructions . These prompt instructions              several useful prompt instructions .
+should be diverse and also relevant to                These prompt instructions should be
+the source sentence . These prompt                    diverse and also useful for math - solving
+instructions are used to guide the                    . These prompt instructions are used to
+language model to think in different                  guide the language model to think in
+ways , attention to different emphases ,              different ways , attention to different
+and reason from different perspectives                emphases , and reason from different
+for a more accurate translation .                     perspectives for more accurate math
+                                                      solving .
+For instance , you can design different
+translation styles , different                        For instance , you can adopt multi -
+expressions of emotion , different                    faceted thinking ( logical thinking ,
+emphases , and different tones for input              lateral thinking , analogical thinking ,
+sentences in prompt instruction . Besides             etc .) , different reasoning perspectives
+ you can create different knowledge                   ( e. g. , top - down , bottom - up , step - by - step
+backgrounds , identities , personalities ,            ) , and different emphases of concern , (
+different concerns , etc for more                     entity words , numbers , units ,
+relevant translation .                                percentages , math knowledge , etc ) for
+                                                      input question in prompt instruction .
+Here are some guidance rules for Prompt
+Generation :                                          Here are some guidance rules for Prompt
+1. Tone Requirement : Please generate                 Generation :
+prompt instructions in the third person .             1. Tone Requirement : Please generate
+2. Content Requirement : Each prompt                  prompt instructions in the third person .
+instruction should be different , and                 2. Content Requirement : Each prompt
+include at least three parts :                        instruction should adopt a different way
+translation styles , attention emphasis ,              of thinking , or focus on a different
+and tones and emotion design . Please do              perspective , or different emphases to
+not state them separately .                           solve the question .
+3. Number Requirement : Dynamically                   3. Number Requirement : Dynamically
+generate the most valuable 2 to 9 prompt              generate the most valuable 2 to 9 prompt
+ instructions based on the input Chinese               instructions based on the input math
+ source sentences .                                   question .
+4. Format Requirement : Each prompt                   4. Format Requirement : Each prompt
+instruction should start with ###.                    instruction should start with ### and
+5. Others : Prompt should focus on                    end with @@@ .
+translation . So don ’ t ask any other                5. Others : Prompt instructions should
+irrelevant questions in the prompt .                  focus on math solving . So don ’ t ask any
+
+                                                  3619
+other irrelevant questions in the prompt         Reasoning Task:
+.                                                You are a math specialist who
+                                                 specializes in math solving . Given some
+Here is an example : The math question is        candidate solutions for a math question ,
+: Mark works at his job for 8 hours a             you should carefully compare the
+day for 5 days a week . He used to make          difference for each two solutions in
+$10 an hour but they raised his pay by           their solving steps .
+$2 per hour . How much does he make a
+week ?                                           When you compare , you need to consider
+                                                 the following questions :
+Output :                                         1: Are the two solutions have different
+bottom - up perspective : ### As a               final answers and mathematical
+mathematician , you have to solve the            expressions ?
+given problem from a bottom - up                 2: Where are the differences in their
+perspective . Please focus initially on          solution steps and mathematical
+the foundational elements of the problem         expressions ?
+. Start with the simplest parts and              3: Why are the answers of the two
+their interrelations . Progressively             solutions different ?
+build upon these foundational components
+, joining them together until a complete         After contrasting , you should generate a
+ solution emerges                                 checklist based on these differences
+                                                 between candidate solutions . You should
+The input math question is {input}.              carefully consider each discrepancy and
+Please generate the most suitable                the reasons behind it , summarizing them
+prompts :                                        into a few checking instructions in the
+                                                 checklist . This checklist can guide
+                                                 others to re - examine the input question
+D.2 Prompt for Contrasting Process               and these candidate solutions to
+                                                 eliminate these discrepancies .
+Translation Task:
+You are an expert translator . Given some
+ candidate English translations for a            Input Format :
+Chinese source sentence , you should             The math question is {Question}.
+carefully compare the difference between         All solutions : {Solution1}, {Solution2} , {
+ each two translations in terms of               Solution3}, ....
+semantics , syntax , words (e . g . , nouns
+and verbs ) , and any other aspects .            Output Format :
+                                                 For Solution1 and Solution2 : {Difference1}
+When you compare , you need to consider          For Solution1 and Solution3 : {Difference2}
+the following questions :                        For Solution2 and Solution3 : {Difference3}
+1: Are there differences between the two         Checklist : {Directive1, Directive2, ...}
+ translations ?
+2: Where are the differences ?
+3: What causes these differences ?               D.3   Prompt For Reflection Stage
+
+After contrasting , you should generate a        We record all candidate responses, their differences,
+ checklist based on these differences            and the checklist in a JSON format. The whole
+between candidate translations . You             prompt for math reasoning is as follows:
+should carefully consider each
+discrepancy and the reasons behind it ,          Reflection Instruction:
+summarizing them into a few checking             Given a math question , multiple
+instructions in the checklist . This             inconsistent solutions , their
+checklist can guide others to re - examine       differences in their solving processes ,
+ the input sentence and these candidate          and a checklist . You should revise the
+translations to eliminate these                  inconsistent solving step for each
+discrepancies .                                  solution , eliminate the differences , and
+                                                  output a new solving process for each
+                                                 solution .
+Input Format :
+The Chinese sentence is {Chinese sentence}.      Guidance Rules for Reflection :
+All Results : {Result1} ,{Result2} , {
+Result3} ,....                                   1. Please check carefully according to
+                                                 the requirements on the checklist . It
+Output Format :                                  helps you to resolve conflicts between
+For Result1 and Result2 : {Difference1}.         different solutions .
+For Result1 and Result3 : {Difference2}          2. When you finish revising inconsistent
+For Result2 and Result3 : {Difference3}           solutions , please ensure all revised
+Checklist : {Directive1, Directive2, ...}        solutions should have the same answer .
+....                                             If not , please revise again until all
+                                                 inconsistencies are removed , and all
+
+                                              3620
+candidates are consistent .                                based system. However, recent studies (Huang
+3. Please output all revised solutions                     et al., 2023b; Stechly et al., 2023; Liang et al., 2023;
+in JSON format as input , without any
+other text .                                               Valmeekam et al., 2023) have cast doubt on LLM’s
+                                                           inherent reflection capability. Their research indi-
+                                                           cates that without external feedback, LLMs have
+The math question is {question}.
+The candidate solutions and their                          difficulties in amending prior responses.
+discrepancy are as follows :
+{                                                          E.2   Prompting for Better Problem-Solving
+   " Candidate ": {
+          " result_1 ": {                                  Drawing on cognitive science, human reasoning
+                 " answer ": "{answer1}" ,                 involves two different reasoning patterns: breadth
+                 " solution ": "{solution1}"} ,
+          " result_2 ": {                                  reasoning, i.e., exploring various reasoning per-
+                 " answer ": "{answer2}" ,                 spectives, and depth reasoning, which involves
+                 " solution ": "{solution2}"} ,            continually refining ideas and minimizing errors.
+          " result_3 ": {
+                 " answer ": "{answer3}" ,                 Based on this concept, we can view previous
+                 " solution ": "{solution3}"} ,            prompting strategies as either breadth or depth rea-
+          ....                                             soning. Self-consistency and some contempora-
+   },
+   " Discrepancy ": {                                      neous works (Wang et al., 2023d; Huang et al.,
+          " difference_1_2 ": {                            2022; Yoran et al., 2023; Jain et al., 2023; Chen
+                 " source ": " result_1 " ,
+                 " target ": " result_2 " ,
+                                                           et al., 2023c) mimic breadth reasoning by sampling
+                 " relation ": "{difference}"              diverse reasoning processes and voting the final
+                 },                                        answer, while self-reflection, abstraction reason-
+          " difference_1_3 ": {
+                 " source ": " result_1 " ,                ing strategies (Shinn et al., 2023; Madaan et al.,
+                 " target ": " result_3 " ,                2023; Paul et al., 2023; Zheng et al., 2023a; Wang
+                 " relation ": "{difference}"              et al., 2023a; Yoran et al., 2023; Zheng et al.,
+                 },
+          " difference_2_3 ": {                            2023b; Xu et al., 2023b; Shridhar et al., 2023) rep-
+                 " source ": " result_2 " ,                resent depth reasoning, refining reasoning through
+                 " target ": " result_3 " ,                iterative prompting strategy. Except for these,
+                 " relation ": "{difference}"
+                 },                                        Self-Verification (Weng et al., 2022) designs a re-
+          ....                                             verse generation from the answer to given condi-
+   }                                                       tions, which is widely used in machine transla-
+}
+Checklist: {Directive1, Directive2 ,....}                  tion (Edunov et al., 2018). Cohen et al. (2023);
+Please revise each inconsistent solution                   Mündler et al. (2023) propose a method for de-
+.
+                                                           tecting self-contradictions or factual errors in re-
+                                                           sponses to enhance quality. However, our Self-
+E     Related Works                                        Contrast combines both breadth and depth reason-
+                                                           ing. It creates multiple perspectives to enhance the
+E.1    Self-correction Ability of LLM                      breadth of reasoning and also reflects on the dif-
+Recently, one exciting discovery is that LLMs ap-          ferences for better depth reasoning, offering more
+pear to possess advanced cognitive intelligence:           reliable problem-solving.
+self-correction, where LLMs can refine their pre-
+vious responses based on feedback (Shinn et al.,           E.3   Agent-based Methods
+2023; Madaan et al., 2023; Paul et al., 2023). This        Recent studies (Li et al., 2023; Deshpande et al.,
+capacity endows LLMs to harness external feed-             2023; Xu et al., 2023a; Du et al., 2023; Xiong
+back, or even self-evaluated feedback to refine the        et al., 2023) have found that when an LLM is
+prior responses (Welleck et al., 2022; Kadavath            assigned a specific role personas, it can gener-
+et al., 2022; Chen et al., 2023d; Kim et al., 2023;        ate higher-quality responses. This suggests that
+Xi et al., 2023; Ganguli et al., 2023; Pan et al., 2023;   LLMs are powerful enough, and the appropriate
+Nathani et al., 2023). This capacity, particularly         prompt can elicit this capability. Moreover, recent
+when it is solely reliant on inherent reflection, has      works (Wang et al., 2023e; Fu et al., 2023; Liang
+generated significant interest in the academic com-        et al., 2023; Schick et al., 2022; Dong et al., 2023;
+munity. It appears that a simple iterative prompt          Park et al., 2023; Liu et al., 2023) have utilized a
+strategy could facilitate self-correction in an LLM-       multi-role dialogue to collaborate or debate with
+                                                       3621
+each other for a more comprehensive response. Fur-       sophisticated closed-source LLMs. The fine-tuning
+thermore, some studies (Chen et al., 2023b; Chan         approaches(Yuan et al., 2023a; Luo et al., 2023;
+et al., 2023; Huang et al., 2023a; Chen et al., 2023a;   Yue et al., 2023; Wang et al., 2023b; Yu et al.,
+Hong et al., 2023; Wu et al., 2023b) have integrated     2023; Gou et al., 2023) also have the potential
+this concept with complex tasks such as code gener-      to improve the mathematical reasoning capabili-
+ation by decomposing a complex task into several         ties of LLMs. The essence of fine-tuning is cen-
+sub-tasks and employing multiple agents with dif-        tered around the development of quality datasets
+ferent identities for each sub-task. However, most       comprising question-response pairs. Addition-
+agent-based approaches necessitate careful manual        ally, process-supervised training methods Light-
+design of each agent’s role and pattern of interac-      man et al. (2023); Wang et al. (2023c) can also
+tion. Our approach, in contrast, does not require        enhance the reasoning abilities of the LLMs.
+pre-defined agents’ roles and numbers by humans,
+as it is entirely designed by the LLMs based on the
+user request, offering greater flexibility.
+
+E.4   Learning Mathematical Reasoning
+Mathematical reasoning is the key to achieving
+embodied intelligence (Zhang et al., 2021, 2022c).
+In recent years, mathematical reasoning has be-
+come a significant benchmark (Cobbe et al., 2021;
+Hendrycks et al., 2021) to evaluate the capabili-
+ties of artificial intelligence models. Within the
+paradigm of supervised learning, a vast amount of
+research (Xie and Sun, 2019; Patel et al., 2021;
+Jie et al., 2022; Zhang et al., 2022b, 2023b) has
+been dedicated to translating human language into
+mathematical equations. In the era of LLMs, the
+advent of Chain-of-Thought and other prompting
+strategies have notably augmented the reasoning
+capabilities (Zhu et al., 2023; Yuan et al., 2023b;
+Frieder et al., 2023; Zhou et al., 2022).
+   Prompting Method PAL and Program-of-
+Thoughts (Gao et al., 2022; Chen et al., 2022) sep-
+arate the computation and reasoning process using
+code as the intermediate process. Mathprompter,
+Auto-Model (Imani et al., 2023; Zhao et al., 2023)
+encourage LLMs to generate diverse reasoning
+paths in different forms simultaneously, including
+text (CoT), code (PAL), and symbols (Equation)
+for a higher confidence answer. Automatic-CoT,
+Complexity-CoT, Synthetic Prompt and Boosted
+Prompt (Zhang et al., 2022d; Fu et al., 2022; Shao
+et al., 2023; Pitis et al., 2023) enhance reasoning
+performance by optimizing the selection of demon-
+strations within the prompt. Tree-of-thought and
+Self-Evaluation (Yao et al., 2023; Xie et al., 2023)
+extend the CoT into a search tree, obtaining more
+accurate answers through self-evaluation.
+   Finetuning-based Method Another domain of
+study involves methods based on finetuning. These
+approaches involve finetuning open-source models,
+such as LLaMA, by incorporating insights from
+                                                     3622
+

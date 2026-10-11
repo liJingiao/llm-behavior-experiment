@@ -1,0 +1,775 @@
+       Ask-Before-Detection: Identifying and Mitigating Conformity Bias in
+        LLM-Powered Error Detector for Math Word Problem Solutions
+
+                         Hang Li1 , Tianlong Xu2 , Kaiqi Yang1 , Yucheng Chu1 ,
+                        Yanling Chen1 , Yichi Song3 , Qingsong Wen2 , Hui Liu1 *
+                  1
+                    Michigan State University, 2 Squirrel Ai Learning, 3 Carleton College,
+                      {lihang4,kqyang,chuyuch2,chenya67,liuhui7}@msu.edu
+               {tianlongxu,qingsongwen}@squirrelai.com, {songc2}@carleton.edu
+
+
+                           Abstract                               LLMs in AED across diverse domains (Yan et al.,
+                                                                  2024). Moreover, due to the reasoning-intensive
+        The rise of large language models (LLMs) of-              nature of error detection in mathematical problems,
+        fers new opportunities for automatic error de-
+                                                                  recent research has employed AED tasks on math
+        tection in education, particularly for math word
+        problems (MWPs). While prior studies demon-               word problems (MWPs) to evaluate the compara-
+        strate the promise of LLMs as error detectors,            tive reasoning capabilities of LLMs (Li et al., 2024).
+        they overlook the presence of multiple valid              Studies (Zhou et al., 2024) have indicated that iden-
+        solutions for a single MWP. Our preliminary               tifying errors in MWPs, rather than generating cor-
+        analysis reveals a significant performance gap            rect solutions, serves as a more effective metric
+        between conventional and alternative solutions            for assessing differences in the reasoning capabil-
+        in MWPs, a phenomenon we term conformity
+                                                                  ities of LLMs. In this paper, we explore AED for
+        bias in this work. To mitigate this bias, we in-
+        troduce the Ask-Before-Detect (AskBD) frame-              MWPs. Specifically, building on prior studies, we
+        work, which generates adaptive reference so-              define the AED task as identifying both the erro-
+        lutions using LLMs to enhance error detec-                neous step and its error category from a given input
+        tion. Experiments on 200 examples of GSM8K                pair consisting of a question and its solution. It
+        show that AskBD effectively mitigates bias and            is important to note that a correct result requires
+        improves performance, especially when com-                accurate identification of both the error step and
+        bined with reasoning-enhancing techniques                 the error category.
+        like chain-of-thought prompting. The code and
+                                                                     While previous studies (Li et al., 2024; Zhou
+        data are available at https://github.com/
+        dse-ai-edu/AskBD.                                         et al., 2024) have explored various methods for
+                                                                  evaluating the error detection capabilities of LLMs
+   1    Introduction                                              on MWPs, these approaches predominantly focus
+                                                                  on generating erroneous solutions based solely on
+   Automatic Error Detection (AED) has been a                     the conventional solutions provided in the dataset.
+   prominent research topic in education over the past            In practice, however, a single MWP can have mul-
+   few decades (Leacock et al., 2014). Supported by               tiple valid solutions, leaving the performance of
+   rapid advancements in natural language processing              LLMs on alternative solutions largely unexplored.
+   (NLP) technologies, particularly in language mod-              In Figure 1, we present an illustrative example
+   eling (Min et al., 2023), AED research has achieved            where both the conventional and alternative solu-
+   notable success in language education (Huang et al.,           tions are submitted to an LLM-powered error de-
+   2023). The recent emergence of large language                  tector, yet only the conventional solution receives
+   models (LLMs) presents new opportunities for                   the correct detection result. Motivated by this ob-
+   AED studies. Leveraging their exceptional capabil-             servation, we propose an automatic method for
+   ities in logical reasoning (Pan et al., 2023), LLMs            generating alternative solutions and evaluate the
+   have become promising tools helping the quick                  behavior of LLM-powered error detectors on 200
+   development of AED in more challenging scenar-                 pairs of conventional and alternative solutions. Our
+   ios including programming (Messer et al., 2024)                preliminary results in section 2.3.1 reveal an av-
+   and mathematics learning (Jiang et al., 2024; Yen              erage 7% detecting accuracy performance gap be-
+   and Hsu, 2023). Recent studies have introduced                 tween conventional and alternative solutions, with
+   benchmark datasets to demonstrate the potential of             even advanced closed-source models exhibiting the
+       * Corresponding author.                                    same limitation. These findings suggest that current
+                                                             1597
+Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pages 1597–1609
+                            July 27 - August 1, 2025 ©2025 Association for Computational Linguistics
+  <Instruction> Given the                         <Solution A> Step 1. If he purchases jewelry, he will make a profit of 2.5% which is
+  <question>, please judge whether
+                                                  $5000*(2.5/100)= $125. Step 2. If he purchases electronic gadgets, he will make a profit of 1.2%
+  each step in <solution> is correct.             which is $8000*(1.2/100) = $96. Step 3. If he wants to maximize profit, since $125 > $96, he will
+  During the judging process, you
+                                                  choose to purchase jewelry, thereby making a profit of $125
+  should know that the <question>
+  does not always have only one
+  standard solution, and any reasonable
+  <solution> should be accepted ... In
+  each step, if no errors are found,              GPT-4o: Step 1: <Correct>\nStep 2: <Correct>\nStep 3: <Correct>.
+  respond with Step X: <Correct>. If              ...
+  you find errors in the step, please             Qwen2.5-7B: Step 1: <Correct>\nStep 2: <Correct>\nStep 3: <Correct>.
+  classify them based on the following
+  error categories ..., and respond with
+  Step X: <[Error Category]>.
+
+  <Question> A merchant wants to
+  make a choice of purchase between 2             <Solution B> Step 1. Jewelry worth $5,000 and its profit rate 2.5%, to make the profit value equal
+  purchase plans: jewelry worth $5,000            to the electronic gadgets worth $8,000, the profit value for electronic gadgets should be 5000 *
+  or electronic gadgets worth $8,000.             2.5% / 8000 = 1.56% Step 2. Since 1.56% > 1.2%, which is the actual electronic gadgets profit
+  His financial advisor speculates that           rate, the profit value of electronic gadgets will be less than the jewelry. Step 3. Choose Jewelry
+  the jewelry market will go up 2.5%              will maximize profit at the end of this month and the profit will be $5000 * 2.5% = $125.
+  while the electronic gadgets market
+  will rise 1.2% within the same
+  month. If the merchant is looking to
+  maximize profit at the end of this              GPT-4o: Step 1: <Calculation Error>\nStep 2: <Calculation Error>\nStep 3: <Correct>.
+  month by making a choice, how                   ...
+  much profit would this be?                      Qwen2.5-7B: Step 1: <Reference Error>\nStep 2: <Hallucination>\nStep 3: <Correct>.
+
+
+      Instruction / Question               LLMs                                       Solution / Response
+
+Figure 1: An illustration of error detection in MWP solutions: <Solution A> represents the conventional solution,
+which achieves accurate error detection with LLM-powered error detectors. In contrast, <Solution B>, while also
+correct, encounters erroneous error detection results across all LLM-powered error detectors.
+
+LLM-based error detectors display a pronounced                      conformity bias is significantly reduced across all
+conformity bias, favoring a specific solution for-                  LLMs. This finding inspires us to leverage refer-
+mat while rejecting others. This bias is particu-                   ence answers as a viable strategy for mitigating
+larly concerning in educational contexts, as it dis-                bias. However, uniformly providing a standard
+courages students from exploring diverse problem-                   reference answer for every solution is suboptimal
+solving approaches and stifles creativity.                          in practice. Misalignment between the reasoning
+                                                                    behind different solutions and the reference an-
+   To investigate the underlying causes of confor-
+                                                                    swer can sometimes degrade final detection per-
+mity bias and develop effective strategies to mit-
+                                                                    formance. To address this, we propose the Ask-
+igate it, we conduct further preliminary studies
+                                                                    Before-Detection (AskBD) framework, which gen-
+in Section 2.3, which examines the common pat-
+                                                                    erates adaptive reference answers through step-by-
+terns in the behavior of LLM-powered error detec-
+                                                                    step question-answering techniques. By leveraging
+tors when evaluating diverse solutions. Our find-
+                                                                    the strong problem-solving capabilities of LLMs
+ings reveal that error detection accuracy is closely
+                                                                    and employing a decomposed, question-guided ap-
+correlated with the likelihood scores assigned by
+                                                                    proach, the reference answers can be generated
+LLMs to solutions, with higher likelihood scores
+                                                                    with high accuracy, even using less capable mod-
+corresponding to improved detection performance.
+                                                                    els. Incorporating these generated reference so-
+Since alternative solutions typically receive lower
+                                                                    lutions significantly mitigates conformity bias in
+likelihood scores compared to conventional ones,
+                                                                    LLM-powered error detectors for MWP solutions.
+conformity bias naturally emerges. This observa-
+                                                                    Furthermore, the adaptability of the generated ref-
+tion points to a potential remedy: adjusting the like-
+                                                                    erences enhances the overall performance of LLM-
+lihood scores of solutions. However, this approach
+                                                                    powered error detector across both conventional
+faces two significant challenges. First, fine-tuning
+                                                                    and alternative solutions.
+advanced models requires high-quality datasets and
+incurs substantial costs. Second, while fine-tuning                 2      Preliminary Study
+may improve likelihood scores for samples within
+the training dataset, its generalizability to novel                 In this section, we present our preliminary studies
+solutions remains uncertain. During our investi-                    aimed at identifying and understanding the pres-
+gation into the impact of introducing a reference                   ence of conformity bias in LLM-powered error
+answer during error detection, we observed that                     detectors. Specifically, we begin by describing our
+                                                             1598
+    Conventional                            Conventional                             Alternative                             Alternative
+      Solution                               Expression                              Expression                               Solution
+
+
+
+
+ <Conventional Solution>: Step 1. Candidate A received 20% of 100 voters, so 100 x 20/100 = 20 votes. Step 2. Candidate B received
+ 50% more than candidate A, which is 20 x 50/100 = 10 more votes. Step 3. Therefore, candidate B received 20 (votes from A) + 10
+ (additional votes) = 30 votes. Step 4. Together, candidate A and B got 20 + 30 = 50 votes. Step 5. Candidate C received the remaining
+ votes, which is 100 (total voters) - 50 (votes from A and B) = 50 votes.
+
+ <Conventional Expression>: 100 - ((100 × 0.2) + ((100 × 0.2) + ((100 × 0.2) × 0.5)))
+
+ <Alternative Expression>: 100 × (1 - (0.2 + (0.2 × (1+ 0.5))))
+
+ <Alternative Solution>: Step 1. Calculate the ratio of the votes Candidate B received to those Candidate A received: 1 + 0.5 = 1.5. Step
+ 2. Calculate the fraction of total votes Candidate B received: 0.2 × 1.5 = 0.3. Step 3. Calculate the combined fraction of votes received by
+ Candidates A and B: 0.2 + 0.3 = 0.5. Step 4. Calculate the fraction of total votes Candidate C received: 1 - 0.5 = 0.5. Step 5. Calculate the
+ number of votes Candidate C received: 100 × 0.5 = 50 votes.
+
+
+Figure 2: The ASP pipeline to generate permuted solution. The corresponding relationships between the calculations
+in each step and the parts enclosed by different parentheses in expression are highlighted using matching colors.
+
+automated method for preparing an error detection                         dently. In the Extract stage, ASP encapsulates the
+dataset featured with paired conventional and alter-                      steps of a conventional solution into a single math-
+native solutions. Then, we analyze the relationship                       ematical expression. To ensure accuracy, these
+between likelihood scores and the behavior pat-                           expressions are executed, and any that fail to pro-
+terns of LLM-powered error detectors. Finally, we                         duce correct answer values are discarded. In the
+present our observations on how incorporating ref-                        Permute stage, ASP generates new expressions by
+erence solution text influences the performance and                       applying operations such as factorization, distribu-
+behavior of error detectors.                                              tion, and order rearrangement, which transform the
+                                                                          expressions while preserving their mathematical
+2.1 Automatic Solution Permutation                                        equivalence. A similar filtering process is applied
+Building a high-quality alternative solution dataset                      to these permuted expressions to ensure correctness.
+is critical to our preliminary study, as low-quality                      Finally, in the Explain stage, the permuted expres-
+alternatives, such as simple semantic paraphrases                         sions are provided to LLMs to guide the generation
+of conventional solutions, fail to effectively expose                     of high-quality alternative solutions. By instruct-
+the "conformity bias" in LLM-powered error detec-                         ing the LLMs to interpret the brackets within each
+tors. During our initial exploration, we observed                         expression as distinct steps, the ASP method pro-
+that directly using simple prompts to query LLMs                          duces detailed, step-by-step alternative solutions.
+for automatically generating alternative solutions                        Figure 2 illustrates the ASP pipeline and provides
+presents significant challenges. Specifically, LLMs                       an example of paired conventional and alternative
+often produce paraphrased versions of conventional                        solutions alongside their corresponding solving ex-
+solutions unless detailed and specific instructions                       pressions.
+about the solving strategy are provided during the                           In our study, we use GPT-4o as the backbone
+generation process. To address this, we propose                           LLM for each stage of the ASP method. To be-
+the Automatic Solution Permutation (ASP) method,                          gin, we randomly sample 200 question-and-answer
+which leverages the correspondence between con-                           pairs from the test split of GSM8K (Cobbe et al.,
+ventional solutions and their solving expressions.                        2021) and use them to construct our conventional
+Using these expressions as specific instructions                          dataset, D. For each sample in D, we apply ASP
+helps LLMs move beyond paraphrasing behavior,                             three times to generate three candidate permuted
+enabling the generation of high-quality alternative                       solutions for each conventional solution. Subse-
+solutions.                                                                quently, a graduate student from the education de-
+   The ASP method operates in three stages: Ex-                           partment reviews the quality of all the generated
+tract, Permute, and Explain. At each stage, LLMs                          alternative solutions and selects the highest-quality
+are prompted to execute specific tasks indepen-                           alternative solution for each convention solution.
+                                                                    1599
+These selected solutions are then compiled to form         Table 1: Error detection performance on ordinary (D)
+the alternative dataset, D′ .                              and alternative (D′ ) solutions. The performance gap is
+                                                           calculated as ∆ = |D′ − D|. Results marked with *
+2.2 Erroneous Solution Generation                          indicate statistical significance based on student’s t-test.
+After preparing the alternative solution dataset,
+                                                                                  Small                  Large
+the next step is to generate erroneous solutions.             Model
+Building on prior work (Li et al., 2024), which                             D      D′      ∆       D       D′      ∆
+categorize common errors in solutions to MWPs               GPT-4o         27.2   18.4    8.8∗    52.9    43.4    9.5∗
+into categories, we choose four representative er-         Claude-3.5      38.2   34.7    3.5∗    59.9    52.7    7.2∗
+ror types that commonly encountered in real-world          Gemini-1.5      46.4   39.5    6.9∗    65.2    55.6    9.6∗
+error grading scenarios: calculation errors (EC ),
+                                                           Llama-3.1       20.2   20.9    0.7     44.3    37.2    7.2∗
+reference errors (ER ), missing steps (EM ), and hal-
+                                                           Qwen-2.5        24.7   16.3    8.4∗    46.3    38.8    7.5∗
+lucinations (EH ), for our study. It is worth noting
+that this study specifically aims to explore con-
+formity bias, and therefore, we do not include all         lutions to the given question exist and emphasizes
+possible error types. To minimize the risk of exper-       that all reasonable solutions should be accepted. To
+imental noise caused by ambiguous definitions, we          minimize variability in performance due to ambi-
+defined these error types in a straightforward and         guity in error categories, we provide explicit defini-
+easily distinguishable manner. Detailed descrip-           tions for each error category within the prompt text,
+tions of each error type are provided in Table 8 in        ensuring clarity for the LLMs. The prompt used
+Appendix C. To simulate erroneous solutions, we            for the error detection task is illustrated in Figure 5
+injected these errors into correct solutions using         in Appendix D.
+a generation strategy inspired by prior work (Li
+                                                              To comprehensively analyze the conformity bias
+et al., 2024). During the injection process, the er-
+                                                           exhibited by various LLMs, we conducted exper-
+ror type was controlled through a hyper-parameter,
+                                                           iments with 10 representative models. These in-
+while the specific error location (error step number)
+                                                           clude three closed-source series with their large
+was determined randomly. This approach enables
+                                                           (small) versions (e.g., GPT-4o (Mini) (Bubeck
+controlled testing of the AED’s ability to handle
+                                                           et al., 2023), Gemini-1.5-Pro (Flash) (Team et al.,
+and identify various error scenarios effectively. For
+                                                           2023), Claude-3.5-Sonnet (Haiku) (Anthropic,
+each example in D and D′ , we generated four corre-
+                                                           2024)) and two open-source series with their
+sponding erroneous solutions, each associated with
+                                                           large (small) counterparts (e.g., Llama-3.1-70B
+one of the four error types. This process yielded a
+                                                           (8B) (Touvron et al., 2023) and Qwen-2.5-72B
+total of 2,000 examples, which were prepared for
+                                                           (7B) (Yang et al., 2024)). Table 1 presents a com-
+subsequent analysis.
+                                                           parison of the average error detection accuracy
+2.3 Analysis and Findings                                  across both the conventional solution D and the
+Before delving into the details about our analy-           alternative solution D′ dataset. The results clearly
+sis and findings, we first introduce the evaluation        demonstrate a consistent performance gap between
+metric used for our following analyses. Specifi-           the two datasets, confirming the presence of con-
+cally, since the locations and categories of injected      formity bias in LLM-based error detection tasks.
+errors are automatically labeled during the error
+                                                           2.3.2    Solution Likelihood Score Analysis
+injection process for each solution, we task the
+LLM-powered error detector with identifying both           To investigate the underlying causes of conformity
+the error locations and their types. The evaluation        bias, we first chose to use the log-likelihood score,
+metric is the identification accuracy across both          denoted as log Lθ (s|q), returned by the LLM for
+correct and erroneous solutions.                           a given solution text s to the question text q, as
+                                                           an indicator. This likelihood score is utilized as it
+2.3.1 Conformity Bias Identification                       reflects the LLM’s confidence in the solution text
+To identify conformity bias, we employ a widely-           relative to the question text. If a solution known
+used LLM-powered error detection approach, lever-          to be correct receives a low confidence score from
+aging prompt engineering techniques outlined in            the LLM, it suggests that the LLM does not fully
+previous studies (Li et al., 2024). In addition, the in-   understand the solution. Conversely, if the correct
+struction text informs the LLMs that alternative so-       solution receives a high score, it indicates that the
+                                                       1600
+           (a) Small models                             (b) Large models                  (c) Likelihood distributions
+
+Figure 3: Average error detection accuracy across samples grouped by the 25th, 50th, and 75th percentiles of Iu .
+
+LLM is proficient with the solution. The detailed                 is caused by its decreased understanding to those
+calculation method is presented below:                            alternative solution.
+
+                    |s|                                           2.3.3 Reference-based Detection Findings
+                    X
+   log Lθ (s|q) =         log Lθ (si |[q, s1:(i−1) ])     (1)     Directly improving the likelihood scores of alter-
+                    i=1                                           native solutions poses inherent challenges. Strate-
+                                                                  gies like fine-tuning large language models (LLMs)
+where θ represents the parameters of the LLM, [·, ·]              primarily improve likelihood scores for training
+is text concatenation, si is the i-th token of the                samples, but their effectiveness on unseen alterna-
+solution text. However, directly comparing the                    tive solutions remains unpredictable. Building on
+likelihood scores calculated by Equation 1 for so-                prior work (Daheim et al., 2024), which demon-
+lutions of varying lengths is still problematic, as               strated that introducing reference answers during
+the likelihood score is inversely proportional to the             error detection enhances performance on conven-
+length of s. In other words, shorter solutions with               tional solutions, we extend this approach to alter-
+fewer tokens tend to have higher scores than longer               native solutions. It is important to note that, in real-
+ones. To address this issue, we finally adopt the                 world error detection scenarios, reference answers
+average token log-likelihood score for our analysis               are not always available. Even when they are, con-
+in subsequent studies.                                            ventional solutions are more commonly provided.
+                                                                  Take this into consideration, we conducted exper-
+                               log Lθ (s|q)                       iments comparing two reference-based detection
+            log L̄θ (s|q) =                               (2)
+                                   |s|                            setups: (1) uniformly using conventional solutions
+   In Figure 3b and Figure 3a, we present the aver-               as references and (2) adaptively using correspond-
+age error detection accuracy across different like-               ing solutions as references. The detailed results are
+lihood score groups. Specifically, given the likeli-              presented in Table 3 and Table 2, respectively.
+hood score to both convention and alternative so-
+                                                                  Table 2: Error detection performance w/ using corre-
+lutions, we group them based on their likelihood                  sponding solution as reference solution for both ordinary
+score percentiles. For simplicity, we use the four                (D) and alternative (D′ ) solutions. The performance gap
+quarters in our experiment. It is important to note               is calculated by ∆ = |D′ − D|. Results marked with *
+that, since the likelihood scores of closed-source                indicate statistical significance based on student’s t-test.
+models are unavailable, we use the average scores
+                                                                                         Small                  Large
+of all open-source LLMs as a pseudo-indicator for                    Model
+this analysis. From the figure, we observe that                                    D      D′      ∆       D       D′      ∆
+the larger quarter groups with higher indicator val-
+                                                                   GPT-4o         60.0   56.5    3.5∗    75.5    73.8    1.7∗
+ues exhibit a clear advantage over those with the
+                                                                  Claude-3.5      60.4   57.9    2.5∗    84.0    81.6    2.4∗
+smaller quarter ones. In addition, we plot the likeli-
+                                                                  Gemini-1.5      69.7   66.7    3.0∗    85.3    83.7    1.6∗
+hood score distribution comparisons between the
+                                                                  Llama-3.1       34.6   33.7    0.9     77.5    79.4    1.9∗
+solution from D and D′ in Figure 3c. From these
+                                                                  Qwen-2.5        54.4   51.2    3.2∗    59.3    60.8    1.5∗
+plot, we can draw a clear conclusion that the con-
+formity bias in current LLM to error detection tasks
+                                                             1601
+Table 3: Error detection performance w/ using con-           can be further improved. The overall structure of
+vention solution as reference for both ordinary (D) and      the AskBD is illustrated in Figure 4.
+alternative (D′ ) solutions. The performance gap is calcu-
+lated by ∆ = |D′ − D|. Results marked with * indicate         Algorithm 1: Ask-Before-Detection
+statistical significance based on student’s t-test.            Input: Question text q, solution text s, large
+                      Small                  Large                        lanauge model fθ , prompt text for
+    Model                                                                 each component P(·)
+                D      D′      ∆       D      D′      ∆
+                                                             1 Condition and question extractor (CQE):
+ GPT-4o        60.0   32.0    28.0∗   75.5   53.3    22.2∗      Extract condition information qc and
+Claude-3.5     60.4   38.9    21.5∗   84.0   59.4    24.6∗      inquiry text qi from the question text q.
+Gemini-1.5     69.7   50.8    18.9∗   85.3   67.7    17.6∗      (qc , qi ) = fθ ([Pcqe , q]);
+Llama-3.1      34.6   20.5    14.1∗   77.5   48.8    28.7∗   2 Solution Step Inquirer (SSI): Convert
+Qwen-2.5       54.4   22.2    32.2∗   59.3   43.5    15.8∗      solution text s into step-wise question list
+                                                                text Q and append inquiry text qi at the
+                                                                end. Q = [fθ ([Pssi , s]), qi ];
+   By analyzing the results across Table 1, Table 3,         3 Step Question Responder (SQR): Generate
+and Table 2, it is evident that introducing refer-              reference solution r by summarizing the
+ence solutions improves error detection accuracy                answers to each question in Q using
+for both datasets, D and D′ . However, the choice               condition text qc . r = fθ ([Psqr , qc , Q]);
+of reference solution significantly impacts perfor-          4 Reference-Enhanced Grader (REG):
+mance. While introducing corresponding reference                Generate the error detection result (error
+solutions effectively mitigates bias, uniformly us-             location ys , error type ye ) based on the
+ing conventional solutions tends to amplify it. This            input (q, s, r). y = fθ ([Preg , q, s, r]);
+contrast highlights the critical importance of select-       5 return ys , ye
+ing appropriate reference solutions to enhance error
+detection in alternative scenarios.
+                                                                AskBD consists of four components, executed
+3    Method                                                  sequentially to generate an adaptive reference an-
+                                                             swer tailored to the input solution. First, the Condi-
+The findings in Section 2.3.3 suggest that incor-            tion and Question Extractor (CQE) processes the
+porating a reference solution during the detection           input question text, q, by extracting two key ele-
+process is an effective approach to addressing con-          ments from the original question stem: condition
+formity bias. However, the choice of the refer-              information and inquiry text. The condition infor-
+ence solution plays a critical role. Building on             mation, qc , represents the known facts or context
+this insight, we propose the Ask-Before-Detection            provided in the question, while the inquiry text, qi ,
+(AskBD) framework, which leverages the genera-               specifies the task or problem posed by the question.
+tive capabilities of large language models (LLMs)            Then, the Solution Step Inquirer (SSI) focuses on
+to create adaptive reference solutions tailored to           generating step-specific questions based on the con-
+each provided solution during the grading process.           clusions of each step in the provided solution, s. To
+The AskBD offers several advantages. First, it uti-          improve the stability of the generated results, the
+lizes the inherent problem-solving capabilities of           SSI first summarizes the conclusion of each step
+LLMs rather than relying on fine-tuning, which               before formulating corresponding questions. These
+makes AskBD easily extendable to various solu-               step-specific questions are compiled into a question
+tions. Second, by adaptively generating reference            list, Q, with the inquiry text qi always appended to
+solutions, the framework ensures that these ref-             the end of the list to ensure that the original ques-
+erences are well-aligned with the given answers,             tion’s task is addressed in the generated reference
+significantly reducing the risk of mismatches that           answer. Next, after both the condition text qc and
+could amplify bias. Furthermore, the AskBD is                the question list Q are prepared, the Step Ques-
+orthogonal to other reasoning techniques, such as            tion Responder (SQR) generates responses to each
+chain-of-thought (CoT) (Wei et al., 2022a), mean-            question in Q and reorganizes them into a refer-
+ing that it can complement and enhance their per-            enced solution, r. Finally, the Reference-Enhanced
+formance. By integrating AskBD with these algo-              Grader (REG) uses the referenced solution r along
+rithms, the error detection capabilities of LLMs             with the inputs q and s to produce the final grading
+                                                          1602
+     <Question> (Input)                                               <Condition Information> (CQE)
+     In a student council election, candidate A got 20% of the        In a student council election, candidate A got 20% of the votes while candidate B
+     votes while candidate B got 50% more than candidate A's          got 50% more than candidate A's votes. The rest of the votes was given to
+     votes. The rest of the votes was given to candidate C. If        candidate C. There were 100 voters.
+     there were 100 voters, how many votes did candidate C get?       <Inquiry Text> How many votes did candidate C get?
+
+
+     <Solution> (Input)                             <Step Question> (SSI)             <Reference Answer> (SQR)
+     Step 1. Candidate A received 20% of            Step 1. How many votes            Step 1. The ratio of the votes Candidate B received to those
+     100 voters, so 100 x 20/100 = 20 votes.        did candidate A get?              Candidate A received is 30 votes to 20 votes, which simplifies to
+     Step 2. Candidate B received 50% more          Step 2. How many more             30/20 = 3/2.
+     than candidate A, which is 20 x 50/100         votes did candidate B get         Step 2. Candidate B received 30 votes out of 100, so the fraction
+     = 10 more votes.                               compared to candidate A?          of the total votes Candidate B received is 30/100 = 0.3 or 30%.
+     Step 3. ...                                    Step 3. ...                       Step 3.....
+
+
+
+     <Judgment> (REG)
+     Step 1. <Correct> Step 2. <Correct> Step 3. ...
+
+
+
+
+Figure 4: An overview of AskBG framework where steps are marked with colors. <Question> and <Solution> are
+the inputs and <Reference Answer> is generated by the framework,
+                                                        1        which used to generate the final response.
+
+results. More details can be found in Algorithm 1.                              CoT, being an orthogonal method to AskBD, is
+                                                                                treated as another baseline for comparison.
+4   Experiment
+                                                                                4.2    Result and Discussion
+In this section, we present experiments to validate
+the effectiveness of AskBD. Experiments are de-                                 In Table 4, we present the comparison between
+signed to address the following research questions:                             baseline methods and AskDB over both the con-
+                                                                                ventional solutions D and alternative solution D′ .
+• RQ1: Does AskBD help mitigate conformity                                      To address RQ1, we analyze the values in the ∆
+  bias in error detection?                                                      columns between M2 and M0 . The table clearly
+• RQ2: What additional performance advantages                                   demonstrates that AskDB is effective in mitigat-
+  does AskBD provide?                                                           ing conformity bias in error detection results for
+                                                                                advanced versions of LLMs. However, for base
+• RQ3: How compatible is AskBD with other rea-                                  LLMs, the benefits of naively applying AskDB are
+  soning techniques, such as chain-of-thought?                                  less evident. Among the five LLM frameworks,
+                                                                                only Gemini exhibits a reduced performance gap
+4.1 Experimental Settings                                                       between D and D′ . We attribute this to the rela-
+To answer above research questions, we use dataset                              tively weaker reasoning capabilities of base mod-
+generated during the preliminary study introduced                               els. With the naive instruction prompt, these mod-
+in Section 2. The detailed statistics of the dataset                            els fail to fully leverage the valuable information
+are shown as Table 6 in Appendix A. To evaluate                                 provided by the reference solutions, thereby lim-
+the generalizability of AskBD, we implement it us-                              iting the effectiveness of AskDB in these cases.
+ing the same 10 LLMs described in Section 2, along                              Comparing M1 with M2 , we observe that the CoT
+with two math-specific models, including Qwen2.5-                               prompt strategy also helps mitigate conformity bias
+Math. Detailed information about each model is                                  in LLM-powered error detectors. Nevertheless, in
+provided in Table 7 in Appendix B. Additionally,                                most advanced models, AskDB consistently out-
+we incorporate the CoT reasoning approach into                                  performs CoT in narrowing the gap between con-
+the prompts to assess its compatibility with AskBD,                             ventional and alternative solutions.
+the prompt is shown as Figure 6 in Appendix E.                                     To answer RQ2, we compare M2 with M0 in
+Each experiment is conducted using three different                              the D and D′ columns. The results indicate a con-
+random seeds, and we report the mean error detec-                               sistent improvement in error detection accuracy af-
+tion accuracy in the results. As this is the first study                        ter adopting the AskDB framework. This suggests
+to systematically examine the occurrence of con-                                that AskDB not only helps reduce the performance
+formity bias in LLM-powered error detection for                                 gap between conventional and alternative solutions
+MWP solutions, the results from the preliminary                                 but also enhances overall detection performance.
+study sections serve as one baseline. Furthermore,                              Comparing M1 with M2 , we find that AskDB and
+                                                                        1603
+Table 4: Error detection performance w/ different baseline methods (M0 : Naive prompt, M1 :CoT prompt, M2 :
+Naive prompt + AskBD, M3 : CoT prompt + AskBD) on ordinary solutions (D) and alternative solutions (D′ ). The
+performance gap is calculated by ∆ = |D − D′ |. The best performed results in each group is marked with underline.
+
+                                   D↑                                D′ ↑                                       ∆↓
+      Model
+                    M0      M1          M2     M3     M0         M1         M2       M3         M0        M1          M2           M3
+                                                                   Small
+    GPT-4o          27.2    47.7        48.8   59.1   18.4    36.7        37.8       48.5       8.8       11.0       11.0          10.6
+  Claude-3.5        38.2    51.1        50.7   56.6   34.7    48.5        44.0       51.8       3.5       2.6        6.7            4.8
+  Gemini-1.5        46.4    54.2        61.7   62.4   39.5    49.5        55.5       59.5       6.9        4.7       6.2            2.9
+   Llama-3.1        20.2    34.6        23.5   37.9   20.9    31.0        23.6       32.4       0.7       3.6        0.1            5.4
+   Qwen-2.5         24.7    40.3        34.4   44.3   16.3    35.3        25.0       38.3       8.4        5.0       9.5            6.0
+ Qwen-2.5-Math      24.2    23.3        23.4   23.8   20.7    23.0        22.2       23.7       3.5       0.3        1.2            0.1
+                                                                    Large
+    GPT-4o          52.9    63.4        67.1   66.3   43.4    59.3        58.0       61.4       9.5       4.1         9.1          4.9
+  Claude-3.5        59.0    61.7        72.5   73.1   52.7    57.0        67.4       69.5       6.3       4.7         5.2          3.6
+  Gemini-1.5        65.2    65.6        76.0   71.8   55.6    58.1        72.2       68.8       9.6       7.5         3.8          3.0
+   Llama-3.1        44.3    64.0        63.4   71.9   37.2    56.4        57.1       67.9       7.2       7.6         6.3          4.0
+   Qwen-2.5         46.3    57.4        45.4   60.2   38.8    50.6        43.0       58.2       7.5       6.8         2.4          2.0
+ Qwen-2.5-Math      43.5    41.2        49.6   48.2   39.9    40.0        47.7       46.9       3.6       1.2         1.9          1.3
+
+
+
+CoT prompts enable different LLMs to achieve bet-            Table 5: Error detection performance w/ different base-
+ter results. In summary, AskDB is more compatible            line methods (M0 : Naive prompt, M1 :CoT prompt,
+                                                             M2 : Naive prompt + AskBD, M3 : CoT prompt +
+with advanced models, while CoT demonstrates
+                                                             AskBD) on solutions with multiple errors.
+greater efficacy with base-sized models.
+                                                                                        First                        Overall
+   To address RQ3, we compare M3 with M1 .                         Mode
+The results reveal that AskDB is highly compatible                            M0     M1     M2     M3     M0     M1         M2      M3
+
+with other reasoning-enhancing techniques such as                                                     Small
+
+CoT prompts in the context of error detection. For                GPT-4o      18.8   35.9   38.6   65.8   18.8   35.9       38.6    45.2
+                                                                 Claude-3.5   19.0   56.5   38.3   59.5   18.1   40.6       29.0    40.3
+advanced model of Llama-3.1 and base model of
+                                                                 Gemini-1.5   20.5   38.2   63.5   69.5   16.3   26.7       38.8    44.8
+Gemini-1.5, combining AskDB with CoT yields
+                                                                                                      Large
+significant performance improvements compared
+                                                                  GPT-4o      41.7   62.0   69.0   72.2   31.9   41.0       47.4    47.3
+to using either method independently. These find-
+                                                                 Claude-3.5   31.3   57.3   62.2   71.7   29.3   48.9       45.6    54.6
+ings confirm that AskDB is a robust approach for                 Gemini-1.5   57.3   65.0   80.2   80.0   44.1   45.8       61.2    57.1
+mitigating conformity bias. Moreover, its com-
+patibility with other reasoning-enhancement tech-
+                                                             (M3 ) demonstrates robust performance in detect-
+niques achieves the best overall performance in
+                                                             ing the first error, even when multiple errors are
+error detection tasks.
+                                                             present in the solution. Although the overall er-
+4.3 Further Studies                                          ror detection accuracy is lower than the first er-
+                                                             ror detection accuracy, we can still confirm that
+It is valuable to explore AskBD’s performance                the reference-based strategy introduced in AskBD
+when faced with multiple errors, as successful de-           helps LLMs achieve better performance compared
+tection of these errors could offer a comprehensive          to the baselines.
+view of the student’s problems in a single instance.
+To explore this, we sampled 100 solutions each               5      Related Work
+from the original and alternative solutions, intro-
+ducing two sequential errors into them. To evaluate          5.1      Automatic Error Detection
+performance, we used two metrics: (1) first error            Automatic error detection (AED) is a widely stud-
+detection accuracy and (2) overall error detection           ied research task in the field of education (Zamora
+accuracy. The results are shown in the Table 5.              et al., 2018). Since the advent of pre-trained lan-
+From the table, we can confirm that our AskBD                guage models (PLMs) such as BERT (Kenton
+                                                       1604
+and Toutanova, 2019), AED algorithms in lan-            6   Conclusion
+guage education have achieved significant advance-      In this work, we investigate the behavior of LLM-
+ments (Bryant et al., 2023). Applications like gram-    powered error detectors when encountering alterna-
+mar error detection have been widely implemented        tive solutions commonly found in real-world math
+in the teaching of languages (He, 2021). More-          word problems. Through a preliminary study on an
+over, by integrating PLMs with acoustic models,         alternative solution error detection dataset, we iden-
+AED has also shown promising results in detecting       tify and confirm the presence of conformity bias
+pronunciation errors (Wei et al., 2022b). The re-       in LLMs during error detection. Motivated by our
+cent emergence of large language models (LLMs)          findings on the impact of incorporating reference
+has further expanded the scope of AED research          solutions, we propose the Ask-Before-Detection
+beyond language education. Leveraging their ad-         (AskBD) framework, which enhances error detec-
+vanced capabilities in mathematical reasoning (Ahn      tion by adaptively generating reference solutions.
+et al., 2024), task planning (Huang et al., 2024),      Comprehensive experiments on 200 examples from
+and even programming (Nam et al., 2024), LLMs           GSM8K demonstrate the effectiveness of AskBD
+have been increasingly adopted in recent studies        in mitigating conformity bias. Furthermore, when
+to develop AED solutions for complex educational        combined with reasoning enhancement techniques
+subjects, such as programming (Gabbay and Cohen,        like chain-of-thought (CoT) prompting, AskBD
+2024) and mathematics (Yan et al., 2024).               achieves significant improvements in both bias mit-
+                                                        igation and overall performance.
+5.2 Math Reasoning in LLMs
+Reasoning capability is one of the most attrac-         Limitation
+tive features reported among the emergent capa-         In this work, we identify conformity bias in LLM-
+bilities of large language models (LLMs). Build-        powered error detectors for math word problem
+ing on approaches such as chain-of-thought (Wei         (MWP) solutions using 200 seed samples from the
+et al., 2022a), LLMs have demonstrated impres-          GSM8K dataset. During the data preparation pro-
+sive performance in solving complex logical rea-        cess, we selected four common error types in stu-
+soning problems. However, recent studies (Prab-         dent solutions as targets to simulate real-world er-
+hakar et al., 2024) have raised skepticism about        ror detection scenarios. However, this approach has
+these reasoning capabilities, suggesting they may       limitations, as it overlooks the occurrence of rarer
+primarily originate from memorization rather than       but potentially more challenging error types in stu-
+genuine reasoning ability. To address these con-        dent solutions. To address this, we plan to collect
+cerns, numerous new reasoning tasks and bench-          samples from real-world student responses in fu-
+mark datasets have been introduced (Srivastava          ture iterations of our study. Additionally, this work
+et al., 2024). Among these, approaches that in-         focuses exclusively on alternative solutions for
+volve error detection and correction of flawed so-      math word problems. The phenomenon of multiple
+lutions have gained popularity in the community         valid solutions to a single problem is widespread
+as a means to evaluate true mathematical reason-        across other subjects in education. In future re-
+ing capabilities, aided by the availability of exten-   search, we aim to extend our analysis of conformity
+sive benchmark datasets (Zhou et al., 2024). To         bias to these subjects, contributing to the develop-
+reduce the burden of tedious human annotation,          ment of LLM-powered detectors as more effective
+many recent works have proposed algorithms to           tools in educational contexts.
+automatically generate inputs for these tasks based
+on existing datasets (Li et al., 2024). Through         Acknowledge
+extensive experiments on these newly introduced         Hang Li, Kaiqi Yang, Yucheng Chu and
+mathematical reasoning tasks, the reasoning capa-       Hui Liu are supported by the National Sci-
+bilities of LLMs have been rigorously evaluated         ence Foundation (NSF) under grant num-
+and significantly validated. Moreover, with the         bers CNS2321416, IIS2212032, IIS2212144,
+rapid advancements in multi-modal large language        IOS2107215, DUE2234015, CNS2246050,
+models, investigating the multimodal mathematical       DRL2405483 and IOS2035472, US Department
+reasoning capabilities of current vision-language       of Commerce, Gates Foundation, the Michigan
+LLMs is becoming an increasingly prominent area         Department of Agriculture and Rural Development,
+of research (Yan et al., 2024).                         Amazon, Meta, and SNAP.
+                                                    1605
+References                                                    Claudia Leacock, Martin Chodorow, Michael Gamon,
+                                                                and Joel Tetreault. 2014. Automated grammatical
+Janice Ahn, Rishu Verma, Renze Lou, Di Liu, Rui                 error detection for language learners. Morgan &
+  Zhang, and Wenpeng Yin. 2024. Large language                  Claypool Publishers.
+  models for mathematical reasoning: Progresses and
+  challenges. arXiv preprint arXiv:2402.00157.                Xiaoyuan Li, Wenjie Wang, Moxin Li, Junrong Guo,
+                                                                Yang Zhang, and Fuli Feng. 2024. Evaluating mathe-
+Anthropic. 2024. The claude 3 model family: Opus,               matical reasoning of large language models: A focus
+  sonnet, haiku.                                                on error identification and correction. arXiv preprint
+                                                                arXiv:2406.00755.
+Christopher Bryant, Zheng Yuan, Muhammad Reza
+  Qorib, Hannan Cao, Hwee Tou Ng, and Ted Briscoe.            Marcus Messer, Neil CC Brown, Michael Kölling, and
+  2023. Grammatical error correction: A survey of              Miaojing Shi. 2024. Automated grading and feed-
+  the state of the art. Computational Linguistics,             back tools for programming education: A systematic
+  49(3):643–701.                                               review. ACM Transactions on Computing Education,
+                                                               24(1):1–43.
+Sébastien Bubeck, Varun Chandrasekaran, Ronen El-
+  dan, Johannes Gehrke, Eric Horvitz, Ece Kamar,              Bonan Min, Hayley Ross, Elior Sulem, Amir
+  Peter Lee, Yin Tat Lee, Yuanzhi Li, Scott Lund-               Pouran Ben Veyseh, Thien Huu Nguyen, Oscar Sainz,
+  berg, et al. 2023. Sparks of artificial general intelli-      Eneko Agirre, Ilana Heintz, and Dan Roth. 2023.
+  gence: Early experiments with gpt-4. arXiv preprint           Recent advances in natural language processing via
+  arXiv:2303.12712.                                             large pre-trained language models: A survey. ACM
+                                                                Computing Surveys, 56(2):1–40.
+Karl Cobbe, Vineet Kosaraju, Mohammad Bavarian,               Daye Nam, Andrew Macvean, Vincent Hellendoorn,
+  Mark Chen, Heewoo Jun, Lukasz Kaiser, Matthias                Bogdan Vasilescu, and Brad Myers. 2024. Using an
+  Plappert, Jerry Tworek, Jacob Hilton, Reiichiro               llm to help with code understanding. In Proceedings
+  Nakano, et al. 2021. Training verifiers to solve math         of the IEEE/ACM 46th International Conference on
+  word problems. arXiv preprint arXiv:2110.14168.               Software Engineering, pages 1–13.
+Nico Daheim, Jakub Macina, Manu Kapur, Iryna                  Liangming Pan, Alon Albalak, Xinyi Wang, and
+  Gurevych, and Mrinmaya Sachan. 2024. Stepwise                 William Yang Wang. 2023. Logic-lm: Empower-
+  verification and remediation of student reasoning er-         ing large language models with symbolic solvers
+  rors with large language model tutors. arXiv preprint         for faithful logical reasoning.  arXiv preprint
+  arXiv:2407.09136.                                             arXiv:2305.12295.
+Hagit Gabbay and Anat Cohen. 2024. Combining llm-             Akshara Prabhakar, Thomas L Griffiths, and R Thomas
+  generated and test-based feedback in a mooc for pro-          McCoy. 2024. Deciphering the factors influenc-
+  gramming. In Proceedings of the Eleventh ACM                  ing the efficacy of chain-of-thought: Probability,
+  Conference on Learning@ Scale, pages 177–187.                 memorization, and noisy reasoning. arXiv preprint
+                                                                arXiv:2407.01687.
+Zhenhui He. 2021. English grammar error detection
+  using recurrent neural networks. Scientific Program-        Saurabh Srivastava, Anto PV, Shashank Menon, Ajay
+  ming, 2021(1):7058723.                                        Sukumar, Alan Philipose, Stevin Prince, Sooraj
+                                                                Thomas, et al. 2024. Functional benchmarks for
+Xinyi Huang, Di Zou, Gary Cheng, Xieling Chen, and              robust evaluation of reasoning performance, and the
+  Haoran Xie. 2023. Trends, research issues and appli-          reasoning gap. arXiv preprint arXiv:2402.19450.
+  cations of artificial intelligence in language education.   Gemini Team, Rohan Anil, Sebastian Borgeaud, Jean-
+  Educational Technology & Society, 26(1):112–131.              Baptiste Alayrac, Jiahui Yu, Radu Soricut, Johan
+                                                                Schalkwyk, Andrew M Dai, Anja Hauth, Katie
+Xu Huang, Weiwen Liu, Xiaolong Chen, Xingmei
+                                                                Millican, et al. 2023.    Gemini: a family of
+  Wang, Hao Wang, Defu Lian, Yasheng Wang, Ruim-
+                                                                highly capable multimodal models. arXiv preprint
+  ing Tang, and Enhong Chen. 2024. Understanding
+                                                                arXiv:2312.11805.
+  the planning of llm agents: A survey. arXiv preprint
+  arXiv:2402.02716.                                           Hugo Touvron, Louis Martin, Kevin Stone, Peter Al-
+                                                                bert, Amjad Almahairi, Yasmine Babaei, Nikolay
+Zhuoxuan Jiang, Haoyuan Peng, Shanshan Feng, Fan                Bashlykov, Soumya Batra, Prajjwal Bhargava, Shruti
+  Li, and Dongsheng Li. 2024. Llms can find mathe-              Bhosale, et al. 2023. Llama 2: Open founda-
+  matical reasoning mistakes by pedagogical chain-of-           tion and fine-tuned chat models. arXiv preprint
+  thought. arXiv preprint arXiv:2405.06705.                     arXiv:2307.09288.
+Jacob Devlin Ming-Wei Chang Kenton and Lee Kristina           Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten
+   Toutanova. 2019. Bert: Pre-training of deep bidirec-          Bosma, Fei Xia, Ed Chi, Quoc V Le, Denny Zhou,
+   tional transformers for language understanding. In            et al. 2022a. Chain-of-thought prompting elicits rea-
+   Proceedings of naacL-HLT, volume 1, page 2. Min-              soning in large language models. Advances in neural
+   neapolis, Minnesota.                                          information processing systems, 35:24824–24837.
+                                                          1606
+Xing Wei, Catia Cucchiarini, Roeland van Hout, and        A     Dataset Statistics
+  Helmer Strik. 2022b. Automatic speech recognition
+  and pronunciation error detection of dutch non-native
+                                                          Table 6: Statistics on conventional solutions (D) and al-
+  speech: cumulating speech resources in a pluricentric
+  language. Speech Communication, 144:1–9.                ternative solutions (D′ ) across different error categories.
+
+Yibo Yan, Shen Wang, Jiahao Huo, Hang Li, Boyan Li,                                              Error
+  Jiamin Su, Xiong Gao, Yi-Fan Zhang, Tianlong Xu,           Solution     Correct
+  Zhendong Chu, et al. 2024. Errorradar: Benchmark-                                    EC     ER       EM      EH
+  ing complex mathematical reasoning of multimodal              D           200       200    200      200      200
+  large language models via error detection. arXiv
+  preprint arXiv:2410.04509.                                    D′          200       200    200      200      200
+
+An Yang, Baosong Yang, Binyuan Hui, Bo Zheng,
+  Bowen Yu, Chang Zhou, Chengpeng Li, Chengyuan
+  Li, Dayiheng Liu, Fei Huang, et al. 2024. Qwen2         B    LLM Details
+  technical report. arXiv preprint arXiv:2407.10671.
+                                                          Table 7: Details about LLM implementation in this
+An-Zi Yen and Wei-Ling Hsu. 2023. Three ques-             paper and source file links.
+  tions concerning the use of large language models
+  to facilitate mathematics learning. arXiv preprint
+  arXiv:2310.13615.                                             LLM Name                     Model ID
+                                                                                     Small
+Ángela Zamora, José Manuel Suárez, and Diego Ar-
+  dura. 2018. Error detection and self-assessment as              GPT-4o              gpt-4o-mini-2024-07-18
+  mechanisms to promote self-regulation of learning             Claude-3.5          claude-3-5-haiku-20241022
+  among secondary education students. The Journal of            Gemini-1.5             Gemini-1.5-Flash-002
+  Educational Research, 111(2):175–185.
+                                                                 Llama-3.1             Llama-3.1-8B-Instruct
+Zihao Zhou, Shudong Liu, Maizhen Ning, Wei Liu,                  Qwen-2.5              Qwen2.5-7B-Instruct
+  Jindong Wang, Derek F Wong, Xiaowei Huang, Qi-               Qwen-2.5-Math        Qwen2.5-Math-7B-Instruct
+  ufeng Wang, and Kaizhu Huang. 2024. Is your
+                                                                                     Large
+  model really a good math reasoner? evaluating math-
+  ematical reasoning with checklist. arXiv preprint               GPT-4o               gpt-4o-2024-08-06
+  arXiv:2407.08733.                                             Claude-3.5        claude-3-5-sonnet-20240620
+                                                                Gemini-1.5            Gemini-1.5-Pro-002
+                                                                 Llama-3.1           Llama-3.1-70B-Instruct
+                                                                 Qwen-2.5            Qwen2.5-72B-Instruct
+                                                               Qwen-2.5-Math      Qwen2.5-Math-72B-Instruct
+
+
+
+                                                          C     Error Definitions
+                                                          D     Naive Instruction Prompt
+                                                          E    COT Instruction Prompt
+
+
+
+
+                                                      1607
+Table 8: Detailed definition to each error. The error location for each example is marked with the red color. The
+original solution is presented at the top of the table for reference.
+
+ Error            Definition                         Example
+ -                Correct solution.                  Step 1. Each gust blows the leaf forward 5 feet, so 11 gusts will blow it forward
+                                                     5 × 11 = 55 feet. Step 2. Each swirl after a gust blows it back 2 feet, so 11
+                                                     swirls will blow it back 2 × 11 = 22 feet. Step 3. After 11 gusts, the leaf has
+                                                     traveled 55 − 22 = 33 feet down the sidewalk.
+ EC               Operands in expressions are cor- Step 1. Each gust blows the leaf forward 5 feet, so 11 gusts will blow it forward
+                  rect but an error occurs in the 5 × 11 = 50 feet. Step 2. Each swirl after a gust blows it back 2 feet, so 11
+                  calculated results.              swirls will blow it back 2 × 11 = 22 feet. Step 3. After 11 gusts, the leaf has
+                                                   traveled 55 − 22 = 33 feet down the sidewalk.
+ ER               Expression are incorrectly refer- Step 1. Each gust blows the leaf forward 5 feet, so 10 gusts will blow it forward
+                  encing the question conditions 5 × 10 = 50 feet. Step 2. Each swirl after a gust blows it back 2 feet, so 11
+                  or the results from prior steps.  swirls will blow it back 2 × 11 = 22 feet. Step 3. After 11 gusts, the leaf has
+                                                    traveled 55 − 22 = 33 feet down the sidewalk.
+ EM               Operands or expressions in the Step 1. Each swirl after a gust blows it back 2 feet, so 11 swirls will blow it back
+                  step that lack of references or 2 × 11 = 22 feet. Step 2. After 11 gusts, the leaf has traveled 55 − 22 = 33
+                  support from the question con- feet down the sidewalk.
+                  ditions or prior steps.
+ EH               Statements or operands in the      Step 1. Each gust blows the leaf forward 5 feet, so 11 gusts will blow it forward
+                  listed expression are fabricated   5 × 11 = 55 feet. Step 2. Each swirl after a gust blows it back 2 feet, so 11
+                  or inconsistent with the ques-     swirls will blow it back 2 × 11 = 22 feet. Step 3. After 11 gusts, the leaf has
+                  tion’s conditions.                 traveled 55 − 22 = 33 feet down the sidewalk. Finally, a wind blew the leaf 10
+                                                     feet forward, and the leaf traveled 33 + 10 = 43 feet.
+
+
+
+
+     Given the <question>, please judge whether each step in <solution> is correct. During the
+     judging process,you should know that the <question> does not always have only one
+     standard solution, and any reasonable <solution> should be accepted. You should pay
+     attention to both the expressions and the statements in each step, and take care about
+     the logic consistency between different steps. Additionally, consider arithmetic expression
+     equivalency and avoid rejecting solutions solely because they use equivalent expressions.
+
+     In each step, if no errors are found, respond with Step X: <correct>. If you find that the
+     operands in the listed expressions are correct but an error occurs in the calculated result,
+     respond with Step X: <calculation error>. If you find statements or operands in the listed
+     expression are incorrectly referencing the question conditions or the results from prior steps,
+     respond with Step X: <reference error>. If you find operands or expressions in the step that
+     is lack of references or support from the question conditions or prior steps, respond with Step
+     X: <missing step>. If you find statements or operands in the listed expression are fabricated or
+     inconsistent with the question’s conditions, respond with: Step X: <hallucination>. If an error
+     is a follow-on issue due to mistakes in previous steps rather than an independent error, respond
+     with: Step X: <secondary error>.
+
+     <question> [Question Text] <solution> [Solution Text]
+     Now, please start to respond.
+
+Figure 5: The example prompt we used to implement the error detector with LLMs includes specific formatting for
+clarity. Instruction text guiding the LLMs to accept alternative solutions is highlighted in bold, while the definitions
+of error categories are emphasized in italic. Text enclosed in square brackets serves as placeholders for the input
+question and solution text, respectively.
+
+
+                                                               1608
+  Given the <question>, please judge whether each step in <solution> is correct. During the
+  judging process,you should know that the <question> does not always have only one
+  standard solution, and any reasonable <solution> should be accepted. You should pay
+  attention to both the expressions and the statements in each step, and take care about
+  the logic consistency between different steps. Additionally, consider arithmetic expression
+  equivalency and avoid rejecting solutions solely because they use equivalent expressions.
+
+  In each step, if no errors are found, respond with Step X: <correct>. If you find that the
+  operands in the listed expressions are correct but an error occurs in the calculated result,
+  respond with Step X: <calculation error>. If you find statements or operands in the listed
+  expression are incorrectly referencing the question conditions or the results from prior steps,
+  respond with Step X: <reference error>. If you find operands or expressions in the step that
+  is lack of references or support from the question conditions or prior steps, respond with Step
+  X: <missing step>. If you find statements or operands in the listed expression are fabricated or
+  inconsistent with the question’s conditions, respond with: Step X: <hallucination>. If an error
+  is a follow-on issue due to mistakes in previous steps rather than an independent error, respond
+  with: Step X: <secondary error>.
+
+
+  Before the <response>, you should provide your step-by-step <thinking> about your judging
+  process.
+
+  <question> [Question Text] <solution> [Solution Text]
+  Now, please start to think first and then respond.
+
+Figure 6: The example CoT prompt we used to implement the error detector with LLMs includes specific formatting
+for clarity. Instruction text guiding the LLMs to accept alternative solutions is highlighted in bold, while the
+definitions of error categories are emphasized in italic. Text enclosed in square brackets serves as placeholders for
+the input question and solution text, respectively.
+
+
+
+
+                                                       1609
+

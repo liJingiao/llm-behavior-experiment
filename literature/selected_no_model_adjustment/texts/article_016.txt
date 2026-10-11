@@ -1,0 +1,2245 @@
+                                                                                                                                                                                    2025-03
+
+
+
+                                         QuestBench: Can LLMs ask the right question
+                                         to acquire information in reasoning tasks?
+                                         Belinda Z. Li2 , Been Kim1 and Zi Wang1
+                                         1 Google DeepMind, 2 Massachusetts Institute of Technology. Work done as a student researcher at Google DeepMind.
+
+
+
+
+                                         Recently, a large amount of work has focused on improving large language models’ (LLMs’) performance
+                                         on reasoning benchmarks such as math and logic. However, past work has largely assumed that tasks are
+                                         well-defined. In the real world, queries to LLMs are often underspecified, only solvable through acquiring
+                                         missing information. We formalize this as a constraint satisfaction problem (CSP) with missing variable
+                                         assignments. Using a special case of this formalism where only one necessary variable assignment is
+
+
+
+
+arXiv:2503.22674v1 [cs.AI] 28 Mar 2025
+                                         missing, we can rigorously evaluate an LLM’s ability to identify the minimal necessary question to ask and
+                                         quantify axes of difficulty levels for each problem. We present QuestBench, a set of underspecified
+                                         reasoning tasks solvable by asking at most one question, which includes: (1) Logic-Q: Logical reasoning
+                                         tasks with one missing proposition, (2) Planning-Q: PDDL planning problems with initial states that are
+                                         partially-observed, (3) GSM-Q: Human-annotated grade school math problems with one missing variable
+                                         assignment, and (4) GSME-Q: a version of GSM-Q where word problems are translated into equations
+                                         by human annotators. The LLM is tasked with selecting the correct clarification question(s) from a list
+                                         of options. While state-of-the-art models excel at GSM-Q and GSME-Q, their accuracy is only 40-50%
+                                         on Logic-Q and Planning-Q. Analysis demonstrates that the ability to solve well-specified reasoning
+                                         problems may not be sufficient for success on our benchmark: models have difficulty identifying the
+                                         right question to ask, even when they can solve the fully specified version of the problem. Furthermore,
+                                         in the Planning-Q domain, LLMs tend not to hedge, even when explicitly presented with the option to
+                                         predict “not sure.” This highlights the need for deeper investigation into models’ information acquisition
+                                         capabilities. Code and dataset are available at https://github.com/google-deepmind/questbench.
+
+
+                                         1. Introduction
+                                                                                                                                                GSM-Q
+                                                                                                                                                                           CSP
+                                         Large language models (LLMs) are increas-                            Every day, Wendi's chickens each get three               TF=3*C
+                                                                                                              cups of chicken feed and six cups of water.
+                                                                                                                                                                       TW=6*C
+                                                                                                                                                                                   C
+                                         ingly being applied to reasoning tasks such as                       The chickens get their feed and water in three
+                                                                                                                                                                       F3=TF-F1-F2
+                                                                                                              separate meals: in the morning, afternoon, and
+                                         math (Cobbe et al., 2021; Hendrycks et al.,                          evening. In the afternoon, she gives her
+                                                                                                                                                                       W3=TW-W1-W2
+                                                                                                              chickens 25 cups of feed and 40 cups of water.           F2=25
+                                         2021; Li et al., 2024a), logic (Chen et al., 2024b;                  How many cups of feed does she need to give              W2=40       A
+                                                                                                                                                                       C=20
+                                         Creswell et al., 2022; Zhang et al., 2023) and                       her chickens in the final meal of the day if the
+                                                                                                              size of Wendi's flock is 20 chickens?                    What is F3? y
+                                         planning/coding (Austin et al., 2021; Chen
+                                                                                                             Which of the following questions should be asked to               F3
+                                         et al., 2021; Curtis et al., 2024a; Silver et al.,                  solve the problem?
+                                                                                                             (a) No questions needed.                                   TF - F1 - F2
+                                         2024; Wang et al., 2024a). These applications                       (b) What is the total number of cups of feed that Wendi
+                                                                                                             gives her chickens in a day (TF)?                         3 * C   ❓      25
+                                         typically assume well-specified tasks where all                     (c) What is the number of cups of feed Wendi gives
+                                         necessary information has been provided.                            her chickens in the morning (F1)?                           20
+                                                                                                             (d) What is the number of cups of water Wendi gives
+                                                                                                             her chickens in the morning (W1)?
+                                             However, real-world scenarios often violate                     ...
+                                         this assumption. Users may omit crucial details
+                                         in math problems, and robots might operate
+                                                                                                          Figure 1 | A multi-choice question-asking task in
+                                         in environments with partial observability. In                   Q u e s t Be nc h with ground truth answers for accu-
+                                         such cases, LLMs need the ability to proactively                 racy evaluation. We construct question choices using
+                                         gather missing information, for instance, by ask-                the CSP translated from the verbal problem.
+                                         ing clarifying questions.
+
+
+                                         Corresponding authors: Belinda Z. Li (bzl@mit.edu), Zi Wang (wangzi@google.com).
+                                         © 2025 Google DeepMind. All rights reserved
+                  QuestBench: Can LLMs ask the right question to acquire information in reasoning tasks?
+
+
+
+    This work investigates whether LLMs can identify and acquire the missing information necessary
+to solve reasoning tasks. We formalize this information-gathering problem as an underspecified
+Constraint Satisfaction Problem (CSP). Our key idea is that many reasoning tasks can be modeled
+as determining the value of a target variable given a set of variables and constraints. A problem
+is underspecified if and only if the value of the target variable cannot be inferred from the given
+information. This formalization helps pinpoint the difference between semantic ambiguity (where
+multiple valid interpretations exist, but each yields a solvable answer) and underspecification (where
+the problem is unsolvable without additional information). We address the latter in this work. Figure 1
+shows an example of an underspecified CSP derived from a grade school math problem, where the
+target variable cups of feed in the final meal of the day cannot be calculated without knowing the value
+of cups of feed in the morning.
+    We focus on a special case of underspecified CSPs where we only need to acquire one unknown
+variable’s value in order to solve for the target variable. We call these “1-sufficient CSPs”. We construct
+Q u e s t Be nc h: a benchmark of question asking problems based on 1-sufficient CSPs. The model
+is given an underspecified problem and multiple choices for which variable to ask about. It must
+pick a relevant variable, one whose value isn’t already known (or derivable from the existing assigned
+variables), and is sufficient for computing the target variable. Q u e s t Be nc h contains the ground
+truth correct choices for this variable. As we show in this work, modern models struggle to solve
+1-sufficient CSPs.
+    QuestBe nc h consists of:
+• Logic-Q: Logical reasoning tasks where the truth value of a missing proposition is needed to
+determine the correctness of a claim.
+• Planning-Q: Blocks world planning problems in Planning Domain Definition Language (PDDL) (Ghal-
+lab et al., 1998), with partially observed initial states, where one additional observation is needed to
+disambiguate the shortest path to a goal.
+• GSM-Q/GSME-Q: Grade-school math problems that are missing conditions needed to derive the
+solution. GSM-Q consists of verbalized forms of problems, while GSME-Q consists of equation forms
+of problems. Both are annotated by humans.
+These problems can generally be solved by either backwards search from the target variable or
+brute-force search validating one variable at a time. We use the complexity of these search algorithms
+to catalogue QuestBench problems into four “axes” of difficulty: 1) the number of variables in the
+problem, 2) the number of constraints in the problem, 3) the search depth required by backwards
+search, and 4) the expected number of guesses required by brute-force search. These axes correspond
+to factors in the runtime complexity of CSP solvers (Section 3.3), and provide insight into what type
+of problems LLMs excel at, what they struggle with, and what strategies they may be employing to
+solve these problems.
+    We benchmarked state-of-the-art LLMs including GPT-4o (OpenAI, 2023), GPT-4-o1 Preview,
+Claude 3.5 Sonnet, Gemini 1.5 Pro and Gemini 2.0 Flash Thinking Experimental (Gemini Team
+Google, 2023, 2024) on Q u e s t Be nc h. While these models demonstrate strong performance
+on GSM-Q and GSME-Q (over 80% accuracy), their performance on Logic-Q and Planning-Q is
+significantly lower (under 50% accuracy).
+     To investigate these discrepancies, we analyze the correlation between model accuracy and axes of
+difficulty in QuestBench, finding differing trends between domains. For example, in Logic-Q, LLMs
+are more sensitive to the search depth than in Planning-Q, suggesting that models may be utilizing
+strategies similar to backwards search when solving Logic-Q, but not when solving Planning-Q. In
+general, our results suggest that the models may not be employing the same strategies across different
+
+
+
+                                                                                                           2
+                  QuestBench: Can LLMs ask the right question to acquire information in reasoning tasks?
+
+
+
+problem types, even within the same 1-sufficient CSP framework.
+    We also conduct ablation studies and correlation analyses to assess LLMs’ ability to 1) reason in
+the presence of sufficient information and 2) detect whether the problem is underspecified. We find
+that these abilities are correlated with identifying the right question to ask in our benchmark, but to
+varying degrees in varying domains. Moreover, we find that reasoning ability helps Q u e s t Be nc h
+performance, but only up to a certain point.
+    Our contributions include (1) a constraint satisfaction-based problem formulation of asking
+clarification questions for reasoning, (2) Q u e s t Be nc h, a novel benchmark with multi-choice
+problems for evaluating information-gathering abilities in reasoning tasks, (3) empirical evaluations
+and detailed analyses of SOTA or near-SOTA LLMs on Q u e s t Be nc h.
+
+
+2. Related work
+Importance of Information Gathering. Actively gathering information is a critical skill for both
+humans and autonomous systems when solving problems under uncertainty. For humans, Chouinard
+et al. (2007) demonstrates that asking questions plays a crucial role in cognitive development,
+helping children resolve ambiguity and learn more effectively. Similarly, AI/ML researchers have
+extensively explored strategies for sequential data acquisition in various domains, including concept
+learning (Angluin, 1988; Sammut and Banerji, 1986), active learning (Cohn et al., 1996; Gal et al.,
+2017; Houlsby et al., 2011; Ren et al., 2021; Settles, 2009), Bayesian optimization (Auer, 2002; Chen
+et al., 2022; Fan et al., 2024; Feurer et al., 2018; Garnett, 2023; Hennig and Schuler, 2012; Kushner,
+1962, 1964; Moc̆kus, 1974; Srinivas et al., 2010; Wang and Jegelka, 2017; Wang et al., 2024b),
+reinforcement learning (Ghavamzadeh et al., 2015; Kaelbling et al., 1996; Sutton, 2018), and robot
+planning with partially observable states (Curtis et al., 2024b; Kaelbling and Lozano-Pérez, 2013;
+Kaelbling et al., 1998; Phiquepal and Toussaint, 2019) or unknown models (Wang et al., 2017, 2018,
+2021). Wu (2023) emphasizes the need for AI assistants to ask questions in the face of uncertainty,
+specifically in the context of code generation. Our work follows this tradition by evaluating how well
+large language models (LLMs) gather information through basic reasoning tasks.
+
+Ambiguity in user requests. Natural language queries often contain ambiguity for a variety of
+reasons. Prior work has examined ambiguity in the context of semantics (Kuhn et al., 2023b), factual
+question-answering (Min et al., 2020), task-oriented dialogue intents (Budzianowski et al., 2018;
+Rastogi et al., 2020; Zhang et al., 2024b), personalized human preferences (Chen et al., 2024a;
+Handa et al., 2024; Li et al., 2023), and text-to-image generation (Hahn et al., 2024). Chandu
+et al. (2024) presents a visual question answering benchmark to identify epistemic and aleatory
+uncertainty, though the distinction between the two types of uncertainties can often be unclear. Zhang
+et al. (2024a) introduces a taxonomy of ambiguity, categorizing it into issues like unfamiliarity and
+different semantic question types (e.g., “who,” “what," “where").
+   In this paper, we focus on underspecification instead of ambiguity, where the user has not provided
+enough information for the LM to fulfill the request. This situation can arise because users may not
+know what information the model lacks, or what information is necessary to complete the task. We
+evaluate LLMs’ ability to address underspecification in structured reasoning tasks.
+
+Information gathering benchmarks for LLMs. Most existing benchmarks focus on subjective
+or ambiguous tasks where there may be multiple valid clarifying questions, depending on context
+and user preference (Aroyo and Welty, 2015; Basile et al., 2021; Davani et al., 2022; Sandri et al.,
+2023; Wan et al., 2023). Task-oriented dialogue benchmarks (Budzianowski et al., 2018; Rastogi
+et al., 2020; Zhang et al., 2024b) and preference elicitation tasks (Li et al., 2023) involve inherently
+
+
+                                                                                                           3
+                    QuestBench: Can LLMs ask the right question to acquire information in reasoning tasks?
+
+
+
+subjective problems where no universal “right” question exists. This makes objective evaluation of
+information-gathering abilities difficult in these settings. In contrast, our work focuses on reasoning
+tasks with a clearly defined ground truth. For each task, the model needs to ask exactly one question,
+allowing for reliable evaluation of LLMs’ information-gathering capabilities.
+
+Question-asking methods for LLMs. Several methods have been proposed to enhance LLMs’ ability
+to ask clarifying questions. These methods primarily address ambiguous or knowledge-based tasks,
+such as identifying a good recipe (Andukuri et al., 2024) or asking who won a sports event (Pang
+et al., 2024; Zhang and Choi, 2023). Some approaches directly prompt LLMs to ask clarifying
+questions (Kuhn et al., 2023a; Li et al., 2023), while others compute information gain to prioritize
+informative questions (Grand et al., 2024; Handa et al., 2024; Hu et al., 2024; Piriyakulkij et al., 2024).
+Zhang and Choi (2023) breaks down question-asking into three stages: detecting when clarification is
+needed, identifying the appropriate question, and responding based on new information. While these
+methods are promising, they primarily focus on subjective tasks or require substantial user simulation.
+Our work introduces a new setting that emphasizes generating accurate clarifying questions for
+underspecified reasoning tasks, where the correct question is objectively determinable.
+
+
+3. Problem formulation
+Consider the following user request:
+Example 3.1. Please solve the math problem: Janet had some eggs (variable 𝑥0 ) and ate one (variable
+𝑥1 ). How many eggs does she have now (target variable 𝑦 )?
+
+     The word problem can be parsed into equations 𝑦 = 𝑥0 − 𝑥1 , 𝑥1 = 1. The LM cannot compute
+target variable 𝑦 without knowing the value of variable 𝑥0 . Other examples can be found in Figures 1
+to 3. In these cases, the desired behavior is for the LM to ask the minimal set of questions that enables
+it to respond to the user query.
+
+3.1. Distinguishing semantic ambiguity and underspecification
+
+In this paper, we focus on problems that are semantically equivalent to constraint satisfaction prob-
+lems,1 which allow us to formalize underspecification. The semantic ambiguity could be sometimes
+confused with underspecification, as it also arises as a challenge during interpretation of the problem.
+   Solving a problem thus comprises of two stages:
+  1. A natural language query is parsed into a set of variables, a set of constraints, and a target
+     variable corresponding to the desired response. In Example 3.1, there are variables 𝑥0 (initial
+     eggs), 𝑥1 (eaten eggs), a constraint 𝑦 = 𝑥0 − 𝑥1 , and a target variable 𝑦 (current eggs) .
+  2. The model solves for the target variable in the CSP.
+   Ambiguity may arise in either (or both) of these two stages:
+  1. Semantic ambiguity: There are multiple semantic interpretations of the problem at the parsing
+     stage, inducing a distribution over possible CSPs.
+  2. Underspecification: For a given CSP, some variable assignments or constraints may be missing
+     that makes it impossible to solve for the target variable.
+   Semantic ambiguity has been treated extensively in prior work (Kuhn et al., 2023b), and can vary
+between individuals or populations. This work focuses specifically on underspecification, which can be
+evaluated by formulating problems as CSPs with missing information.
+  1 Note: queries can also be viewed as a combination of soft constraints.
+
+
+
+
+                                                                                                             4
+                    QuestBench: Can LLMs ask the right question to acquire information in reasoning tasks?
+
+
+
+3.2. Formalizing underspecification
+
+We formalize underspecification as follows. First, we define a CSP as a tuple ⟨ 𝑋, 𝐷, 𝐶, 𝐴, 𝑦 ⟩:
+   • 𝑋 = { 𝑥 𝑖 } 𝑖𝑁=1 is a set of 𝑁 variables.
+   • 𝐷 = { 𝐷𝑖 } 𝑖𝑁=1 is a set of domains for each variable in 𝑋 .
+   • 𝐶 = {𝑐 𝑗 }𝑀𝑗=1
+                      is a set of 𝑀 constraints. Each constraint 𝑐 𝑗 can be viewed as a boolean function that
+     takes in as input a list of variables in 𝑋 , denoted as [ 𝑥 𝑖 ] 𝑖 ∈ 𝐼 𝑗 , and outputting True or False. We
+     use the shorthand 𝑐 𝑗 ( 𝒙 𝑗 ) to denote 𝑐 𝑗 ( [ 𝑥 𝑖 ] 𝑖 ∈ 𝐼 𝑗 ).
+   • 𝐴 = ∧𝑖 ∈ 𝐼 𝐴 ( 𝑥 𝑖 = 𝑎𝑖 ) are assignments from variables to values, stating that for each 𝑖 ∈ 𝐼 𝐴 ⊆ [ 𝑁 ],
+     variable 𝑥 𝑖 is assigned a value 𝑎𝑖 ∈ 𝐷𝑖 .
+   • 𝑦 is the target variable to solve for. Target 𝑦 must satisfy the constraints and the variable
+                         Ó
+     assignments, 𝑗 ∈ [ 𝑀 ] 𝑐 𝑗 ( 𝒙 𝑗 ) ∧ 𝐴.
+    In Example 3.1, the variables are { 𝑥0 , 𝑥1 , 𝑦 } and the target is 𝑦 . There is one constraint 𝑐0 , which
+is 𝑦 = 𝑥0 − 𝑥1 . Target 𝑦 must satisfy constraint 𝑐0 and assignment 𝑥1 = 1.
+
+
+The Known predicate. For convenience, we introduce the Known predicate. Known( 𝑥 ) means
+that the value of variable 𝑥 is known. This can occur either if 𝑥 is directly assigned a value (i.e.
+𝐴 =⇒ ∧𝑖 ∈ 𝐼 𝐴 Known( 𝑥 𝑖 )), or 𝑥 ’s value can be derived from the existing assignments and constraints.
+In Example 3.1, once 𝑥0 and 𝑥1 are known, 𝑦 would also be known.
+   We can then formally define underspecified CSPs as follows.
+                                                       Ó
+Definition 3.1. A CSP is underspecified if and only if   𝑐 𝑗 ( 𝒙 𝑗 ) ∧ 𝐴 =⇒ ¬Known( 𝑦 ).
+                                                                  𝑗∈ [ 𝑀 ]
+
+
+    Conversely, if the CSP is not underspecified, it is well-specified. We use Known(X) over a set of
+                                                                                       Ó
+variables X to denote that the values of all variables in X are known, i.e., Known(X) = 𝑥 ∈ X Known( 𝑥 ).
+    If knowing a set of variables is sufficient to determine the value of another variable, we call the set
+the “sufficient set”:
+Definition 3.2. A set of variables X ⊆ 𝑋 is a sufficient set (for 𝑦 ) if and only if
+                              Û
+                                  𝑐 𝑗 ( 𝒙 𝑗 ) ∧ 𝐴 ∧ Known(X) =⇒ Known( 𝑦 ) .
+                                 𝑗∈ [ 𝑀 ]
+
+
+
+    For efficient question asking, we wish to find the smallest sufficient set for the target variable:2
+
+                                   X̂ = arg min X ⊆ 𝑋 |X|        s.t. X is sufficient.
+
+    In Example 3.1, a sufficient set for 𝑦 is { 𝑥0 } since Known({ 𝑥0 }) =⇒ Known( 𝑦 ).
+    Finally, we define the special case where the size of the smallest sufficient set is 1.
+Definition 3.3. An underspecified CSP is a 1-sufficient CSP if the size of its smallest sufficient sets is 1.
+The variable in a smallest sufficient set is a sufficient variable of the problem.
+
+    1-sufficient CSPs are fundamental for solving broader “𝑘-sufficient” CSPs, which always becomes
+1-sufficient CSPs after asking 𝑘 − 1 questions. That means, the accuracy on 1-sufficient CSPs provides
+an upper bound for that on “𝑘-sufficient” CSPs.
+  2 There could be many smallest sufficient sets for an underspecified CSP.
+
+
+
+
+                                                                                                             5
+                      QuestBench: Can LLMs ask the right question to acquire information in reasoning tasks?
+
+
+
+3.3. Difficulty axes of 1-sufficient CSPs
+
+Solving a 1-sufficient CSP entails identifying a sufficient variable for the target variable. While specific
+problem instances might allow for customized approaches, in general, 1-sufficient CSPs can be solved
+by brute-force or backward search. Brute-force search checks the sufficiency of every variable one
+at a time. Backward search builds a search tree starting from the target variable (root node) and
+recursively searches all variables (child nodes) involved in all constraints (edges) involving the parent
+node. These two methods allow us to formalize the following properties associated with the difficulty
+of each 1-sufficient CSP:
+    • | 𝑋 |: The total number of variables.
+    • |𝐶 |: The total number of constraints.
+    • 𝑑 : The depth of the backward search tree.
+    • 𝔼BF : The expected number of random guesses until selecting a correct choice of question3 .
+For example, in Example 3.1, there are 3 variables ( 𝑥0 , 𝑥1 , 𝑦 ), 1 constraint ( 𝑦 = 𝑥0 − 𝑥1 ), and the
+search depth 𝑑 is 1. Among choices (a) No questions needed., (b) What is the value of 𝑥0 ?, (c) What is
+the value of 𝑥1 ?, only choice (b) is correct since we know the value of 𝑥1 but not 𝑥0 . The expected
+number of guesses 𝔼BF needed to find the correct question is 2.
+
+
+4. Dataset descriptions for Q u e s t Be nc h
+We construct 1-sufficient CSPs in logical reasoning (Logic-Q), planning (Planning-Q), and math
+(GSM-Q/GSME-Q) domains. Each problem instance is composed of a user request, the full set of
+question choices and a subset including correct questions. We evaluate whether models can pick out
+a correct question from the question choices. See Table 1 for dataset statistics.
+
+                   #Tasks     | 𝑋 | / #Choices            𝑑                |𝐶 |                  𝑏               𝔼BF
+                                                                    min – max (mean)
+    Logic-Q        1150       10 – 59 (37.9)       1 – 12 (4.1)       8 – 108 (47.8)            -           1.2 – 15.0 (6.1)
+  Planning-Q       7500       25 – 64 (46.0)       1 – 14 (6.9)              -             4 – 7 (5.7)     3.0 – 33.0 (18.5)
+    GSM-Q          23642       2 – 27 (3.5)        1 – 7 (2.1)          1 – 9 (3.0)             -          2.5 – 18.5 (5.0)
+   GSME-Q          6590        2 – 27 (3.5)        1 – 7 (2.1)          1 – 9 (3.1)             -          2.5 – 18.5 (4.9)
+
+Table 1 | Dataset sizes and properties (Section 3.3) for each domain in QuestBench. We use 𝑏 to
+denote the number of blocks for the Blocks World planning problems.
+
+
+4.1. Logic-Q
+
+SimpleLogic (Zhang et al., 2023) is a propositional logic benchmark, which consists of
+1. a set of rules about an imaginary person named Alice, for example: If Alice is jittery and strange,
+then Alice is stubborn.
+2. a set of properties that hold true about Alice, for example: Alice is smart. Alice is not stubborn.
+3. a question about an unknown property of Alice, for example: Is Alice pleasant?
+
+
+   3We assume the random guesses are made without replacement. So we have 𝔼     | 𝑋 |+1
+                                                                           BF = 𝔰+1 , where 𝔰 is the number of
+sufficient variables. We leave the derivation as an exercise for the readers.
+
+
+
+
+                                                                                                                               6
+                            QuestBench: Can LLMs ask the right question to acquire information in reasoning tasks?
+
+
+
+Problem Definition. We can define a CSP in this
+domain as follows:                                                                                             Logic-Q
+                                                                                 Suppose you know the following rules about Alice:
+• 𝑋 is a set of all the potential properties of Alice that                       If Alice is smart, then Alice is                     CSP
+                                                                                 jittery.
+appears in all rules (e.g. strange, jittery, worried).                           If Alice is strange and jittery,               smart⇒jittery
+                                                                                 then Alice is stubborn.            C           strange∧jittery
+• 𝐷 = {{true , f al se} ∀𝑥 ∈ 𝑋 }. Each property in                               If Alice is jittery and worried,                 ⇒stubborn
+                                                                                                                                jittery∧worried
+𝑋 can be either be true or false.                                                then Alice is pleasant.
+                                                                                                                                  ⇒pleasant
+                                                                                 If Alice is pleasant, then Alice
+                                                                                                                                pleasant⇒worried
+• 𝐴 is the set of properties that we know to be true                             is worried.
+                                                                                 Alice is smart.
+about Alice (e.g. smart, ¬stubborn).                                             Alice is not stubborn.
+                                                                                                                    A           smart=True
+                                                                                                                                stubborn=False
+                                                                                 Is Alice pleasant?                 y
+• 𝐶 is the set of rules about Alice. 𝐶 takes the form                                                                           pleasant=?
+
+of a conjunction of implicative constraints (e.g. in                             Which of the following questions should be
+                                                                                 asked to solve the problem?                    jittery=True
+the above example, strange ∧ jittery =⇒ stubborn).                               (a) No questions needed.                       strange=False
+                                                                                 (b) Is Alice strange?                          worried⇒pleasant
+                                                                                 (c) Is Alice stubborn?                         ¬worried⇒¬pleasant
+
+           Û                  Û ©© Û                                             (d) Is Alice worried?
+                                                                                 ...
+     𝐶=              𝑐𝑖 =                           𝑥 𝑖, 𝑗 ® =⇒ 𝑥 𝑖,𝑀𝑖 +1 ®
+                                                           ª              ª
+                                      ­­
+          𝑖∈ [ 𝑀 ]          𝑖 ∈ [ 𝑀 ] «« 𝑗 ∈ [ 𝑀𝑖 ]
+                                                                              Figure 2 | An example in Logic-Q. The prompt pro-
+                                                           ¬              ¬
+where 𝑥 𝑖, 𝑗 can take any value in the set 𝑋 .                                vided to the LM is on the left hand side. The ground
+                                                                              truth answer is in red. The symbolic CSP used to con-
+• 𝑦 is the property that we are being asked about,
+                                                                              struct the questions is shown on the right hand side.
+e.g. pleasant in the above example.
+    To create Logic-Q, we discard the assignments 𝐴’s that are already present in the original fully-
+specified CSPs in the SimpleLogic dataset. We then construct new 𝐴˜’s such that a single additional
+property of Alice is sufficient to determine whether the goal property is true or false. We do this
+by performing backward search from 𝑦 and ¬ 𝑦 for each problem, to obtain a set of all possible
+variable assignments that would imply 𝑦 , and another set for ¬ 𝑦 . Each assignment from each set, in
+conjunction with their corresponding 𝑋, 𝐶, 𝐷, 𝑦 , make up a base CSP. We then iteratively withhold
+one shared variable assignment from the two sets (such that assigning that variable deterministically
+implies either 𝑦 or ¬ 𝑦 ) and check whether the problem is now underspecified. See more details
+in Appendix A.1. In the end of this process, we get ⟨ 𝑋, 𝐷, ˜
+                                                            𝐴, 𝐶, 𝑦 ⟩, which form a 1-sufficient CSP.
+
+
+4.2. Planning-Q
+
+We adapt the Blocks World domain from PyperPlan (Alkhazraji et al., 2020), a pick-and-place task
+involving 𝑛 blocks which can be set on the table or stacked on top of each other.
+    Blocks World consists of the following predicates:
+              (ontable ?a), (clear ?a), (handempty), (holding ?a), (on ?a ?b).
+Predicates can be applied to blocks (e.g. a) to construct an atom (e.g., (ontable a)). A state is a
+conjunction of atoms or their negations, e.g.
+                                             (ontable a), (holding b), ¬(on a b).
+   Note that not all states are valid under this definition. In each valid state, there are a set of actions
+that can potentially be applied to it to transition to another state. Each action has a precondition
+specifying atoms the state must satisfy before applying the action, and an effect specifying atoms the
+next state must satisfy after applying the action. An example of an action:
+stack(?a, ?b)
+  :precondition (and (holding ?a) (clear ?b))
+  :effect (and (not (holding ?a)) (not (clear ?b))
+           (clear ?a) (handempty) (on ?a ?b))
+
+
+
+                                                                                                                                                     7
+                     QuestBench: Can LLMs ask the right question to acquire information in reasoning tasks?
+
+
+
+    Given an initial state and
+                                                                                   Planning-Q
+a goal state, the model is ex-                  Blocks    a    b    c    d
+pected to plan the shortest ac-
+                                                          (ontable a)
+tion sequence to the goal state,                          (clear a)          Possible
+                                               Partial    (ontable b)        Initial                       d                              d
+e.g.,                                          initial    not (on c b)       States           a        b   c      a    b   c   d     a    b   c
+                                               state      (clear d)
+[pick-up(b), stack(b,a)].                                 (handempty)                                  (on d b) is False           (on d b) is True
+
+                                                              Pick-Up
+Problem Definition The prob-                    Actions
+                                                              Put-Down
+                                                              Stack                               Az
+
+
+
+lem can be expressed as a CSP                                 Unstack
+
+⟨ 𝑋, 𝐷, 𝐶, 𝐴, 𝑦 ⟩ as follows:                  Partial goal state
+                                                                    b        Plan to Goal
+                                                                    a        from
+                                                                             Initial States
+• 𝑋 is the set of all atoms (pred-             What question should we
+  icates applied to objects) in                ask to disambiguate the
+                                               plan?:
+  the initial state.                           (a) No questions needed.
+                                               (b) Is block d on block b?
+• 𝐷 = {{Tru e , Fal se} ∀𝑥 ∈                   (c) Is block d on block c?
+                                               ...
+  𝑋 }. Each atom must be either
+  true or false.
+• 𝐴 is the set of atoms with Figure 3 | An example in Planning-Q. The ground-truth answer is given
+  known values in the initial in red. The prompt given to the LM (left) includes the full task specifica-
+  state.                                    tion in PDDL, which we omit for simplicity and instead display visually.
+• 𝐶 is the set of constraints. Possible initial states are constructed from the partial initial state and
+  For any sequence of actions are grouped based on plans to the goal. These groups of initial states
+                                            are used for constructing the questions.
+  [𝑞𝑡 ] 𝑡 ∈ [ 𝑛 ] and their correspond-
+  ing sequence of states [ 𝑠𝑡 ] 𝑡 ∈ [ 𝑛 ] , each pair of current state 𝑠𝑡 and next state 𝑠𝑡+1 must satisfy the
+  precondition and effect of action 𝑞𝑡 , i.e.,
+                          ∀ 𝑝 ∈ p r e ( 𝑞𝑡 ) , 𝑠𝑡 ⇒ 𝑝 (preconditions of 𝑞𝑡 must hold in 𝑠𝑡 )
+                          ∀𝑒 ∈ e f f ec t s( 𝑞𝑡 ) , 𝑠𝑡+1 ⇒ 𝑒 (effects of 𝑞𝑡 must hold in 𝑠𝑡+1 )
+• 𝑦 is the shortest action sequence from the initial state to the goal state.4
+     We construct the Planning-Q dataset as a mix of 1-sufficient and well-specified problems. In
+1-sufficient problems, the initial state is 1-sufficient – we only know the values of certain atoms of
+the initial state, and must ask the value of at most a single other atom in order to find the shortest
+action sequence. In well-specified problems, the shortest action sequence is the same regardless of
+uncertainty about the initial state. For example, in Fig. 3, if we knew that (on d b) is false, then
+we do not need additional information in order to find the shortest path, even though the initial state
+is still underspecified. In these cases, we expect the LLM to select the choice “No questions needed.”
+     The well-specified problems are constructed through backwards breadth-first-search, which derives
+all initial states from which there is a single, unambiguous shortest path to the goal. These initial
+states, taken with the corresponding 𝑋, 𝐷, 𝐶, 𝑦 constitute the base CSPs. The 1-sufficient problems are
+constructed by taking each base CSP and removing one proposition. Checks are performed to ensure
+they are truly well-specified or 1-sufficient. More details in Appendix A.2.
+
+
+4.3. GSM-Q and GSME-Q
+
+In general, grade-school math problems can be parsed into simple algebra problems where a sequence
+of variable substitutions can fully solve the problem. We construct underspecified grade-school math
+problems from GSM-Plus’ “distractor” setting (Li et al., 2024a), which was derived from adding
+  4 It is not meaningful to set 𝑦 to be any action sequence (not just the shortest one) to the goal, since all initial states can
+get to the goal state through some path in BlocksWorld, so no information needs to be gathered.
+
+
+
+                                                                                                                                                      8
+                  QuestBench: Can LLMs ask the right question to acquire information in reasoning tasks?
+
+
+
+a single piece of distractor information to math problems in GSM8k (Cobbe et al., 2021) that is
+irrelevant to deriving the goal variable. This allows us to isolate whether LLMs can identify which
+specific variables are relevant to a goal variable. An example can be seen in Figure 1.
+
+Problem Definition. Every problem in GSM-Q and GSME-Q is equivalent to a 1-sufficient CSP
+⟨ 𝑋, 𝐷, 𝐶, 𝐴, 𝑦 ⟩ where
+   • 𝑋 is a set of variables in the problem.
+   • 𝐷 is possible values 𝑥 can take on, generally ℕ, ∀𝑥 ∈ 𝑋 .
+   • 𝐶 is a set of equations relating variables in the problem to each other.
+   • 𝐴 = 𝐴˜ variable assignments from the problem with a single variable withheld.
+   • 𝑦 variable the user wants to solve for.
+GSM-Q are underspecified math questions written in English words (i.e., word problems), while
+GSME-Q are underspecified math questions written in equations.
+
+Construction. To construct GSM-Q/GSME-Q dataset out of GSM-Plus, we use human annotators to
+translate a word problem into a set of variables and equations. First, we ask annotators to try and
+solve the word problems on their own. If they cannot solve the problem due to semantic ambiguity, or
+answer the problem in a way that doesn’t match the original answer in GSM-Plus (due to interpreting
+the problem differently, or erroneous problems in GSM-Plus), we discard the problem entirely.
+    Next, we ask annotators to try and parse each math word problem into a set of variables 𝑋 ,
+equations 𝐶 , assignments 𝐴, and a goal variable 𝑦 . We assume domains 𝐷 for each variable is the
+set of natural numbers. We had three different annotators provide CSPs for each math problem,
+resulting in different CSPs (different annotators may have different interpretations of a problem).
+We further perform automated checks to ensure the annotated CSPs actually result in the correct
+answer, discarding any CSP which we weren’t able to parse or provided incorrect answers. We use
+all valid CSPs resulting from this process, including different CSPs corresponding to the same math
+problem. This gives us the set of fully-specified, high quality CSPs. These constitute the base CSPs in
+this domain.
+    To make these CSPs underspecified, we withhold both distractor variable assignments { 𝑑 𝑖 } 𝑛𝑖=0
+that aren’t essential to computing 𝑦 , as well
+                                             as a single variable assignment 𝑎 ∈ 𝐴 that is required
+for computing the goal, creating 𝐴˜ = 𝐴\ { 𝑑 𝑖 } 𝑛𝑖=0 ∪ { 𝑎} . Asking about the value of the variable
+corresponding to 𝑎 is necessary and sufficient for deriving the value of target variable 𝑦 .
+   These underspecified CSPs are consolidated into GSME-Q. To convert them back into word
+problems for GSM-Q, we show annotators the original word problem and the CSP form of the problem,
+and ask them to remove 𝑎 and the distractors { 𝑑 𝑖 } 𝑛𝑖=0 from the word problem.
+
+Annotation Details We recruited a total of 21 annotators (11 male, 10 female) from five countries
+to annotate our tasks. Annotators were all fluent in English and between the ages of 25 – 45. We
+paid an average of $27 – $55 per hour per annotator. Details including full instructions provided to
+annotators and screenshots of the annotation interface for each task, can be found in Appendix A.3.
+
+
+5. Results and analyses
+In this section, we present experiment results on Q u e s t Be nc h. We evaluated GPT-4o (Ope-
+nAI, 2023), GPT-4-o1 Preview, Claude 3.5 Sonnet, Gemini 1.5 Pro, Gemini 1.5 Flash, Gemini 2.0
+Flash Thinking Experimental (Gemini Team Google, 2023, 2024), and open-sourced Gemma mod-
+els (Gemma Team, 2024) in zero-shot (ZS), chain-of-thought (CoT), and four-shot settings (4S)
+
+
+                                                                                                           9
+                 QuestBench: Can LLMs ask the right question to acquire information in reasoning tasks?
+
+
+
+                                                                 Logic-Q      Planning-Q       GSME-Q     GSM-Q
+                             o1-preview                          49.91%           42.31%        98.01%    91.32%
+                 Gemini Flash Thinking 2.0 Exp 01-21             37.39%           47.32%        96.69%    84.72%
+                          Claude 3.5 Sonnet                      30.09%            7.53%        94.70%    91.32%
+         ZS                    GPT-4o                            27.39%           24.49%        96.69%    86.81%
+                            Gemini 1.5 Pro                       29.13%           19.80%        48.34%    77.78%
+                           Gemini 1.5 Flash                      16.78%            8.52%        96.69%    71.88%
+                           Gemma 2 2B IT                         0.09%            10.76%        32.45%    49.65%
+                           Gemma 2 9B IT                         26.00%           14.36%        75.50%    40.97%
+                           Gemma 2 27B IT                        29.39%            7.64%        73.51%    71.18%
+                 Gemini Flash Thinking 2.0 Exp 01-21             34.61%           46.24%        96.03%    86.11%
+                          Claude 3.5 Sonnet                      36.78%           34.03%        74.17%    90.97%
+                               GPT-4o                            31.57%           16.36%        99.34%    92.01%
+     ZS + CoT               Gemini 1.5 Pro                       29.22%           21.27%        96.69%    79.17%
+                           Gemini 1.5 Flash                      18.70%            9.29%        98.68%    76.74%
+                           Gemma 2 2B IT                         0.26%             3.01%        56.95%    68.40%
+                           Gemma 2 9B IT                         24.61%           10.27%        56.95%    36.46%
+                           Gemma 2 27B IT                        31.22%            9.96%        80.79%    79.51%
+                 Gemini Flash Thinking 2.0 Exp 01-21             38.43%           19.32%        96.69%    92.71%
+                          Claude 3.5 Sonnet                      36.00%           34.56%        95.36%    94.10%
+                               GPT-4o                            25.57%           11.48%        96.03%    84.03%
+         4S                 Gemini 1.5 Pro                       26.35%           18.80%        92.05%    85.42%
+                           Gemini 1.5 Flash                      15.48%           18.29%        95.36%    80.90%
+                           Gemma 2 2B IT                         25.13%            7.51%        90.73%    37.50%
+                           Gemma 2 9B IT                         21.57%            5.15%        86.75%    55.56%
+                           Gemma 2 27B IT                        26.26%           10.71%        96.69%    66.67%
+        BFS                      Depth 3                         39.0%              5.75%         87.4%   86.1%
+        BFS                      Depth 5                         80.6%              27.2%          100%    100%
+        BFS                      Depth 10                        99.8%              93.9%          100%    100%
+
+Table 2 | Language model accuracies at predicting the right question in QuestBench. As a baseline,
+we include breadth-first-search (BFS) up to a fixed depth on each dataset. Results show that the best
+models saturate GSME-Q and GSM-Q, but fail to perform beyond 50% on Logic-Q and Planning-Q.
+
+settings. For GSM-Q and GSME-Q, we present results on a subset of 288 and 151 representative tasks,
+respectively. All results are based on publicly available APIs or models. Our experiments were done
+from 06/2024 to 03/2025, and some models/APIs may have been updated during this time.
+
+
+5.1. Evaluation of clarification question accuracy
+
+QuestBench is a multi-choice benchmark with ground truth choices, each of which is a clarification
+question. We evaluated whether the LLM generates a correct choice for each question. Table 2 shows
+LLM accuracies in different setups. For reference, we also evaluated the accuracy of breadth-first-
+search up to a depth 𝑛.
+   Generally, we found that all models we tested struggled to perform beyond 50% on our Logic-Q
+and Planning-Q domains. Neither chain of thought nor few-shot examples resulted in significant gains
+across all models in either domain. However, LMs were generally able to saturate performance on
+GSME-Q and GSM-Q. We suspect that this is due to these domains having a smaller number of variables
+and constraints, and requiring shallower search depth than the other two domains. Additionally, LMs
+may have been specifically studied and optimized for solving these sorts of math problems.
+
+
+
+                                                                                                                   10
+                     QuestBench: Can LLMs ask the right question to acquire information in reasoning tasks?
+
+
+
+                                   ZS                                  ZS + CoT                           4S
+                      o1-     Gemini Claude GPT-                 Gemini Claude GPT-              Gemini Claude GPT-
+                      preview 2.0    3.5S   4o                   2.0    3.5S    4o               2.0    3.5S   4o
+                              FTE                                FTE                             FTE
+              𝑑       -0.23      -0.20     -0.19      -0.19      -0.15     -0.18      -0.22      -0.28        -0.28   -0.20
+              |𝑋 |    -0.27      -0.21     -0.15      -0.16      -0.11     -0.13      -0.22      -0.18        -0.27   -0.18
+  Logic-Q
+              |𝐶 |    -0.22      -0.23     -0.11      -0.11      -0.22     -0.13      -0.18      -0.18        -0.24   -0.20
+              𝔼 𝐵𝐹    -0.41      -0.30     -0.26      -0.26      -0.16     -0.23      -0.35      -0.28        -0.31   -0.30
+             𝑑        0.01       -0.11     0.07       0.04       -0.10     0.09       -0.06      -0.08        0.10    -0.06
+             |𝑋 |     -0.06      -0.11     -0.04      -0.07      -0.11     -0.00      -0.09      -0.14        -0.01   -0.10
+  Planning-Q
+             𝑏        -0.06      -0.11     -0.04      -0.07      -0.11     -0.00      -0.09      -0.14        -0.01   -0.10
+              𝔼 𝐵𝐹    -0.54      -0.14     -0.27      -0.28      -0.12     -0.56      -0.41      -0.35        -0.48   -0.41
+              𝑑       -0.21      -0.26     -0.14      -0.10      -0.27     -0.06      -0.14      -0.20        -0.05   -0.10
+              |𝑋 |    -0.24      -0.27     -0.21      -0.09      -0.31     -0.11      -0.14      -0.29        -0.25   -0.22
+  GSME-Q
+              |𝐶 |    -0.24      -0.30     -0.24      -0.25      -0.34     0.04       -0.14      -0.30        -0.26   -0.29
+              𝔼 𝐵𝐹    -0.24      -0.27     -0.21      -0.09      -0.31     -0.11      -0.14      -0.29        -0.25   -0.22
+              𝑑       -0.03      -0.01     -0.06      -0.03      -0.01     -0.09      -0.01      -0.00        -0.01   -0.03
+              |𝑋 |    -0.02      -0.19     -0.13      -0.09      -0.18     -0.19      -0.14      -0.07        -0.05   -0.07
+  GSM-Q
+              |𝐶 |    0.01       -0.05     -0.11      -0.03      -0.07     -0.16      -0.09      -0.01        -0.05   -0.05
+              𝔼 𝐵𝐹    -0.02      -0.19     -0.13      -0.09      -0.18     -0.19      -0.14      -0.07        -0.05   -0.07
+
+Table 3 | Spearman’s rank correlation coefficient between various axes and accuracy for at predicting
+the right question. Bolded values indicate a statistical significance correlation between the axis and
+model accuracy ( 𝑝 < 0.05). Colored values are moderately strong correlations. We abbreviate Claude
+3.5 Sonnet to Claude 3.5S and Gemini 2.0 Flash Thinking Experiment 01-21 to Gemini 2.0 FTE.
+We observe moderate to mild negative correlation between these factors and model performance in
+Logic-Q and Planning-Q, and sometimes in GSME-Q.
+
+   Comparing GSME-Q to GSM-Q, we found that models generally had a harder time reasoning about
+verbalized versions of problems than if they were presented in raw equation forms. We hypothesize
+that, at least for the problems in Q u e s tBe nc h, identifying missing information requires building
+up a search tree, which can be easier if the problem were presented symbolically than verbally.
+
+
+5.2. Correlation between problem complexity and clarification question accuracy
+
+1-sufficient CSPs can generally be solved through either brute-force (forward) search or backwards
+search. We can approximately quantify the difficulty of each problem in Q u e s t Be nc h based on
+the runtime of each search algorithm on that problem. If there is a correlation between the factors
+that determine search complexity and the performance of the LLM, this serves as a high-level signal
+for the types of mechanisms LLMs may be using to succeed in these tasks.
+   Specifically, we analyze the correlation between LLM performance and factors listed in Section 3.3.
+The runtime complexity of each search algorithm in the Logic-Q and Planning-Q domains can
+expressed as a function of these factors, see Table 4, where the complexity of brute-force search holds
+with probability at least 1 − 𝛿.
+   We report Spearman’s rank correlation coefficients between accuracy and these factors in Table 3,
+and plot accuracy across each factor in Figure 4. The runtime complexity derivations of each search
+algorithm in each domain are in Appendices C.1 and C.2.
+   Logic-Q Table 3 and Figure 4 show that the LLMs’ performances correlate negatively with
+
+
+
+                                                                                                                              11
+                  QuestBench: Can LLMs ask the right question to acquire information in reasoning tasks?
+
+
+
+
+Figure 4 | LM accuracies across varying backwards search depths 𝑑 , number variables | 𝑋 |, number
+constraints |𝐶 |, and expected number brute-force guesses 𝔼BF for each domain, model, and prompt
+setting. To make the graph less noisy, we aggregate units of 5 on the 𝑥 -axis for the Logic-Q setting for
+| 𝑋 | and |𝐶 |.
+
+
+
+
+                                                                                                           12
+                     QuestBench: Can LLMs ask the right question to acquire information in reasoning tasks?
+
+
+
+                                                           Logic-Q                 Planning-Q
+                        Brute-force Search 𝑂 ((| 𝑋 | + | 𝐶 |)𝔼BF /𝛿) 𝑂 4 | 𝑋 | 𝑏2 𝔼BF /𝛿 
+                                                                                           
+
+                        Backwards Search         𝑂 | 𝑋 | |𝐶 | 𝑑       𝑂 ( 𝑏2𝑑 ) or 𝑂 3 | 𝑋 | 𝑑
+
+Table 4 | Runtime complexities of brute-force and backwards search in Logic-Q and Planning-Q.
+Derivation details can be found in Appendices C.1 and C.2.
+
+backwards search depth 𝑑 , number of variables | 𝑋 |, number of constraints |𝐶 |, and expected number
+of brute-force guesses 𝔼 𝐵𝐹 . These correlations are statistically significant for most LLMs in this domain,
+indicating that in Logic-Q, brute-force and backwards search are moderately good approximations for
+the type of reasoning LLMs are required to perform.
+      Planning-Q Results show that the LLMs’ performances have very weak or no correlations with 𝑑 ,
+| 𝑋 |, 𝑏, suggesting that LLMs may be using mechanisms other than the backwards search in planning.
+This is reasonable as these search algorithms generally require exponential-time search, while Trans-
+formers theoretically cannot perform non-polynomial-time-computation within a polynomial amount
+of chain-of-thought (Li et al., 2024b). However, some models’ accuracies have moderately strong
+correlation with 𝔼 𝐵𝐹 despite nearly no correlation with | 𝑋 | or 𝑏. This indicates that those LLMs might
+be randomly guessing, or verifying one choice at a time (the 𝔼 𝐵𝐹 factor in Table 4 for brute-force
+search), but perhaps not using breath-first search for verification.
+
+
+5.3. Is asking the right question harder than solving the problem?
+
+Ablation study. To better understand the relationship between question-asking and reasoning,
+we conducted an ablation study filtering for examples where the language model (LM) correctly
+answered the well-specified version of a task. By doing so, we can isolate the challenge of asking the
+right question from that of solving the underlying reasoning problem. This setup allows us to estimate
+how much more difficult question-asking is relative to reasoning.
+    We began by constructing a well-specified variant of Q u e s t Be nc h, in which we restored one
+sufficient piece of missing information in each 1-sufficient problem. This yielded well-specified CSPs
+for which the target variable 𝑦 can be determined without gathering new information. We then
+prompted LMs to directly solve these CSPs:
+    • In Logic-Q, the task is to determine the truth value of a target property about Alice.
+    • In Planning-Q, the model finds a valid plan from a given start state to a goal.
+    • In GSM-Q, we used the original GSM-plus math problems as-is.
+    • In GSME-Q, we used the GSM-plus problems translated into CSPs by the human annotators.
+   The prompts we used for this evaluation are provided in Appendix B.2, and evaluations on this
+well-specified variant of Q u e s t Be nc h are reported in Table 9.
+    We then restricted our evaluation of question-asking to only those examples where the model
+correctly answered at least one corresponding well-specified variant.5 Results of this filtered evaluation
+are shown in Table 5, including accuracy, differences from unfiltered performance (Table 2), and the
+number of retained examples. Results for GSM-Q and GSME-Q can be found in Table 10.
+    We observed that question-asking accuracy increased up to 54% in Planning-Q after filtering
+but remained effectively unchanged in Logic-Q. This suggests that while reasoning ability may be a
+   5 Note that each original QuestBench example may yield multiple well-specified variants, since there can be multiple
+1-sufficient variables; we retained only those where the model succeeded on at least one.
+
+
+
+
+                                                                                                                    13
+                 QuestBench: Can LLMs ask the right question to acquire information in reasoning tasks?
+
+
+
+                                                        Logic-Q                           Planning-Q
+                                              Acc       Diff # samples            Acc       Diff   # samples
+                     Gemini 2.0 FTE          37.4%     0.0%         1150        53.8% 6.5%                4273
+                    Claude 3.5 Sonnet        30.8%     0.7%         1120        11.3% 3.8%                4368
+                         GPT-4o              27.4%     0.0%         1150        33.4% 8.9%                2275
+            ZS        Gemini 1.5 Pro         29.6%     0.5%         1127        28.7% 8.9%                2175
+                     Gemini 1.5 Flash        17.1%     0.3%         1127        16.1% 7.6%                1288
+                     Gemma 2 2B IT            0.1%     0.0%         1101        0.0% -10.8%                 1
+                     Gemma 2 9B IT           26.2%     0.2%         1116        21.1% 6.7%                 95
+                     Gemma 2 27B IT          29.8%     0.4%         1111        30.8% 23.1%                117
+                  Gemini 2.0 FTE             34.6%     0.0%         1150        52.3%      6.1%           4318
+                 Claude 3.5 Sonnet           37.0%     0.2%         1132        43.4%      9.4%           5176
+                      GPT-4o                 32.0%     0.4%         1133        35.7%      19.3%          1339
+        ZS + CoT   Gemini 1.5 Pro            29.4%     0.2%         1132        28.1%      6.8%           2456
+                  Gemini 1.5 Flash           19.0%     0.3%         1130        20.4%      11.1%          1386
+                  Gemma 2 2B IT               0.3%     0.0%         1088          -          -             0
+                  Gemma 2 9B IT              25.4%     0.8%         1097        21.9%      11.7%           73
+                  Gemma 2 27B IT             32.3%     1.1%         1090        28.0%      18.0%           75
+                     Gemini 2.0 FTE          38.5% 0.1%             1147        28.5%      9.2%           4016
+                    Claude 3.5 Sonnet        36.3% 0.3%             1131        44.7%      10.1%          4264
+                         GPT-4o              25.5% -0.1%            1143        20.1%      8.6%           2780
+            4S        Gemini 1.5 Pro         26.8% 0.4%             1102        32.2%      13.4%          2935
+                     Gemini 1.5 Flash        15.6% 0.1%             1133        24.3%      6.0%           3429
+                     Gemma 2 2B IT           25.1% -0.0%            1148        22.2%      14.7%            9
+                     Gemma 2 9B IT           21.4% -0.2%            1135        11.7%      6.6%            726
+                     Gemma 2 27B IT          26.4% 0.1%             1130        22.7%      12.0%           546
+
+Table 5 | Ablation: Language model accuracies at predicting the right question to ask on only filtered
+Q u e s t Be nc h problems of which at least one well-specified version can be answered correctly by
+the model + prompt method. We use Gemini 2.0 FTE as a shorthand for Gemini Flash Thinking 2.0
+Exp 01-21. See Section 5.3 for the experimental setup. Acc indicates accuracy on the filtered version
+of Q u e s t Be nc h, Diff indicates difference between the accuracy in the filtered version vs. the
+original Q u e s t Be nc h dataset (Table 2), and # samples indicates the number of samples in the
+filtered dataset, out of 1150 and 7500 examples in the original Logic-Q and Planning-Q, respectively.
+We bold all accuracy differences greater than zero.
+
+necessary component of effective question-asking, it may not be sufficient. Notably, models reasoned
+significantly better on the well-specified version of Logic-Q than Planning-Q (see Table 9), yet this
+improvement did not translate to better question-asking performance in Logic-Q. This implies that
+even when reasoning is strong, models may still struggle to identify what information is missing.
+
+
+Correlation analysis. We also examined whether LMs’ abilities to reason in the presence of sufficient
+information correlates with their ability to identify the missing information in a question. Recall
+that we constructed the 1-sufficient problems in Q u e s t Be nc h by withholding 1 variable from a
+well-specified base CSP (see Section 4). Then, we constructed multiple well-specified questions from
+each 1-sufficient problem by restoring 1 variable at a time (note these questions will all be slightly
+different variants of the base CSP).
+   For each (model, base CSP) pair, we computed (1) the model’s mean accuracy on reasoning over
+and solving the corresponding well-specified problems, and (2) the model’s mean question-asking
+accuracy on the 1-sufficient problems derived from that base CSP (i.e., whether the model correctly
+
+
+                                                                                                                 14
+                  QuestBench: Can LLMs ask the right question to acquire information in reasoning tasks?
+
+
+
+identifies which variable is required).
+    Both accuracies were averaged across different prompt modes. This gave us one list of accuracies
+for reasoning in the presence of sufficient information, and another for question-asking, with each
+entry corresponding to a specific (model, base CSP) pair. To assess the relationship between reasoning
+and question-asking abilities, we computed Spearman’s rank correlation between the two lists. A
+high correlation would indicate that models better at reasoning with complete information also tend
+to be better at identifying what’s missing when information is incomplete.
+    Table 6 shows statistically significant, mild-
+                                                                                               𝜌      𝑝-value
+to-moderate positive correlations in all domains,
+suggesting that reasoning capability is generally                              Logic-Q       0.24 1.9e-98
+correlated with improved question-asking per-                                Planning-Q      0.40   0.0
+                                                                              GSME-Q         0.30 4.5e-10
+formance in our domain. This aligns with our
+                                                                               GSM-Q         0.22 6.4e-6
+findings from the ablation study: while reason-
+ing ability may be a necessary ingredient for               Table 6 | Spearman’s rank correlation coefficients ( 𝜌)
+effective question-asking, it may not be suffi-              between LMs’ ability to solve a reasoning problem and to
+cient on its own—-potentially explaining why                 identify the missing information in the problem. The cor-
+the observed correlations, though statistically              relations are statistically significant and positive across
+significant, remain modest in magnitude.                     domains, showing that the two abilities are relevant.
+
+
+5.4. Detecting underspecification and recognizing uncertainty
+
+We also investigated whether LLMs can detect underspecified problems and identify their own uncer-
+tainty. We did this by sampling the well-specified variants of Q u e s t Be nc h from Section 5.3 and
+the original examples of QuestBench, creating a mix of 1-sufficient and well-specified problems.
+For each problem, we asked LMs to either 1) identify the target variable’s value if the problem is
+well-specified (this is analogous to the setup in Section 5.3), or 2) say “not sure” if the problem is
+1-sufficient. The prompts for this setting can be found in Appendix B.3.
+    Table 7 shows the F1 scores for the “not sure” class and results of Random, a baseline where a
+random set of examples (of the same size as ground-truth “not sure” set) are assigned “not sure”.
+Surprisingly, we found that performance did not always improve substantially with model size,
+particularly in the Planning-Q domain where all models performed at most 5% better than the
+Random baseline. We hypothesize that Planning-Q problems are sufficiently difficult that models
+cannot recognize uncertainty, and thus opt to guess randomly instead of answering (truthfully) that
+they are uncertain. As further support for this hypothesis, we found that Gemini Flash Thinking,
+Claude 3.5, and GPT-4o predict “not sure” on only 1.4%, 4.6%, and 0.7% of cases in the zero-shot (no
+chain-of-thought) setting on Planning-Q, when the ground-truth ratio is 41.8%. This is in line with
+prior work that finds RLHF post-training tends to encourage model overconfidence (Kadavath et al.,
+2022; Leng et al., 2025; OpenAI, 2023).
+
+
+Correlation with missing information identification. We examined whether LMs’ ability to detect
+whether a problem is underspecified correlates with their ability to identify what specific information
+is missing. Similar to the correlation analyses in §5.3, for each (model, base CSP) pair, we computed
+the model’s average F1 score in predicting whether a question is underspecified, and its average
+accuracy in identifying the correct missing variable in the corresponding 1-sufficient problems. We
+then computed Spearman’s rank correlation of the two lists of accuracies for all (model, base CSP)
+pairs. This evaluates whether models that are better at recognizing underspecification are also better
+at identifying the source of that underspecification.
+
+
+
+                                                                                                                     15
+                  QuestBench: Can LLMs ask the right question to acquire information in reasoning tasks?
+
+
+
+                                                                   Logic-Q Planning-Q GSME-Q GSM-Q
+                   Gemini Flash Thinking 2.0 Exp 01-21               60.87             0.82        22.35    36.83
+                            Claude 3.5 Sonnet                        57.09            10.77        65.22    59.85
+                                 GPT-4o                              36.26             1.23        30.27    60.87
+                              Gemini 1.5 Pro                         47.44             9.88        12.42    55.28
+           ZS
+                             Gemini 1.5 Flash                        34.03             0.00        39.41    51.16
+                             Gemma 2 2B IT                           47.03             0.00         2.56     4.08
+                             Gemma 2 9B IT                           48.39             0.00        40.66    74.67
+                             Gemma 2 27B IT                          50.29             0.10         6.13    56.93
+                Gemini Flash Thinking 2.0 Exp 01-21                  61.70             0.89        12.42    28.57
+                         Claude 3.5 Sonnet                           58.87            15.45        96.58    68.49
+                              GPT-4o                                 45.95             0.37        83.70    62.86
+                           Gemini 1.5 Pro                            53.37             4.15        88.15    65.11
+       ZS + CoT
+                          Gemini 1.5 Flash                           55.71             4.53        90.59    69.09
+                          Gemma 2 2B IT                              35.96             0.05        53.40    21.67
+                          Gemma 2 9B IT                              48.98             0.00        64.91    67.12
+                          Gemma 2 27B IT                             47.87             0.74        91.37    60.19
+                   Gemini Flash Thinking 2.0 Exp 01-21               57.95             5.42        74.90    50.00
+                            Claude 3.5 Sonnet                        51.65            31.52        91.37    86.41
+                                 GPT-4o                              24.49            13.39        40.21    82.69
+                              Gemini 1.5 Pro                         32.35             9.49        66.37    78.74
+           4S
+                             Gemini 1.5 Flash                        27.62            20.82        75.21    75.95
+                             Gemma 2 2B IT                           37.95            46.52        15.03    61.75
+                             Gemma 2 9B IT                           43.75             2.85        16.00    70.62
+                             Gemma 2 27B IT                          36.04             9.06        15.20    75.14
+        Random                   (proportional)                      41.97            41.75        42.90        50.0
+
+Table 7 | F1 scores for identifying which problems are underspecified in QuestBench. We include a
+random baseline where a randomly-sampled, proportional number of examples are labeled “not sure”.
+We found that most LLMs have difficulty assessing when problems are underspecified, particularly in
+difficult domains like Planning-Q.
+                                                                                               𝜌      𝑝-value
+    Table 8 shows statistically significant weak                               Logic-Q        0.09   2.7e-10
+correlations in all domains, which suggest that                              Planning-Q       0.11   1.1e-08
+the abilities to detect missing information and to                            GSME-Q          0.29   1.1e-08
+pinpoint what is missing, while related, are only                              GSM-Q          0.26   1.1e-07
+partially overlapping, particularly in the more
+complex Logic-Q and Planning-Q domains.                     Table 8 | Spearman’s rank correlation coefficients ( 𝜌)
+                                                             show that LMs’ abilities to identify whether they do not
+                                                             know v.s. what they do not know are weakly correlated.
+6. Conclusion
+We introduce a collection of benchmarks for identifying underspecification and asking clarification
+questions in reasoning problems, which we posit is an essential skill necessary for LLMs’ to perform
+tasks under uncertainty. We found that SOTA and near-SOTA LLMs are relatively good at identifying
+missing information in simple algebra problems, but struggle with more complex tasks involving logic
+and planning. Their performance is sometimes negatively correlated with factors that increase problem
+complexity, such as search depth and expected number of brute-force guesses. Our ablation studies
+and correlation experiments suggest that reasoning ability is necessary – but may not be sufficient –
+to enable models to ask the right question. Our work underscores the areas where significant progress
+can be made in enabling systems to ask for clarifying information and acknowledge uncertainty.
+
+
+                                                                                                                       16
+                 QuestBench: Can LLMs ask the right question to acquire information in reasoning tasks?
+
+
+
+References
+Y. Alkhazraji, M. Frorath, M. Grützner, M. Helmert, T. Liebetraut, R. Mattmüller, M. Ortlieb, J. Seipp,
+   T. Springenberg, P. Stahl, and J. Wülfing. Pyperplan. https://doi.org/10.5281/zenodo.
+   3700819, 2020. URL https://doi.org/10.5281/zenodo.3700819.
+C. Andukuri, J.-P. Fränken, T. Gerstenberg, and N. D. Goodman. STaR-GATE: Teaching language
+  models to ask clarifying questions. In Conference on Language Modeling, 2024.
+
+D. Angluin. Queries and concept learning. Machine learning, 2:319–342, 1988.
+
+L. Aroyo and C. Welty. Truth is a lie: Crowd truth and the seven myths of human annotation. AI
+   Magazine, 36(1):15–24, 2015.
+
+P. Auer. Using confidence bounds for exploitation-exploration tradeoffs. Journal of Machine Learning
+   Research (JMLR), 3:397–422, 2002.
+
+J. Austin, A. Odena, M. Nye, M. Bosma, H. Michalewski, D. Dohan, E. Jiang, C. Cai, M. Terry, Q. Le,
+   et al. Program synthesis with large language models. arXiv preprint arXiv:2108.07732, 2021.
+
+V. Basile, M. Fell, T. Fornaciari, D. Hovy, S. Paun, B. Plank, M. Poesio, A. Uma, et al. We need to
+  consider disagreement in evaluation. In Proceedings of the 1st workshop on benchmarking: past,
+  present and future, pages 15–21. Association for Computational Linguistics, 2021.
+
+P. Budzianowski, T.-H. Wen, B.-H. Tseng, I. Casanueva, U. Stefan, R. Osman, and M. Gašić. Multiwoz -
+   a large-scale multi-domain wizard-of-oz dataset for task-oriented dialogue modelling. In Proceedings
+   of the 2018 Conference on Empirical Methods in Natural Language Processing (EMNLP), 2018.
+
+K. R. Chandu, L. Li, A. Awadalla, X. Lu, J. S. Park, J. Hessel, L. Wang, and Y. Choi. Certainly
+  uncertain: A benchmark and metric for multimodal epistemic and aleatoric awareness. arXiv
+  preprint arXiv:2407.01942, 2024.
+
+M. Chen, J. Tworek, H. Jun, Q. Yuan, H. P. D. O. Pinto, J. Kaplan, H. Edwards, Y. Burda,
+ N. Joseph, G. Brockman, et al. Evaluating large language models trained on code. arXiv preprint
+ arXiv:2107.03374, 2021.
+
+S. Chen, S. Wiseman, and B. Dhingra. ChatShop: Interactive information seeking with language
+   agents. arXiv preprint arXiv:2404.09911, 2024a.
+
+X. Chen, R. A. Chi, X. Wang, and D. Zhou. Premise order matters in reasoning with large language
+  models. In International Conference on Machine Learning (ICML), 2024b.
+
+Y. Chen, X. Song, C. Lee, Z. Wang, Q. Zhang, D. Dohan, K. Kawakami, G. Kochanski, A. Doucet,
+   M. Ranzato, S. Perel, and N. de Freitas. Towards learning universal hyperparameter optimizers
+  with transformers. In Advances in Neural Information Processing Systems (NeurIPS), 2022.
+
+M. M. Chouinard, P. L. Harris, and M. P. Maratsos. Children’s questions: A mechanism for cognitive
+ development. Monographs of the Society for Research in Child Development, pages i–129, 2007.
+
+K. Cobbe, V. Kosaraju, M. Bavarian, M. Chen, H. Jun, L. Kaiser, M. Plappert, J. Tworek, J. Hilton,
+  R. Nakano, C. Hesse, and J. Schulman. Training verifiers to solve math word problems. arXiv
+  preprint arXiv:2110.14168, 2021.
+
+D. A. Cohn, Z. Ghahramani, and M. I. Jordan. Active learning with statistical models. Journal or
+  Artificial Intelligence Research (JAIR), 4:129–145, 1996.
+
+
+                                                                                                          17
+                  QuestBench: Can LLMs ask the right question to acquire information in reasoning tasks?
+
+
+
+A. Creswell, M. Shanahan, and I. Higgins. Selection-inference: Exploiting large language models for
+  interpretable logical reasoning. arXiv preprint arXiv:2205.09712, 2022.
+
+A. Curtis, N. Kumar, J. Cao, T. Lozano-Pérez, and L. P. Kaelbling. Trust the proc3s: Solving long-
+  horizon robotics problems with llms and constraint satisfaction. In Conference on Robot Learning,
+  2024a.
+
+A. Curtis, G. Matheos, N. Gothoskar, V. Mansinghka, J. Tenenbaum, T. Lozano-Pérez, and L. P.
+  Kaelbling. Partially observable task and motion planning with uncertainty and risk awareness.
+  arXiv preprint arXiv:2403.10454, 2024b.
+
+A. M. Davani, M. Díaz, and V. Prabhakaran. Dealing with disagreements: Looking beyond the majority
+  vote in subjective annotations. Transactions of the Association for Computational Linguistics, 10:
+  92–110, 2022.
+
+Z. Fan, X. Han, and Z. Wang. Transfer learning for Bayesian optimization on heterogeneous search
+   spaces. Transactions on Machine Learning Research (TMLR), 2024.
+
+M. Feurer, B. Letham, F. Hutter, and E. Bakshy. Practical transfer learning for Bayesian optimization.
+ arXiv:1802.02219 [stat.ML], 2018.
+
+Y. Gal, R. Islam, and Z. Ghahramani. Deep Bayesian active learning with image data. In International
+   Conference on Machine Learning (ICML), pages 1183–1192. PMLR, 2017.
+
+R. Garnett. Bayesian optimization. Cambridge University Press, 2023.
+
+Gemini Team Google. Gemini: A family of highly capable multimodal models. arXiv:2312.11805
+  [cs.CL], 2023. URL https://arxiv.org/abs/2312.11805.
+
+Gemini Team Google. Gemini 1.5: Unlocking multimodal understanding across millions of tokens of
+  context. arXiv:2403.05530 [cs.CL], 2024. URL https://arxiv.org/abs/2403.05530.
+
+Gemma Team. Gemma: Open models based on Gemini research and technology. arXiv:2403.08295
+  [cs.CL], 2024. URL https://arxiv.org/abs/2403.08295.
+
+M. Ghallab, A. Howe, C. Knoblock, D. McDermott, A. Ram, M. Veloso, D. Weld, D. W. SRI, A. Barrett,
+ D. Christianson, et al. PDDL – the planning domain definition language. Technical Report CVC
+ TR98003/DCS TR1165. New Haven, CT: Yale Center for Computational Vision and Control., 1998.
+
+M. Ghavamzadeh, S. Mannor, J. Pineau, A. Tamar, et al. Bayesian reinforcement learning: A survey.
+ Foundations and Trends in Machine Learning, 8(5–6):359–483, 2015.
+
+G. Grand, V. Pepe, J. Andreas, and J. B. Tenenbaum. Loose lips sink ships: Asking questions in battleship
+  with language-informed program sampling, 2024. URL https://arxiv.org/abs/2402.19471.
+
+M. Hahn, W. Zeng, N. Kannen, R. Galt, K. Badola, B. Kim, and Z. Wang. Proactive agents for multi-turn
+  text-to-image generation under uncertainty. arXiv:2412.06771 [cs.AI], 2024.
+
+K. Handa, Y. Gal, E. Pavlick, N. Goodman, J. Andreas, A. Tamkin, and B. Z. Li. Bayesian preference
+  elicitation with language models, 2024. URL https://arxiv.org/abs/2403.05534.
+
+D. Hendrycks, C. Burns, S. Kadavath, A. Arora, S. Basart, E. Tang, D. Song, and J. Steinhardt. Measuring
+  mathematical problem solving with the math dataset. arXiv preprint arXiv:2103.03874, 2021.
+
+P. Hennig and C. J. Schuler. Entropy search for information-efficient global optimization. Journal of
+   Machine Learning Research (JMLR), 13:1809–1837, 2012.
+
+
+                                                                                                           18
+                  QuestBench: Can LLMs ask the right question to acquire information in reasoning tasks?
+
+
+
+N. Houlsby, F. Huszár, Z. Ghahramani, and M. Lengyel. Bayesian active learning for classification and
+  preference learning. arXiv preprint arXiv:1112.5745, 2011.
+
+Z. Hu, C. Liu, X. Feng, Y. Zhao, S.-K. Ng, A. T. Luu, J. He, P. W. Koh, and B. Hooi. Uncertainty of
+  thoughts: Uncertainty-aware planning enhances information seeking in large language models.
+  arXiv:2402.03271 [cs.CL], 2024.
+
+S. Kadavath, T. Conerly, A. Askell, T. Henighan, D. Drain, E. Perez, N. Schiefer, Z. Hatfield-Dodds,
+   N. DasSarma, E. Tran-Johnson, S. Johnston, S. El-Showk, A. Jones, N. Elhage, T. Hume, A. Chen,
+   Y. Bai, S. Bowman, S. Fort, D. Ganguli, D. Hernandez, J. Jacobson, J. Kernion, S. Kravec, L. Lovitt,
+   K. Ndousse, C. Olsson, S. Ringer, D. Amodei, T. Brown, J. Clark, N. Joseph, B. Mann, S. McCandlish,
+   C. Olah, and J. Kaplan. Language models (mostly) know what they know, 2022. URL https:
+  //arxiv.org/abs/2207.05221.
+L. P. Kaelbling and T. Lozano-Pérez. Integrated task and motion planning in belief space. International
+   Journal of Robotics Research (IJRR), 32(9-10):1194–1227, 2013.
+
+L. P. Kaelbling, M. L. Littman, and A. W. Moore. Reinforcement learning: A survey. Journal or Artificial
+   Intelligence Research (JAIR), 4:237–285, 1996.
+
+L. P. Kaelbling, M. L. Littman, and A. R. Cassandra. Planning and acting in partially observable
+   stochastic domains. Artificial Intelligence, 101(1-2):99–134, 1998.
+
+L. Kuhn, Y. Gal, and S. Farquhar. CLAM: Selective clarification for ambiguous questions with generative
+   language models. arXiv:2212.07769 [cs.CL], 2023a.
+
+L. Kuhn, Y. Gal, and S. Farquhar. Semantic uncertainty: Linguistic invariances for uncertainty
+  estimation in natural language generation. In International Conference on Learning Representations
+  (ICLR), 2023b.
+
+H. J. Kushner. A versatile stochastic model of a function of unknown and time varying form. Journal
+  of Mathematical Analysis and Applications, 5(1):150–167, 1962.
+
+H. J. Kushner. A new method of locating the maximum point of an arbitrary multipeak curve in the
+  presence of noise. Journal of Fluids Engineering, 86(1):97–106, 1964.
+
+J. Leng, C. Huang, B. Zhu, and J. Huang. Taming overconfidence in LLMs: Reward calibration
+   in RLHF. In The Thirteenth International Conference on Learning Representations, 2025. URL
+   https://openreview.net/forum?id=l0tg0jzsdL.
+B. Z. Li, A. Tamkin, N. Goodman, and J. Andreas. Eliciting human preferences with language models,
+  2023. URL https://arxiv.org/abs/2310.11589.
+
+Q. Li, L. Cui, X. Zhao, L. Kong, and W. Bi. GSM-plus: A comprehensive benchmark for evaluating
+  the robustness of LLMs as mathematical problem solvers. In L.-W. Ku, A. Martins, and V. Srikumar,
+  editors, Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics
+  (Volume 1: Long Papers), pages 2961–2984, Bangkok, Thailand, Aug. 2024a. Association for
+  Computational Linguistics. doi: 10.18653/v1/2024.acl-long.163. URL https://aclanthology.
+  org/2024.acl-long.163.
+Z. Li, H. Liu, D. Zhou, and T. Ma. Chain of thought empowers transformers to solve inherently
+  serial problems. In The Twelfth International Conference on Learning Representations, 2024b. URL
+  https://openreview.net/forum?id=3EWTEy9MTM.
+
+
+
+                                                                                                           19
+                  QuestBench: Can LLMs ask the right question to acquire information in reasoning tasks?
+
+
+
+S. Min, J. Michael, H. Hajishirzi, and L. Zettlemoyer. AmbigQA: Answering ambiguous open-domain
+   questions. In EMNLP, 2020.
+
+J. Moc̆kus. On Bayesian methods for seeking the extremum. In Optimization Techniques IFIP Technical
+   Conference, 1974.
+
+OpenAI. Gpt-4 technical report, 2023.
+
+J.-C. Pang, H.-B. Fan, P. Wang, J.-H. Xiao, N. Tang, S.-H. Yang, C. Jia, S.-J. Huang, and Y. Yu. Empower-
+   ing language models with active inquiry for deeper understanding. arXiv preprint arXiv:2402.03719,
+   2024.
+
+C. Phiquepal and M. Toussaint. Combined task and motion planning under partial observability: An
+  optimization-based approach. In IEEE International Conference on Robotics and Automation (ICRA),
+  2019.
+
+W. T. Piriyakulkij, V. Kuleshov, and K. Ellis. Active preference inference using language models and
+ probabilistic reasoning, 2024. URL https://arxiv.org/abs/2312.12009.
+
+A. Rastogi, X. Zang, S. Sunkara, R. Gupta, and P. Khaitan. Towards scalable multi-domain conversa-
+  tional agents: The schema-guided dialogue dataset. Proceedings of the AAAI Conference on Artificial
+  Intelligence, 34(05):8689–8696, 2020.
+
+P. Ren, Y. Xiao, X. Chang, P.-Y. Huang, Z. Li, B. B. Gupta, X. Chen, and X. Wang. A survey of deep
+   active learning. ACM computing surveys (CSUR), 54(9):1–40, 2021.
+
+C. Sammut and R. B. Banerji. Learning concepts by asking questions. Machine learning: An artificial
+  intelligence approach, 2:167–192, 1986.
+
+M. Sandri, E. Leonardelli, S. Tonelli, and E. Ježek. Why don’t you do it right? analysing annotators’
+ disagreement in subjective tasks. In Proceedings of the 17th Conference of the European Chapter of
+ the Association for Computational Linguistics, pages 2428–2441, 2023.
+
+B. Settles. Active learning literature survey. Computer Sciences Technical Report 1648, University of
+  Wisconsin–Madison, 2009.
+
+T. Silver, S. Dan, K. Srinivas, J. B. Tenenbaum, L. Kaelbling, and M. Katz. Generalized planning in
+   PDDL domains with pretrained large language models. In AAAI Conference on Artificial Intelligence
+  (AAAI), 2024.
+
+N. Srinivas, A. Krause, S. M. Kakade, and M. Seeger. Gaussian process optimization in the bandit
+  setting: No regret and experimental design. In International Conference on Machine Learning (ICML),
+  2010.
+
+R. S. Sutton. Reinforcement learning: An introduction. A Bradford Book, 2018.
+
+R. Wan, J. Kim, and D. Kang. Everyone’s voice matters: Quantifying annotation disagreement using
+  demographic information. Proceedings of the AAAI Conference on Artificial Intelligence, 37(12):
+  14523–14530, 2023.
+
+B. Wang, Z. Wang, X. Wang, Y. Cao, R. A Saurous, and Y. Kim. Grammar prompting for domain-specific
+   language generation with large language models. In Advances in Neural Information Processing
+  Systems (NeurIPS), 2024a.
+
+Z. Wang and S. Jegelka. Max-value entropy search for efficient Bayesian optimization. In International
+   Conference on Machine Learning (ICML), 2017.
+
+
+                                                                                                           20
+                 QuestBench: Can LLMs ask the right question to acquire information in reasoning tasks?
+
+
+
+Z. Wang, S. Jegelka, L. P. Kaelbling, and T. Lozano-Pérez. Focused model-learning and planning for
+   non-Gaussian continuous state-action systems. In IEEE International Conference on Robotics and
+   Automation (ICRA), 2017.
+
+Z. Wang, C. R. Garrett, L. P. Kaelbling, and T. Lozano-Pérez. Active model learning and diverse action
+   sampling for task and motion planning. In IEEE/RSJ International Conference on Intelligent Robots
+   and Systems (IROS), pages 4107–4114. IEEE, 2018.
+
+Z. Wang, C. R. Garrett, L. P. Kaelbling, and T. Lozano-Pérez. Learning compositional models of robot
+   skills for task and motion planning. International Journal of Robotics Research (IJRR), 40(6-7):
+   866–894, 2021.
+
+Z. Wang, G. E. Dahl, K. Swersky, C. Lee, Z. Nado, J. Gilmer, J. Snoek, and Z. Ghahramani. Pre-trained
+   Gaussian processes for Bayesian optimization. Journal of Machine Learning Research (JMLR), 25
+  (212):1–83, 2024b.
+
+J. J. Wu. Large language models should ask clarifying questions to increase confidence in generated
+   code. In Annual Symposium on Machine Programming (MAPS), 2023.
+
+H. Zhang, L. H. Li, T. Meng, K.-W. Chang, and G. Van Den Broeck. On the paradox of learning to
+  reason from data. In Proceedings of the Thirty-Second International Joint Conference on Artificial
+  Intelligence, IJCAI ’23, 2023. ISBN 978-1-956792-03-4. doi: 10.24963/ijcai.2023/375. URL
+  https://doi.org/10.24963/ijcai.2023/375.
+M. J. Zhang and E. Choi. Clarify when necessary: Resolving ambiguity through interaction with LMs.
+  arXiv:2311.09469 [cs.CL], 2023.
+
+T. Zhang, P. Qin, Y. Deng, C. Huang, W. Lei, J. Liu, D. Jin, H. Liang, and T.-S. Chua. CLAMBER: A
+   benchmark of identifying and clarifying ambiguous information needs in large language models.
+   In Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (ACL),
+   2024a.
+
+X. Zhang, Y. Deng, Z. Ren, S.-K. Ng, and T.-S. Chua. Ask-before-plan: Proactive language agents for
+  real-world planning. arXiv:2406.12639 [cs.CL], 2024b.
+
+
+
+
+                                                                                                          21
+                     QuestBench: Can LLMs ask the right question to acquire information in reasoning tasks?
+
+
+
+A. Dataset Construction Details
+
+A.1. Logic-Q
+
+We create 1-sufficient CSPs out of SimpleLogic problems by first discarding the 𝐴’s that are already
+present in the dataset. We then identify all assignments 𝐴 ( 𝑦 ) = { 𝐴𝑖( 𝑦 ) : 𝐴𝑖( 𝑦 ) =⇒ 𝑦 } 𝑖𝑀=0 to (a subset of)
+variables in 𝑋 \ 𝑦 which would imply 𝑦 is true, and similarly all assignments 𝐴 (¬ 𝑦 ) = { 𝐴𝑖(¬ 𝑦 ) : 𝐴𝑖(¬ 𝑦 ) =⇒
+         ′
+¬ 𝑦 } 𝑖𝑀=0 that imply 𝑦 is false. These sets are found through recursive backwards search starting from 𝑦
+or ¬ 𝑦 , see Appendix A.1.1.
+    Once we have the full set of assignments which imply 𝑦 , to make them underspecified, we examine
+                                                                                  ′
+all pairs of assignments ( 𝐴𝑖( 𝑦 ) , 𝐴 (¬
+                                       𝑗
+                                          𝑦)
+                                             ) ∈ { 𝐴𝑖( 𝑦 ) } 𝑖𝑀=0 { 𝐴𝑖(¬ 𝑦 ) } 𝑖𝑀=0 where 𝐴𝑖( 𝑦 ) and 𝐴 (¬
+                                                                                                        𝑗
+                                                                                                           𝑦)
+                                                                                                              differ on an
+assignment to a single variable 𝑥𝑑 . This means that ifwe remove 𝑥𝑑 ’s assignment
+                                                                                  from both 𝐴𝑖( 𝑦 ) and
+ (¬ 𝑦 )
+𝐴𝑗     (creating 𝐴𝑖( 𝑦 ) \ 𝑥𝑑 and 𝐴 (¬
+                                    𝑗
+                                       𝑦)
+                                          \𝑥𝑑 ), then knowing ( 𝐴𝑖( 𝑦 ) \𝑥𝑑 ) ∧ ( 𝐴 (¬
+                                                                                    𝑗
+                                                                                       𝑦)
+                                                                                          \ 𝑥𝑑 ) is true means knowing
+𝑥𝑑 ’s value is sufficient to determine whether 𝑦 or ¬ 𝑦 is true,
+
+                              Known( 𝑥𝑑 ) ∧ ( 𝐴𝑖( 𝑦 ) \ 𝑥𝑑 ) ∧ ( 𝐴 (¬
+                                                                   𝑗
+                                                                      𝑦)
+                                                                         \𝑥𝑑 ) =⇒ Known( 𝑦 ) .
+
+We conduct further checks (see Appendix A.1.2) to ensure that the assignments themselves do not
+already imply a value for 𝑦 ,
+
+                                      ( 𝐴𝑖( 𝑦 ) \𝑥𝑑 ) ∧ ( 𝐴 (¬
+                                                            𝑗
+                                                               𝑦)
+                                                                  \ 𝑥𝑑 ) =⇒ ¬Known( 𝑦 ) ,
+
+discarding any assignment from that doesn’t satisfy the above property. We define Ã as the set of
+assignments satisfying the two properties above, and 𝐴˜ as an element of this set.
+
+                     Ã = ( 𝐴𝑖( 𝑦 ) \ 𝑥𝑑 ) ∧ ( 𝐴 (¬ 𝑦)
+                         
+                                                 𝑗
+                                                       \𝑥𝑑 ) :
+                                 ∃ 𝑥𝑑 ∈ 𝑋,
+                                                                                                                    (1)
+                                      Known( 𝑥𝑑 ) ∧ ( 𝐴𝑖( 𝑦 ) \𝑥𝑑 ) ∧ ( 𝐴 (¬𝑗
+                                                                              𝑦)
+                                                                                 \ 𝑥 𝑑 ) =⇒   Known( 𝑦 )
+                                                                                              
+                                    ∧ ( 𝐴𝑖( 𝑦 ) \𝑥𝑑 ) ∧ ( 𝐴 (¬
+                                                            𝑗
+                                                               𝑦)
+                                                                  \ 𝑥 𝑑 ) =⇒   ¬Known(     𝑦 )
+
+where the sufficient set of each 𝐴˜ ∈ Ã is defined as
+
+               C( 𝐴˜) = 𝑥 : Known( 𝑥𝑑 ) ∧ 𝐴˜ =⇒ Known( 𝑦 ) ∧ 𝐴˜ =⇒ ¬Known( 𝑦 ) .
+                                                                            
+                                                                                                                      (2)
+
+A.1.1. Constructing all assignments that imply goal is true
+
+We begin by doing backwards search through the constraints 𝐶 to iteratively derive the set of as-
+signments which imply 𝑦 is true. At each iteration, we keep track of a disjunction of conjunctions
+of variables that must be set in order for the goal variable to be true. We start from the most trivial
+assignment – just setting goal variable itself 𝑦 to true.
+
+                                                                 𝑔0 = 𝑦
+
+We then find all rules which imply 𝑦 is true and add the relevant variable assignments to our set. For
+example, suppose we have rule 𝑎 ∧ 𝑏 → 𝑦 and 𝑐 ∧ ¬𝑑 → 𝑦 , then at the first iteration, we expand our
+disjunction of conjunctions to include
+
+                                                   𝑔1 = ( 𝑎 ∧ 𝑏) ∨ ( 𝑐 ∧ ¬𝑑 )
+
+
+
+                                                                                                                       22
+                                QuestBench: Can LLMs ask the right question to acquire information in reasoning tasks?
+
+
+
+We then iterate through each conjunction, and apply the above procedure on each variable in the
+conjunction. For example, if we have 𝑒 ∧ 𝑓 =⇒ 𝑏 and 𝑒 ∧ 𝑔 ∧ ℎ =⇒ 𝑏 and 𝑒 ∧ 𝑥 =⇒ 𝑐 in the
+constraints, then we expand as:
+
+                                                𝑔2 = (( 𝑎 ∧ (( 𝑒 ∧ 𝑓 ) ∨ ( 𝑒 ∧ 𝑔 ∧ ℎ)))) ∨ (( 𝑒 ∧ 𝑥 ) ∧ ¬𝑑 )
+
+Which we can then apply the distributive property to, obtaining
+
+                                                     𝑔 2 = ( 𝑎 ∧ 𝑒 ∧ 𝑓 ) ∨ ( 𝑎 ∧ 𝑒 ∧ 𝑔 ∧ ℎ) ∨ ( 𝑒 ∧ 𝑥 ∧ ¬ 𝑑 )
+
+
+    More formally, we decompose each constraint 𝐶 𝑖 into p r e m i se s(𝐶 𝑖 ) =⇒ conc l u s ion(𝐶 𝑖 ) 6 ,
+where premi se s(𝐶 𝑖 ) is a set of terms that participate in the conjunction, while conc l u s ion(𝐶 𝑖 )
+is a single term implied by p r e m i se s(𝐶 𝑖 ). Backwards search is thus formalized as follows:
+
+     𝑔0 = 𝑦
+             [ 𝑁 ] [Û
+                    𝑀𝑖 ]
+                                        !
+             Ü
+     𝑔1 =                       𝑡𝑖, 𝑗 , ∀𝑡𝑖, 𝑗 ∈ p r e m i se s ( 𝐶 𝑖 ) , ∀𝐶 𝑖 where conc l u s ion( 𝐶 𝑖 ) = 𝑦
+               𝑖         𝑗
+                 𝑀𝑖 ] [Ü
+          [ 𝑁 ] [Û     𝑁 𝑗 ] [Û
+                              𝑀𝑘 ]
+                                            !
+          Ü
+     𝑔2 =                          𝑡𝑖, 𝑗,𝑘,ℓ ®® , ∀𝑡𝑖, 𝑗,𝑘,ℓ ∈ p r e m i se s( 𝐶 𝑖, 𝑗,𝑘 ) ,
+               ©     ©                        ªª
+               ­     ­
+            𝑖 « 𝑗 « 𝑘         ℓ               ¬¬
+                                                             ∀𝐶 𝑖, 𝑗,𝑘 where conc l u s ion(𝐶 𝑖, 𝑗,𝑘 ) = 𝑡𝑖, 𝑗 , · · ·
+             [𝑁 ]
+             Ü                              Ü                       𝑀𝑖 ] [Û
+                                                                   [Û     𝑀𝑘 ]
+         =                                                                       𝑡𝑖, ( 𝑗,𝑘′ ) ,ℓ
+               𝑖                       𝑘′ ,                          𝑗     ℓ
+                    ∀ ( 𝑗,𝑘′ ) ∈ ( (0,𝑘′ ) , ··· , ( 𝑀𝑖 ,𝑘′ ) )
+                        ∀ ( (0,𝑘′ ) , ··· , ( 𝑀 ,𝑘′ ) ) ∈
+                                                 𝑖
+                      { { ( 𝑗,𝑘 ) ∀ 𝑘 ∈ [ 𝑁 𝑗 ] } ∀ 𝑗 ∈ [ 𝑀𝑖 ] }
+
+                                                                   ∀𝑡𝑖, ( 𝑗,𝑘′ ) ,ℓ ∈ p r e m i se s (𝐶 𝑖, ( 𝑗,𝑘′ ) ) ,
+                                                                   ∀𝐶 𝑖, ( 𝑗,𝑘′ ) ∈       𝑗 {𝐶 𝑖, 𝑗,𝑘 ∀𝐶 𝑖, 𝑗,𝑘 where conc l u s ion( 𝐶 𝑖, 𝑗,𝑘 ) = 𝑡 𝑖, 𝑗 }
+
+                                                     taking all combinations of 𝑘 rules that can form each 𝑗 term
+             ÜÛ
+         =                   𝑡𝑖2 , 𝑗2                   re-indexing
+               𝑖2   𝑗2
+
+         ···
+
+to infer all sets of variable assignments that implies 𝑦 . Similarly, we repeat the process starting from
+¬ 𝑦.
+   This gives us the full set of variable assignments 𝐴 ( 𝑦 ) which imply 𝑦 is true. We also repeat this
+backwards-search procedure starting from ¬ 𝑦 to get the full set of variable assignments 𝐴 (¬ 𝑦 ) which
+imply ¬ 𝑦 is true.
+
+A.1.2. Checking 1-sufficiency
+
+After constructing potential 1-sufficient assignments 𝐴 𝑦, −1 = {( 𝐴𝑖( 𝑦 ) \𝑥𝑑 ) ∧ ( 𝐴 (¬
+                                                                                       𝑗
+                                                                                          𝑦)
+                                                                                             \𝑥𝑑 )∀𝑥𝑑 ∈ 𝑋 }, we
+conduct several further checks to ensure they are 1-sufficient:
+   6 Note that any rule of form 𝑎 ∧ 𝑏 ∧ 𝑐    =⇒ 𝑑 is equivalent to 𝑎 ∧ 𝑏 ∧ ¬𝑑 =⇒ ¬𝑐, 𝑎 ∧ ¬𝑏 ∧ 𝑐 =⇒ ¬𝑑 , etc. We consider
+all possible cycles by writing 𝐶 𝑖 in the form of a disjunction, ¬𝑎 ∨ ¬𝑏 ∨ ¬𝑐 ∨ 𝑑 and seeking all disjunctions that contain a
+particular term (e.g. 𝑑 ), meaning they are implied by the conjunction of the negation of the rest of the terms (e.g. 𝑎 ∧ 𝑏 ∧ 𝑐).
+
+
+
+
+                                                                                                                                                              23
+                  QuestBench: Can LLMs ask the right question to acquire information in reasoning tasks?
+
+
+
+  1. First, we check that
+
+                                ∀ 𝐴𝑖𝑦, −1 ∈ 𝐴 𝑦, −1 ,
+                                                                                                 
+                                                         ∀ 𝐴𝑖( 𝑦 ) ∈ 𝐴 ( 𝑦 ) , 𝐴𝑖𝑦, −1 ̸=⇒ 𝐴 ( 𝑦 ) ∧
+                                                                                                     
+                                                         ∀ 𝐴𝑖(¬ 𝑦 ) ∈ 𝐴 (¬ 𝑦 ) , 𝐴𝑖𝑦, −1 ̸=⇒ 𝐴 (¬ 𝑦 )
+
+     This ensures that 𝐴𝑖𝑦, −1 by itself is not sufficient to determine the value of 𝑦 . We throw away
+     any 𝐴𝑖𝑦, −1 that does not satisfy these two constraints.
+  2. For any 𝐴𝑖𝑦, −1 ∈ 𝐴 𝑦, −1 , if exists another 𝐴𝑖𝑦,′ −1 ∈ 𝐴 𝑦, −1 such that 𝐴𝑖𝑦,′ −1 =⇒ 𝐴𝑖𝑦, −1 , then all
+     variables in the sufficiency set of 𝐴𝑖𝑦,′ −1 is also in the sufficiency set of 𝐴𝑖𝑦, −1 . However, resolving
+       𝑦, −1
+     𝐴 𝑖′    may require shallower backwards search than resolving 𝐴𝑖𝑦, −1 (see Appendix C.1). To
+     ensure that the LM conducts search to the full depth required for resolving 𝐴𝑖𝑦, −1 , we construct
+     an “invalid set” consisting of the elements of the resolution sets of 𝐴𝑖𝑦,′ −1 . During test-time, we
+     tell the LM that it cannot ask about the value of any 𝑥𝑑′ in the sufficiency set of 𝐴𝑖𝑦,′ −1 .
+
+
+A.2. Planning-Q
+
+We introduce some notation to describe the dataset construction procedure for Planning-Q. The
+fully-specified version of the Blocks World task with 𝑛 blocks can by characterized as ⟨ 𝑋, 𝑆, 𝑄, 𝑠0 , 𝑦 ⟩
+where
+   • 𝑋 is the full set of atoms 𝑝 that can be true of a state.
+   • 𝑆 is the set of physically-possible fully-specified states, which can be represented as a full set of
+     assignments from all variables in 𝑋 to {Tru e , Fal se}.
+   • 𝑄 is a set of actions that operate on the current state and transitions it to a next state. Each
+     action 𝑞 ∈ 𝑄 has a set of preconditions which must hold for the action to be applicable in the
+     state, and a set of effects which hold after the action is applied. Pre-conditions and effects can
+     be expressed as a conjunction of atoms 𝑥 or negated atoms ¬𝑥 for any 𝑥 ∈ 𝑋 . In the blocks
+     setting, there are 4 types of actions which can be enacted on each block:
+
+      pick-up(?x)
+          :precondition (and (clear ?x) (ontable ?x) (handempty))
+          :effect (and (not (ontable ?x)) (not (clear ?x))
+                       (not (handempty)) (holding ?x))
+      put-down(?x)
+          :precondition (holding ?x)
+          :effect (and (not (holding ?x)) (clear ?x)
+                       (handempty) (ontable ?x))
+      stack(?x, ?y)
+          :precondition (and (holding ?x) (clear ?y))
+          :effect (and (not (holding ?x)) (not (clear ?y))
+                       (clear ?x) (handempty) (on ?x ?y))
+      unstack(?x, ?y)
+          :precondition (and (on ?x ?y) (clear ?x) (handempty))
+          :effect (and (holding ?x) (clear ?y) (not (clear ?x))
+                       (not (handempty)) (not (on ?x ?y))))
+   • 𝑠0 is the initial state, which is in 𝑆.
+
+
+                                                                                                             24
+                   QuestBench: Can LLMs ask the right question to acquire information in reasoning tasks?
+
+
+
+   • 𝑦 is a conjunction of goal propositions which we wish to be true at the end of a plan. There are
+     6 possible 𝑦 ’s in this dataset, which were written manually by the authors:
+            {(on b a),
+             (and (on b a) (on c b)),
+             (and (on b a) (on d c)),
+             (and (on b a) (ontable a)),
+             (and (on b a) (ontable a) (on c b)),
+             (and (on b a) (ontable a) (on d c) (ontable c))}
+Given the above, models are expected to construct an optimal action sequence 𝜏ˆ = [𝑞0 , 𝑞1 , · · · , 𝑞𝑘 −1 ]
+where 𝑞𝑡 ∈ 𝑄 for all 𝑞𝑡 in the trajectory.
+    Definition: (Optimal) Action Sequence. An action sequence 𝜏 enables the robot to go from
+initial state 𝑠0 to a goal state 𝑠𝑘 where the goal conditions are satisfied (𝑠𝑘 =⇒ 𝑦 ). We use
+tr ansition( 𝑠0 , 𝜏) to denote the state of the robot after taking action sequence 𝜏 from state 𝑠0 . We
+also use 𝑠0 , · · · 𝑠𝑘 to denote the sequence of intermediate states the robot goes through when taking
+the action sequence, where action 𝑎𝑖 results in state 𝑠𝑖+1 . An optimal sequence 𝜏ˆ is the shortest path
+that satisfy tr an s i t ion( 𝑠0 , 𝜏) implies 𝑦 .
+
+                             ˆ = arg min | 𝜏 |
+                             𝜏                      s.t. t r an s i t ion( 𝑠0 , 𝜏) =⇒ 𝑦                     (3)
+                                       𝜏
+
+
+   Definition: Planner. We use Ψ𝑦 to denote an optimal planner that can map initial states 𝑠0 to an
+optimal actions sequence 𝜏ˆ to the goal 𝑦 . The planner is implemented through breadth-first-search,
+on a search graph where the nodes are the states and the edges are the actions, starting from state 𝑠0
+and terminating in a state where 𝑦 is true.
+    In order to make the planning problem underspecified, we construct a version of it where certain
+literals (a literal is an atom or its negation) in 𝑠0 are withheld, such that the initial state is only
+partially observed.
+   Definition: Partial state. A partial state is one where a subset of atoms (variables in 𝑋 ) have
+been assigned values.
+   Definition: Consistent set. We say a full state 𝑠 is consistent with a partial state 𝑠˜ if 𝑠 ∈ 𝑆 and
+𝑠 =⇒ 𝑠˜. The set of all states which are consistent with 𝑠˜ is called the consistent set for 𝑠˜, which we
+denote with 𝐹 ( 𝑠).
+    We begin by inferring all partial states 𝑠˜0 where there is only a single possible optimal action
+sequence from any 𝑠0 ∈ 𝐹 ( 𝑠˜0 ) to the goal. In other words, if we know 𝑠˜0 , we know the optimal
+trajectory to the goal. This gives us all the well-specified CSPs.
+
+                   S˜0 = { 𝑠˜0 : ∃ˆ
+                                  𝜏, 𝑠0 ∈ 𝐹 ( 𝑠˜0 ) =⇒ Ψ ( 𝑠0 ) = 𝜏
+                                                                  ˆ} = {˜𝑠 : 𝑠˜ =⇒ Known( 𝜏)} .             (4)
+
+The construction process for this set is given in Appendix A.2.1.
+    In order to construct 1-sufficient initial states, we withhold a single atom from each 𝑠˜0 ∈ 𝑆˜0 and
+check that knowing the truth value of a single additional atom in 𝑋 is necessary and sufficient in order
+to disambiguate a single optimal action sequence to the goal. Details are given in Appendix A.2.2.
+               ′
+            S˜0 = { 𝑠˜0 ′ : ∃ 𝑥 ∈ 𝑋, (Known( 𝑥 ) ∧ 𝑠˜0 ′ =⇒ Known( 𝜏)) ∧ ( 𝑠˜0 ′ =⇒ ¬Known( 𝜏))}            (5)
+
+where the sufficient set of each 𝑠˜0 ′ is defined as
+
+               C( 𝑠˜0 ′ ) = { 𝑥 : (Known( 𝑥 ) ∧ 𝑠˜0 ′ =⇒ Known( 𝜏)) ∧ ( 𝑠˜0 ′ =⇒ ¬Known( 𝜏))} .             (6)
+
+
+                                                                                                             25
+                       QuestBench: Can LLMs ask the right question to acquire information in reasoning tasks?
+
+
+
+A.2.1. Deriving all well-specified partial states with the same optimal action sequence to goal
+
+Given goal conditions 𝑦 , first, we perform backwards breadth-first-search from 𝑦 to derive the full set
+of optimal partial-state trajectories that end at 𝑦 .
+    Definition: Partial-state Trajectories. A trajectory 𝜏˜ where the intermediary states are partial
+states, e.g. [˜𝑠0 , 𝑞0 , 𝑠˜1 , 𝑞1 , · · · , 𝑠˜𝑘 ], where 𝑠˜1··· 𝐾 are partial states. Partial-state trajectories are valid if
+for any consecutive state sequence 𝑠˜𝑡 , 𝑞𝑡 , 𝑠˜𝑡+1 ∈ 𝜏˜, applying 𝑞𝑡 to any full state 𝑠𝑡 ∈ 𝐹 (˜𝑠𝑡 ) arrives at some
+𝑠𝑡+1 ∈ 𝐹 (˜𝑠𝑡+1 ). They are optimal if the trajectory is the shortest trajectory from 𝑠˜0 to 𝑠˜𝑘 .
+
+   Starting from the atoms in 𝑦 , we iteratively search each action and deduce the partial states from
+which applying that action result in 𝑦 .
+
+        𝑔0 = {[ 𝑦 ]}
+        𝑔1 = {[˜𝑠, 𝑞, 𝑦 ] , ∀𝑞 ∈ 𝑄 ∀˜𝑠 s.t. t r an s i t ion(˜𝑠, 𝑞) =⇒ 𝑦 }
+                 find all partial states 𝑠˜ that transition into 𝑦 on some action 𝑞,
+                 prepend 𝑠˜, 𝑞 to the existing trajectories
+           ···
+                      ˜] , ∀𝑞 ∈ 𝑄 ∀˜𝑠 s.t. ∃˜
+      𝑔𝑖+1 = {[˜𝑠, 𝑞, 𝜏                     𝜏 ∈ 𝑔𝑖 where t r an s i t ion(˜𝑠, 𝑞) =⇒ 𝜏
+                                                                                    ˜ [0]}
+                 find all partial states 𝑠˜ that transitions from some action 𝑞 into an initial state 𝜏˜ [0]
+                 of a trajectory 𝜏˜ found in the prior iteration 𝑔𝑖 . Prepend 𝑠˜, 𝑞 to that trajectory
+           ···
+
+We expand a search tree where each branch of the tree is partial trajectory. We terminate search
+for that branch if we arrive at a partial state 𝑠˜ that is implied by a partial state we have already
+encountered (meaning we have already considered that partial state). This means in the worst case,
+we exhaust the space of all possible partial states. When all branches have terminated, we have the
+set of all optimal partial-state trajectories to the goal 𝑦 , by taking the union 𝑔0 ∪ 𝑔1 ∪ · · · . The set of
+well-specified partial states S̃0 is the initial states of all these trajectories.
+
+A.2.2. Creating 1-sufficient partial states
+
+To create 1-sufficient partial states from S̃0 , we remove one proposition 𝑥𝑑 from each 𝑠˜0 ∈ S̃0 to create
+𝑆˜0′ = { 𝑠˜0 \ 𝑥𝑑 ∀𝑥𝑑 ∈ 𝑠˜0∀𝑠˜0 ∈ S̃0 } where 𝑠˜0 ′ = 𝑠˜0 \ 𝑥𝑑 for some 𝑠˜0 , and check that each of the following
+holds:
+   1. For all other 𝑠˜0 ′′ ∈ S̃0 , we check whether ∃ 𝑥 ∈ 𝑋, 𝑠˜0 ′′ = 𝑠˜0 ′ ∧ 𝑥 , meaning that a single additional
+      true atom brings us to another 1-sufficient partial state. In this case, we assign the salient atom
+      𝑥 where 𝑠˜0 ′′ = 𝑠˜0 ′ ∧ 𝑥 to Fal se, to eliminate the possibility more than one question must be
+      asked: for example, if 𝑥 is asked and turns out to be true, then we are brought to 𝑠˜0 ′′ , which we
+      know is 1-sufficient, meaning we must ask at least one other question.
+   2. For all physically-valid, well-specified states 𝑠0′ ∈ 𝐹 ( 𝑠˜0 ′ ) consistent with the 1-sufficient state
+      𝑠˜0 ′ , we check that there are at most two possible distinct optimal action sequences to the goal
+      condition 𝑦 :
+                                              { Ψ𝑦 ( 𝑠0′ ) , ∀𝑠0′ ∈ 𝐹 ( 𝑠˜0 ′ } ≤ 2
+        (a) If there is 1 unique action sequence, then we expect the LM response to be “No questions
+            needed.”
+        (b) If there are 2 unique action sequences 𝜏1 , 𝜏2 , then we separated out 𝑆˜0 into 𝑆˜0(1) and 𝑆˜0(2) ,
+            where the optimal action sequence from all states in 𝑆˜0(1) to the goal is 𝜏1 , while the optimal
+
+
+
+                                                                                                                          26
+                    QuestBench: Can LLMs ask the right question to acquire information in reasoning tasks?
+
+
+
+            action sequence from all states in 𝑆˜0(1) to the goal is 𝜏2 (𝑆˜0 = 𝑆˜0(1) ∪ 𝑆˜0(2) ). We find the set
+            of differentiating attributes between 𝑆˜0(1) and 𝑆˜0(2) , that is to say, all attributes of states in
+              (1)                                         (2)                                                 (2)
+            𝑆˜0 that aren’t present in any state of 𝑆˜0 , or vice versa (all attributes of states in 𝑆˜0
+            that aren’t present in any state of 𝑆˜0(1) ). If any of these questions are asked, they would
+            disambiguate whether the optimal action sequence is 𝜏1 or 𝜏2 .
+This ensures that for all 𝑠˜0 ′ , asking about the truth value of 𝑥𝑑 fully determines a unique optimal
+trajectory from the state to the goal conditions. If 𝑠˜0 ′ passes all of the above checks, we add it to the
+set of 1-sufficient partial states S̃0′
+
+
+A.3. GSME-Q
+
+Full instructions we provided to annotators can be found below with interface screenshot in Figure 5.
+You will be presented with a series of math problems. These math problems are written in words and may be
+ambiguous. Your task is to try to solve the problem. The problem may be ambiguous, which would make it
+unsolvable. However, if the problem is solvable, you will be asked to provide the answer, and may additionally be
+asked to translate the problem into a set of variables and equations given the information present in the problem.
+Two examples are provided below. Please read carefully and make sure you understand before proceeding.
+
+Math problem 1:
+If there are 10 eggs in a basket. Alice buys more eggs and increases her egg quantity by 200%, but she had also
+sold half of her eggs by then. How many eggs are there total?
+
+You will be asked to try and solve the problem to check if it is ambiguous.
+     1. Try to solve this problem. What is the answer?: [text box]
+           □ Not sure. Explain why: [text box E]
+              What questions, when answered, could clarify this problem?: [text box Q]
+In this case, the problem is ambiguous. You should check off “Not sure" and write why the problem is
+ambiguous in the explanation text box E. For example, in this case, you may write: it is unclear whether
+“increases by 200%" means 200% or 300% of her original amount. Furthermore, it is unclear which came
+first: did she sell half her eggs before increasing by 200%, or did she buy 200% more eggs first, then sell half her eggs.
+
+Next, you should write some questions that could be asked to clarify this problem in text box Q. For example, you
+may write “does an increase by 200% mean 200% or 300% of the original amount?", “which happened first, Alice
+buying more eggs or Alice selling half her eggs?"
+
+Here are some other examples of ambiguous questions that raters have found in this dataset. Note: there may be
+some subjectivity when deciding whether or not a particular problem is ambiguous. Please base it off your own
+interpretation.
+
+
+
+
+                                                                                                                      27
+                   QuestBench: Can LLMs ask the right question to acquire information in reasoning tasks?
+
+
+
+
+          Problem                                        Explanation
+          Janet buys a brooch for her daughter. She The antecedent of "that" in "10% of that" is
+          pays $500 for the material to make it and then unspecified.
+          another $800 for the jeweler to construct it.
+          After that, she pays 10% of that to get it
+          insured. How much did she pay?
+
+          Josh decides to try flipping a house. He buys a       What should be considered the initial value of
+          house for $80,000 and then puts in $50,000 in         the house is unclear. It could be taken as the
+          repairs. This increased the value of the house        initial purchase price or the initial purchase
+          by 150%. How much did he make?                        price plus repairs. Furthermore, it is unclear
+                                                                whether “increase by 150%" means 150% or
+                                                                250% or the price.
+
+          Jason has a phone plan of 1000 minutes per The day of the month is not specified.
+          month. Every day he has a 15-minute call with
+          his boss, and he’s had 300 extra minutes of
+          call this month to other people. How many
+          minutes does Jason have left if this month has
+          30 days?
+
+          In a 60-item quiz, 40% of the questions are The number of points per question is not spec-
+          easy, and the rest are equally divided as average ified. They could all be worth one point or
+          and difficult questions. If Aries is sure to get they could be weighted differently.
+          75% of the easy questions, and half of the
+          average and difficult questions correctly, how
+          many points is she sure to get?
+
+          Mara added 3 slices of cake to a plate that           The order of events is unclear. Because of
+          already had 2 slices on it. She was getting           the temporal mismatch between "was getting"
+          hungrier so she tripled the number of slices          and "currently has" in the same sentence, a
+          she currently has. She ate 2 slices and while         reader cannot know whether "the number of
+          she was distracted, her friend stole 5 slices         slices she currently has" refers to the number
+          off her plate. What number of cake slices             of slices before or after adding the 3.
+          remained on the plate?
+
+Note 2: the problem may be ambiguous in more ways than one. Please explain all ways the problem is ambiguous.
+
+Math problem 2:
+If there are 10 eggs and 2 in a basket, and there are twice as many eggs in a second basket, how many eggs are
+there total?
+    1. Try to solve this problem. What is the answer?: [text box]
+          □ Not sure. Explain why: [text box E]
+              What questions, when answered, could clarify this problem?: [text box Q]
+In this case, you should answer 30. This is because there are 10 eggs in the first basket + 20 in the second basket,
+so 30 total. You should not check off “Not sure."
+
+In cases where you did not check off “Not sure", you may be additionally asked to translate the problem into a
+series of equations, together with the variables that appear in the equations and the goal of the problem.
+    2. Please translate the above math problem into a list of variables, a list of equations, and a goal variable.
+       Ensure that your translation is equivalent to the variables above.
+For example, in this case, the problem may be translated as follows:
+
+
+
+
+                                                                                                                 28
+                   QuestBench: Can LLMs ask the right question to acquire information in reasoning tasks?
+
+
+
+
+      Variables:
+      A = 10 [Number of eggs in the first basket]
+      B [Number of eggs in the second basket]
+      T [Total number of eggs]
+
+      Equations:
+      B = 2 * A [There are twice as many eggs in the second basket as the first.]
+      T = A + B [The total number of eggs is the sum of the eggs in the first and second baskets.]
+
+      Goal: T. How many eggs are there total?
+
+If the value of a variable is directly mentioned in the math problem, you should write down the value. For example,
+A = 10. If the value of a variable is not directly mentioned in the math problem, you should not write down the
+value, even if it can be computed. Here are some examples of incorrect translation:
+INCORRECT EXAMPLE 1
+      Variables:
+      A = 10 [Number of eggs in the first basket]
+      T [Total number of eggs]
+
+      Equations:
+      T = A + B. The total number of eggs is the sum of the eggs in the first and second baskets.
+
+      Goal: T. How many eggs are there total?
+The above example is missing a variable (the number of eggs in the second basket) and an equation.
+INCORRECT EXAMPLE 2
+      Variables:
+      A = 10 [Number of eggs in the first basket]
+      B = 2 [Number of eggs in the second basket]
+      T = Total number of eggs
+
+      Equations:
+      T = A + B. The total number of eggs is the sum of the eggs in the first and second baskets.
+
+      Goal: T. How many eggs are there total?
+The above example has a wrong variable value and missed an equation. “There are twice as many eggs in the
+second basket as the first" should be translated into B = 2 * A instead of B = 2.
+
+INCORRECT EXAMPLE 3
+      Variables:
+      T [Total number of eggs]
+
+      Equations:
+      T = 10 + 20. The total number of eggs is the sum of the 10 eggs in the first basket and the 20 eggs
+      in the second basket.
+
+      Goal: T. How many eggs are there total?
+The above example combines too many operations into a single equation, in a way that is not faithful to the
+original question. A good rule of thumb is to have one variable stand in for every number in the problem, and have
+all equations be of one of two forms: (1) assigns one variable to one constant, or (2) assigns one variable to a
+relation among other variables. Avoid equations that can be simplified.
+
+
+
+                                                                                                               29
+                 QuestBench: Can LLMs ask the right question to acquire information in reasoning tasks?
+
+
+
+
+Figure 5 | Screenshot of the annotation interface used for obtaining CSPs for each math problem in
+the GSM setting.
+
+
+
+
+                                                                                                          30
+                   QuestBench: Can LLMs ask the right question to acquire information in reasoning tasks?
+
+
+
+A.4. GSM-Q
+
+We ask annotators to translate problems from GSME-Q into word problems. Full instructions we
+provided to annotators can be found below with interface screenshot in Figure 6.
+You will be presented with a series of math problems. These math problems are written in words and translated to
+equations. Your task is to first validate whether the translation is correct given the information present in the
+problem. If so, you will then be prompted to answer questions for each equation. An example is provided below.
+Please read carefully and make sure you understand before proceeding.
+
+Math problem written in words:
+If there are 10 eggs and 5 ribbons in a basket, and there are twice as many eggs in the second basket as the first
+basket, how many eggs are there total?
+
+The following is the math problem translated into equations, together with the variables that appear in the
+equations and the goal of the problem.
+
+Variables:
+E1 = 10 [Number of eggs in the first basket]
+E2 [Number of eggs in the second basket]
+R = 5 [Number of ribbons in the first basket]
+T [Total number of eggs]
+
+Equations:
+E2 = 2 * E1 [There are twice as many eggs in the second basket as the first.]
+T = E1 + E2 [The total number of eggs is the sum of the eggs in the first and second baskets.]
+
+Goal:
+T [How many eggs are there total?]
+
+You will first validate that the variables, equations, and goal matches the original problem described in words:
+
+1. Is the above list of variables, equations, and the goal equivalent to the original math problem written in words?:
+  (a) [Bubble] Yes
+  (b) [Bubble] No
+In the example above, the answer is “yes”. Here are some examples of wrong translations, where the answer would
+be “no”:
+INCORRECT EXAMPLE 1
+      Variables:
+      E1 = 10 [Number of eggs in the first basket]
+      T [Total number of eggs]
+
+      Equations:
+      T = E1 + E2. The total number of eggs is the sum of the eggs in the first and second baskets.
+
+      Goal:
+      T [How many eggs are there total?]
+The above example is missing a variable (the number of eggs in the second basket) that is necessary to solve for
+the goal
+
+
+
+
+                                                                                                                   31
+                   QuestBench: Can LLMs ask the right question to acquire information in reasoning tasks?
+
+
+
+
+      INCORRECT EXAMPLE 2
+      Variables:
+      E1 = 10 [Number of eggs in the first basket]
+      E2 = 2 [Number of eggs in the first basket]
+      T [Total number of eggs]
+
+      Equations:
+      T = E1 + E2 [The total number of eggs is the sum of the eggs in the first and second baskets.]
+
+      Goal:
+      T [How many eggs are there total?]
+
+The above example has a wrong variable assignment. “There are twice as many eggs in the second basket as the
+first” should be translated into E2 = 2 * E1 instead of E2 = 2.
+
+INCORRECT EXAMPLE 3
+      Variables:
+      T [Total number of eggs]
+
+      Equations:
+      T = 10 + 20 [The total number of eggs is the sum of the 10 eggs in the first basket and the 20 eggs
+      in the second basket.]
+
+      Goal:
+      T [How many eggs are there total?]
+The above example combines too many operations into a single equation, in a way that is not faithful to the
+original question.
+A good rule of thumb is to have one variable stand in for every number in the problem, and have all equations be
+of one of two forms: (1) assigns one variable to one constant, or (2) assigns one variable to a relation among other
+variables. Avoid equations that can be simplified.
+
+If you answered “yes” to the above question, you will see the following questions.
+
+2. Please solve for the “Goal” in the above list of variables and equations. Is your answer the same as the answer
+below?:
+30
+  (a) [Bubble] Yes
+  (b) [Bubble] No
+In the example above, the answer is yes. In incorrect example 1, the answer would be “no” (the goal value is
+ambiguous in incorrect example 1). In incorrect example 2, the answer would also be “no” (the goal value is 12 in
+incorrect example 2).
+
+If you answered “no” to the above question, the questions will end here. If you answered “yes”, then, you will
+answer the following questions for different sets of equation(s):
+
+
+
+
+                                                                                                                32
+                   QuestBench: Can LLMs ask the right question to acquire information in reasoning tasks?
+
+
+
+3. Try to rewrite the problem to remove all parts of the problem that states any of the above equation(s). Please
+make sure the problem is still coherent English (e.g., do not simply delete the section you copied above without
+fixing any grammatical errors). Please also make sure to remove the entire premise, not just replacing numbers
+with “few” or “some”. If there is no way to remove the equation (e.g., because it was not mentioned in the original
+problem), please leave the text box empty and check off “cannot remove”.
+
+[Text area]
+
+     □ Cannot remove
+For example, given:
+     • E1 = 10 [Number of eggs in the first basket]
+     • R = 5 [Number of ribbons in the first basket]
+you may write (a) “If there are twice as many eggs in the second basket as the first basket, how many eggs are
+there total?”
+Given:
+     • E2 = 2 * E1 [There are twice as many eggs in the second basket as the first.]
+     • R = 5 [Number of ribbons in the first basket]
+you may write (b) “If there are 10 eggs in a basket, how many eggs are there total?”
+Given:
+     • T = E1 + E2 [The total number of eggs is the sum of the eggs in the first and second baskets.]
+     • R = 5 [Number of ribbons in the first basket]
+you would check off “Cannot Remove” because “T = E1 + E2” was never mentioned in words in the prompt, but
+was implied.
+4. Given the above rewritten problem, is the answer to the question:
+     □ the same as your answer in question 2
+     □ unclear
+     □ different from your answer in question 2. What is the new answer?: [Text box]
+In the example above, the answer would likely be “unclear” for question (a). For question (b), the answer would
+likely be “different”, with the new answer being 10.
+
+
+B. Prompts from each domain in Q u e s t Be nc h
+
+B.1. Identifying missing information and asking the right question
+
+Logic-Q. We used the following prompt for Logic-Q:
+Suppose you know the following rules about Alice:
+{rules_nl}
+
+You trying to discern whether a statement about Alice is true given some facts. You must decide whether you have
+enough information to determine whether the final statement is true. You may respond with one of the following-
+If you do not have enough information yet, you may ask a question about an attribute of Alice, in the form of
+"Question: Is Alice [attribute]?". Ask the best question that, regardless of how it is answered, provides the most
+information about the final statement.
+Once you have enough all information necessary to determine the truth value of the statement, you can terminate
+with "End questioning".
+Generate one of "Question: Is Alice [attribute]?" or "End questioning" and nothing else.
+
+
+
+
+                                                                                                                33
+                QuestBench: Can LLMs ask the right question to acquire information in reasoning tasks?
+
+
+
+
+Figure 6 | Screenshot of the annotation interface used for obtaining underspecified GSM problems
+written in words.
+
+
+
+
+                                                                                                         34
+                    QuestBench: Can LLMs ask the right question to acquire information in reasoning tasks?
+
+
+
+Planning-Q. We used the following prompt for Planning-Q:
+You will be given a planning problem in the domain defined by the following PDDL:
+
+{domain_pddl}
+
+The current objects are present in the problem:
+
+{problem_objects}
+
+You will be given a set of conditions true in your initial state and a set of goal conditions, and will need to construct
+a plan from your current state to the goal state. Some details of your initial state may be missing. You must decide
+whether you have enough information to disambiguate a plan to the final state. If not, you must decide what
+information is necessary to construct a fully unambiguous plan from your initial state to the goal state. You will be
+presented with a set of multiple-choice options for questions you may ask, and you must answer with one of the
+options. Please reason step-by-step, then generate "Answer:" followed by the number of the option and nothing else.
+
+Known facts about current state:
+{conditions}
+
+Goal state:
+{goals}
+
+Possible questions:
+0. Is {proposition_0} true?
+1. Is {proposition_1} true?
+2. Is {proposition_2} true?
+...
+
+
+GSM-Q. We used the following prompt for GSM-Q:
+You are trying to solve a math problem. You must decide whether you have enough information to solve the math
+problem. Please respond with one of the following-
+If you do not have enough information to solve the math problem, you may ask a question back to the user from a
+set of predefined "Possible questions". Otherwise, choose "No questions needed." Generate the number of your
+choice in the form "Choice: number"
+
+Math problem: {problem}
+
+Possible questions:
+0. What is {variable_name} ({variable_symbol})?
+1. What is {variable_name} ({variable_symbol})?
+...
+{n}. No questions needed.
+
+
+
+
+                                                                                                                     35
+                    QuestBench: Can LLMs ask the right question to acquire information in reasoning tasks?
+
+
+
+GSME-Q. We used the following prompt for GSME-Q:
+You are trying to solve a math problem. You must decide whether you have enough information to solve the math
+problem. Please respond with one of the following-
+If you do not have enough information to solve the math problem, you may ask a question back to the user from a
+set of predefined "Possible questions". Otherwise, choose "No questions needed." Generate the number of your
+choice in the form "Choice: number"
+
+Math problem: {problem }
+Possible questions:
+0. What is the value of {variable_symbol}?
+1. What is the value of {variable_symbol}?
+{n}. No questions needed.
+
+
+B.2. Reasoning in the presence of sufficient information
+
+Logic-Q. We used the following prompt for Logic-Q:
+Suppose you know the following rules about Alice:
+{rules_nl}
+
+You will presented with a binary question about an attribute of Alice. Please answer it with "Yes" or "No".
+
+
+Planning-Q. We used the following prompt for Planning-Q:
+You will be given a planning problem in the domain defined by the following PDDL:
+
+{domain_pddl}
+
+The current objects are present in the problem:
+
+{problem_objects}
+
+You will be given a set of conditions true in your initial state and a set of goal conditions, and will need to construct
+a plan from your current state to the goal state.
+Please answer with "Answer:" followed by the plan in the form of a comma-separated list of ([action] [args]) (e.g.
+(pick-up a), (stack a b), ...).
+
+Known facts about current state:
+{conditions}
+
+Goal state:
+{goals}
+
+
+GSME-Q/GSM-Q. We used the following prompt for GSME-Q/GSM-Q:
+You are trying to answer a math question. Please answer with "Answer:" followed by the answer to the math
+question. Only include the raw numerical answer, do not include any units or thousands separators.
+
+Math problem: {problem}
+
+
+
+
+                                                                                                                     36
+                    QuestBench: Can LLMs ask the right question to acquire information in reasoning tasks?
+
+
+
+                                                                    Logic-Q Planning-Q          GSME-Q       GSM-Q
+                    Gemini Flash Thinking 2.0 Exp 01-21             89.34%          53.46%       96.03%      98.26%
+                             Claude 3.5 Sonnet                      64.08%          51.26%       29.14%      60.76%
+                                  GPT-4o                            51.93%          24.53%       26.49%      38.54%
+                               Gemini 1.5 Pro                       70.19%          21.33%       35.10%      17.36%
+           ZS
+                              Gemini 1.5 Flash                      71.34%          12.64%       17.22%       6.25%
+                              Gemma 2 2B IT                         50.76%           0.01%        4.64%       8.33%
+                              Gemma 2 9B IT                         51.06%           0.94%        9.93%      18.06%
+                              Gemma 2 27B IT                        56.18%           1.25%       16.56%       2.43%
+                Gemini Flash Thinking 2.0 Exp 01-21                 88.64%          53.45% 96.03% 98.26%
+                         Claude 3.5 Sonnet                          78.59%          69.54% 100.00% 100.00%
+                              GPT-4o                                76.33%          14.12% 100.00% 96.18%
+                           Gemini 1.5 Pro                           74.74%          23.48% 96.03% 95.14%
+       ZS + CoT
+                          Gemini 1.5 Flash                          75.21%          12.84% 100.00% 92.36%
+                          Gemma 2 2B IT                             56.30%           0.00% 78.15% 54.51%
+                          Gemma 2 9B IT                             58.75%           0.62% 75.50% 77.78%
+                          Gemma 2 27B IT                            53.97%           0.49% 88.74% 77.78%
+                    Gemini Flash Thinking 2.0 Exp 01-21             81.23%          48.29% 100.00%           97.92%
+                             Claude 3.5 Sonnet                      65.80%          54.54% 58.28%            70.83%
+                                  GPT-4o                            58.99%          30.61% 39.07%            65.28%
+                               Gemini 1.5 Pro                       55.41%          32.74% 40.40%            45.83%
+           4S
+                              Gemini 1.5 Flash                      57.52%          38.32% 22.52%            47.57%
+                              Gemma 2 2B IT                         51.88%           0.05% 13.25%            43.40%
+                              Gemma 2 9B IT                         62.06%           6.11% 22.52%            54.51%
+                              Gemma 2 27B IT                        56.05%           4.93% 29.14%            65.97%
+
+Table 9 | Language model accuracies for answering questions correctly in a well-specified variant of
+QuestBenc h. See Section 5.3 for more information.
+
+B.3. Detecting underspecification and recognizing uncertainty
+
+Logic-Q. We used the following prompt for Logic-Q:
+Suppose you know the following rules about Alice: {rules_nl}
+You will presented with a binary question about an attribute of Alice. Please answer it with "Yes" or "No" or "Not
+sure".
+
+
+Planning-Q. We used the following prompt for Planning-Q:
+You will be given a planning problem in the domain defined by the following PDDL:
+{domain_pddl}
+The current objects are present in the problem:
+{problem_objects}
+You will be given a set of conditions true in your initial state and a set of goal conditions, and will need to construct
+a plan from your current state to the goal state. Please answer with "Answer:" followed by the plan in the form of
+a comma-separated list of ([action] [args]) (e.g. (pick-up a), (stack a b), ...), or "Not sure" if you are unsure what
+the plan should be.
+
+
+GSME-Q/GSM-Q. We used the following prompt for GSME-Q/GSM-Q:
+You are trying to answer a math question. Please answer with "Answer:" followed by the answer to the math
+question, or "Not sure" if you are not sure what the answer is. Only include the raw numerical answer, do not
+include any units or thousands separators.
+Math problem: {problem}
+
+
+
+                                                                                                                      37
+                  QuestBench: Can LLMs ask the right question to acquire information in reasoning tasks?
+
+
+
+C. Search solutions for Logic-Q and Planning-Q
+
+C.1. Logic-Q
+
+Brute-force Solution. A problem in Logic-Q can be solved through brute force search as follows.
+We have a subroutine infer that allows us to infer the values of all variables consistent with the
+current variable assignments. For example, if 𝐴 = { 𝑎, 𝑏} and we know that 𝑎 ∧ 𝑏 → 𝑐, then infer ( 𝐴)
+gives us { 𝑎, 𝑏, 𝑐 }. At a high-level, infer is analogous to breadth-first-search, and thus has runtime
+complexity 𝑂 (| 𝑋 | + | 𝐶 |).
+   To solve a Logic-Q problem, we first run infer to get values of all variables consistent with the
+current assignment 𝐴, creating 𝐴′ . Next, for all unassigned variables 𝑥𝑢 ∈ 𝑋 \ 𝐴′ , we iterate through
+them one at a time and check whether:
+  1. Including 𝑥𝑢 in 𝐴′ allows us to infer the target variable is either true or false.
+  2. Include ¬𝑥𝑢 in 𝐴′ allows us to infer the target variable is the opposite assignment as it was in
+     case (1).
+The first time 1 and 2 both hold, we have that 𝑥𝑢 is true.
+   The expected runtime of brute-force can thus be computed by the expected number of variables
+that we need to iterate through to get to a variable in the sufficient set (upperbounded by 𝔼BF in
+§3.3), multiplied by the complexity of running the infer algorithm twice. By Markov’s inequality,
+with probability ≥ 1 − 𝛿, the complexity is bounded by
+
+                                                𝑂 ((| 𝑋 | + | 𝐶 |)𝔼BF /𝛿) .
+
+
+Backwards Search Solution. A problem in Logic-Q can be solved through backwards search.
+The procedure is the same as the backwards search used to construct the dataset, described in Ap-
+pendix A.1.1. At each iteration, we keep track of a disjunction of conjunction of variables required to
+prove 𝑦 .
+   The complexity of backwards search is given by the search depth 𝑑 multiplied by the number of
+expansions per depth, which is bounded by 𝑂 (3 | 𝑋 | |𝐶 |) (expanding up to |𝐶 | rules for conjunction, for
+which there are at most 3 | 𝑋 | conjunctions – each variable can be either true/false/missing from that
+conjunction) Thus, the overall complexity is 𝑂 (3 | 𝑋 | |𝐶 | 𝑑 ).
+    Though comprehensive backwards search is EXP-time, we can terminate early as soon as we find
+a disjunction consisting of the negation of all initial conditions, the goal variable, and an additional
+term, which would mean that asking about the value of the initial term is sufficient to infer the value
+of the goal variable.
+   If we know this disjunction is at most at depth 𝑑 , then the runtime is bounded by | 𝑋 | | 𝐶 | 𝑑 , where
+| 𝑋 | | 𝐶 | is the branching factor at each node. The branching factor comes from the cross product of at
+most | 𝑋 | terms across at most |𝐶 | conjunctive constraints. Thus, the total runtime is given by
+
+                                                      𝑂 (| 𝑋 | | 𝐶 | 𝑑 ) .
+
+
+C.2. Planning-Q
+
+Brute-force Solution. As described in §3.3, our brute-force approach randomly samples from the
+choices without replacement, and checks each sampled choice until a correct one is found. The
+complexity of this approach relies on the complexity of validating whether a choice is correct or not.
+
+
+                                                                                                           38
+                    QuestBench: Can LLMs ask the right question to acquire information in reasoning tasks?
+
+
+
+    Given an underspecified initial state 𝑠˜0 and a selected choice of atom 𝑥 , we can generate all
+physically-plausible initial states 𝑠0+ ∈ 𝐹 ( 𝑠˜0 , 𝑥 ) and 𝑠0− ∈ 𝐹 ( 𝑠˜0 , ¬𝑥 ), where function 𝐹 maps from a partial
+state to all states consistent with the partial state. We can then solve the planning problem for all
+initial states in both sets, and check whether the following holds.
+   1. The shortest path 𝜏ˆ+ remains the same for every initial 𝑠0+ ∈ 𝐹 ( 𝑠˜0 , 𝑥 ).
+   2. The shortest path 𝜏ˆ− remains the same for every initial 𝑠0− ∈ 𝐹 ( 𝑠˜0 , ¬𝑥 ).
+   3. 𝜏ˆ+ and 𝜏ˆ− are different.
+    Assume the planning tool we use is breadth-first search, which takes at most 𝑂 (| 𝑆 | + | 𝑆 ||A|) time.
+We perform breadth-first search at most |𝑆 | times (since | 𝐹 ( 𝑠˜0 , ¬𝑥 ) ∪ 𝐹 ( 𝑠˜0 , ¬𝑥 )| < |𝑆 |), meaning the
+overall runtime of this solution is 𝑂 ((|𝑆 | + |𝑆 ||A|)| 𝑆 |). The number of states is bounded by | 𝑆 | = 2 | 𝑋 | ,
+while the number of actions is bounded by |A| = 2𝑏 + 2𝑏 ( 𝑏 + 1) = 𝑂 ( 𝑏2 ) where 𝑏 is the number of
+blocks in the domain, so the overall complexity of validating a choice is 𝑂 (22| 𝑋 | 𝑏2 ).
+   Similar to §C.1, with probability at least 1 − 𝛿, we only need to guess 𝔼 𝐵𝐹 /𝛿 times. So the overall
+complexity is
+                                           𝑂 (22| 𝑋 | 𝑏2 𝔼 𝐵𝐹 /𝛿) .
+
+
+Backward Search Solution. We replace the breadth-first-search from each consistent state with a
+single backwards search. Starting from the goal condition, we iterate backwards to find sets of initial
+states that utilize the same path to the goal. This is the same backwards search that was used to
+construct all well-specified partial states, described in Appendix A.2.1. We expand backwards until
+we arrive at a set of partial initial states that are consistent with the given partially-observed set 𝑠˜0 ,
+and we find the attribute that distinguishes each partial initial state from each other.
+    Because the number of partial states is bounded by 3 | 𝑋 | (each proposition can take on 3 values:
+true/false/unknown), the backwards breadth-first search takes 𝑂 (3 | 𝑋 | + 3 | 𝑋 | |A|). However, if we know
+that the longest path from any initial state consistent with 𝑠˜0 to the goal is of length 𝑑 , meaning we
+only need to search up to depth 𝑑 , then the runtime is bounded by
+
+                                            𝑂 (|A| 𝑑 ) = 𝑂 ( 𝑏2𝑑 ) or 𝑂 (3 | 𝑋 | 𝑑 )
+
+(Each iteration, expand at most 3 | 𝑋 | states or |A| actions.)
+
+
+D. Ablation: Q u e s t Be nc h Accuracy Filtering For Perfect Reasoning
+We report accuracy on the ablation study described in Section 5.3, on the GSME-Q and GSM-Q
+domains. See Table 10. Similar to the Logic-Q domain, we found neglible difference between
+performance on the filtered version and the original QuestBench for most model setups — though
+note that LMs are generally already able to saturate the original version of Q u e s t Be nc h.
+
+
+
+
+                                                                                                                   39
+                  QuestBench: Can LLMs ask the right question to acquire information in reasoning tasks?
+
+
+
+
+                                                         GSME-Q                                GSM-Q
+                                               Acc        Diff  # samples            Acc       Diff # samples
+                    Gemini 2.0 FTE   99.3%                2.6%          145        84.5% -0.3%             283
+                   Claude 3.5 Sonnet 86.4%               -8.3%          44         92.6% 1.3%              175
+                        GPT-4o       97.5%                0.8%           40        90.1% 3.3%              111
+           ZS        Gemini 1.5 Pro  58.5%               10.1%           53        84.0% 6.2%              50
+                    Gemini 1.5 Flash 96.2%               -0.5%          26         66.7% -5.2%              18
+                    Gemma 2 2B IT    71.4%               39.0%            7        45.8% -3.8%              24
+                    Gemma 2 9B IT    93.3%               17.8%           15        40.4% -0.6%              52
+                    Gemma 2 27B IT 100.0%                26.5%           25        85.7% 14.5%              7
+                  Gemini 2.0 FTE             99.3%       3.3%           145        86.2%      0.1%         283
+                 Claude 3.5 Sonnet           74.2%       0.0%           151        91.0%      0.0%         288
+                      GPT-4o                 99.3%       0.0%           151        91.7%      -0.3%        277
+        ZS + CoT   Gemini 1.5 Pro            99.3%       2.6%           145        79.2%      0.0%         274
+                  Gemini 1.5 Flash           98.7%       0.0%           151        75.6%      -1.2%        266
+                  Gemma 2 2B IT              61.0%       4.1%           118        70.1%      1.7%         157
+                  Gemma 2 9B IT              57.0%       0.1%           114        39.3%      2.8%         224
+                  Gemma 2 27B IT             82.1%       1.3%           134        81.7%      2.2%         224
+                    Gemini 2.0 FTE           96.7%       0.0%           151        92.6%      -0.2%        282
+                   Claude 3.5 Sonnet         92.0%       -3.3%           88        95.1%      1.0%         204
+                        GPT-4o               96.6%       0.6%            59        84.0%      0.0%         188
+           4S        Gemini 1.5 Pro          85.2%       -6.8%           61        81.1%      -4.4%        132
+                    Gemini 1.5 Flash         94.1%       -1.2%           34        78.1%      -2.8%        137
+                    Gemma 2 2B IT            95.0%       4.3%            20        37.6%      0.1%         125
+                    Gemma 2 9B IT            76.5%      -10.3%           34        63.1%      7.5%         157
+                    Gemma 2 27B IT           97.7%       1.0%            44        64.7%      -1.9%        190
+
+Table 10 | Ablation: Language model accuracies at predicting the right question to ask on only filtered
+QuestBench problems whose well-specified versions can be answered correctly at least once by the
+model + prompt method. We use Gemini 2.0 FTE as a shorthand for Gemini Flash Thinking 2.0 Exp
+01-21. See Section 5.3 for the experimental setup. Acc indicates accuracy on the filtered version of
+QuestBench, Diff indicates difference between the accuracy in the filtered version vs. the original
+QuestBench dataset, and # samples indicates the number of samples in the filtered dataset, out
+of 151 representative examples in GSME-Q and 288 representative examples in GSM-Q. We bold all
+accuracy differences greater than zero.
+
+
+
+
+                                                                                                                 40
+

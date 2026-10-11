@@ -1,0 +1,1883 @@
+             CogBench: a large language model walks into a psychology lab
+
+
+                          Julian Coda-Forno 1 2 Marcel Binz 1 2 Jane X. Wang 3 Eric Schulz 1 2
+
+
+                          Abstract                                       spectrum of capabilities that were previously unimagined
+                                                                         (Wei et al., 2022; Brown et al., 2020). Yet, these models
+     Large language models (LLMs) have significantly
+                                                                         also present a significant challenge: their internal workings
+     advanced the field of artificial intelligence. Yet,
+                                                                         are largely opaque, making it difficult to fully comprehend
+     evaluating them comprehensively remains chal-
+                                                                         their behavior (Tamkin et al., 2021). This lack of under-
+     lenging. We argue that this is partly due to the pre-
+                                                                         standing fuels ongoing debates about their capabilities and
+     dominant focus on performance metrics in most
+                                                                         limitations (McCoy et al., 2023; Bubeck et al., 2023).
+     benchmarks. This paper introduces CogBench,
+     a benchmark that includes ten behavioral met-                       A notable issue in these discussions is the focus of many
+     rics derived from seven cognitive psychology ex-                    benchmarks on performance metrics alone (Burnell et al.,
+     periments. This novel approach offers a toolkit                     2023). This approach often overlooks the underlying behav-
+     for phenotyping LLMs’ behavior. We apply                            ioral mechanisms of the models, reducing benchmarks to
+     CogBench to 40 LLMs, yielding a rich and di-                        mere training targets rather than tools for genuine insight,
+     verse dataset. We analyze this data using statis-                   and thus failing to provide a comprehensive measure of
+     tical multilevel modeling techniques, accounting                    the models’ abilities (Schaeffer et al., 2023). How can we
+     for the nested dependencies among fine-tuned ver-                   overcome this problem and make progress toward a better
+     sions of specific LLMs. Our study highlights the                    understanding of LLMs’ behaviors?
+     crucial role of model size and reinforcement learn-
+                                                                         The field of cognitive psychology may offer solutions to
+     ing from human feedback (RLHF) in improving
+                                                                         these problems. Experiments from cognitive psychology
+     performance and aligning with human behavior.
+                                                                         have been used to study human behavior for many decades,
+     Interestingly, we find that open-source models are
+                                                                         and have therefore been extensively validated. Furthermore,
+     less risk-prone than proprietary models and that
+                                                                         they typically focus more on behavioral insights rather than
+     fine-tuning on code does not necessarily enhance
+                                                                         performance metrics alone. Finally, many of these exper-
+     LLMs’ behavior. Finally, we explore the effects of
+                                                                         iments are programmatically generated, minimizing data
+     prompt-engineering techniques. We discover that
+                                                                         leakage concerns. Many of these concepts are important to
+     chain-of-thought prompting improves probabilis-
+                                                                         ensure a robust evaluation of an agent’s capabilities. How-
+     tic reasoning, while take-a-step-back prompting
+                                                                         ever, while there have been studies investigating LLMs on
+     fosters model-based behaviors.
+                                                                         individual tasks from cognitive psychology (Binz & Schulz,
+                                                                         2023; Dasgupta et al., 2022; Hagendorff et al., 2023; Ull-
+                                                                         man, 2023), no study has evaluated them holistically.
+1. Introduction
+                                                                         In this paper, we propose CogBench, a novel benchmark
+Large language models (LLMs) have emerged as a ground-                   consisting of ten behavioral metrics spanning seven cogni-
+breaking technology, captivating the attention of the scien-             tive psychology experiments, to fill this gap. We investigate
+tific community (Bommasani et al., 2021; Binz et al., 2023).             the behaviors of 40 LLMs in total, using our benchmark to
+Modern LLMs have scaled to remarkable dimensions in both                 not only compare the performance of these models but also
+architecture and datasets (Kaplan et al., 2020), revealing a             apply techniques from computational cognitive modeling to
+   *
+     Equal contribution 1 Computational Principles of Intelligence       understand the inner workings of their behaviors.
+Lab, Max Planck Institute for Biological Cybernetics, Tübingen,         Our results recover the unequivocal importance of size:
+Germany 2 Institute for Human-Centered AI, Helmholtz Compu-
+tational Health Center, Munich, Germany 3 Google DeepMind,               larger models generally perform better and are more model-
+London, UK. Correspondence to: Julian Coda-Forno <julian.coda-           based than smaller models. Our results also show the im-
+forno@helmholtz-munich.de>.                                              portance of reinforcement learning from human feedback
+                                                                         (RLHF; Christiano et al., 2017) in aligning LLMs with
+Proceedings of the 41 st International Conference on Machine             humans: RLHF’ed LLMs behave generally more human-
+Learning, Vienna, Austria. PMLR 235, 2024. Copyright 2024 by
+the author(s).                                                           like and are more accurate in estimating uncertainty. Yet
+
+                                                                     1
+                                         CogBench: a large language model walks into a psychology lab
+
+
+ 7 psychology experiments                                    Translate them for LLMs                                40 LLMs: LLaMA-2 GPT-4 Claude-2 PaLM-2           Humans
+                              drawn:                                                                                   Prior
+                                         {Probabilistic reasoning instructions}                                                                                      0.88
+            Left   Right                                                                                             weighting 0.94  0.58   0.36    0.50
+     Left              Left
+                                         ...
+                                         Q: The wheel of fortune contains 6 sections labelled F and 4 sections       Likelihood
+                           Right         labelled J. The urn F contains (8, 2) and the urn J contains (2, 8)                      1.55   0.35    0.73    0.40        0.91
+   Right                                                                                                             weighting
+                                         red/blue balls. A red ball was drawn. What is the probability that it
+                      Left                                                                                           Directed
+     Left
+             Left Right
+                                         was drawn from Urn F? (Give your probability estimate on the scale
+                                                                                                                                                                     0.33
+                                         from 0 to 1 rounded to two decimal places)                                 exploration -0.10    -0.31   -0.13   -0.08
+
+                                                                                                                     Random
+                                                                                                                                  0.01   0.00    0.00    0.00        0.02
+                           P(Left|red)   A: I estimate the probability of the red ball to be drawn from the urn F   exploration
+                           is:           to be 0.                                                                      Meta-
+                                                                                                                                  0.61   0.74    0.54    0.55        0.77
+                                                                                                                     cognition
+                      …                                  …                                                           Learning                                    …
+                                                                                                                       rate       0.33   0.25    0.34    0.18        0.19
+
+                                         {BART instructions}
+                                                                                                                     Optimism
+                                                                                                                                  0.50   0.69    0.45    0.15        0.19
+                                         ...                                                                           bias
+                                         You observed the following previously where the type of balloon is           Model-
+               Currently earned: 0       given in parenthesis:                                                                    0.00   0.16    0.05    0.04        0.03
+                                                                                                                     basedness
+                                          -Balloon 1 (A): You inflated the balloon 0 times for a total of 0
+               Number of pumps: 0        points. It did not explode.                                                 Temporal
+                                                                                                                                  13      10      2       15         10.30
+                                          -Balloon 2 (C): You inflated the balloon 4 times for a total of 4         discounting
+                                         points. It did not explode.
+                                          Q: You are currently with Balloon 3 which is a balloon of type A.             Risk-
+                                                                                                                                  3.04   9.47    0.39     1          17.22
+   Inflate          Cash in              What do you do? (Option 1 for 'skip' or 2 for 'inflate')                      taking
+                                         A: Option
+                                                                                                                    10 behavioral metrics comparable to humans
+
+
+
+
+Figure 1. Overview of approach and methods. CogBench provides open access to seven different cognitive psychology experiments.
+These experiments are text-based and can be run to evaluate any LLM’s behavior. The experiments are submitted to LLMs as textual
+prompts and the models indicate their choices by completing a given prompt. Past behavior is then concatenated to the prompt and
+learning is induced via prompt-chaining. We used 40 LLMs in total, including most larger proprietary LLMs as well as many open-source
+models.
+
+
+our results also revealed surprising behaviors. First, while                                    2. Related work
+open-source models are often believed to be more risky due
+to the lack of pre-prompts, we find that, holding all else                                     Benchmarking LLMs: As LLMs rapidly evolve, it is criti-
+equal, they make less risky decisions than proprietary mod-                                    cal to assess their capabilities. Numerous benchmarks have
+els. Secondly, while fine-tuning on code is often believed to                                  emerged to tackle this challenge, evaluating capabilities
+improve LLMs’ behaviors, we find little evidence for this in                                   such as grade school mathematics (Cobbe et al., 2021), gen-
+our benchmarking suite.                                                                        eral knowledge (Joshi et al., 2017), programming (Chen
+                                                                                               et al., 2021), reasoning (Collins et al., 2022), among others
+Finally, we investigate how chain-of-thought (CoT) (Wei                                        (Hendrycks et al., 2021). In addition, the Chatbot Arena
+et al., 2023; Kojima et al., 2022) and take-a-step-back (SB)                                   (Zheng et al., 2023b) provides a platform for comparing AI
+(Zheng et al., 2023a) prompting techniques can influence                                       chatbots, and the Beyond the Imitation Game Benchmark
+different behavioral characteristics. Our analysis suggests                                    (BIG-bench; Srivastava & authors, 2023) offers a compre-
+that CoT is particularly effective at enhancing probabilistic                                  hensive evaluation of LLMs across over 200 tasks.
+reasoning, while SB proves to be more relevant for pro-
+moting model-based behaviors. This showcases insights                                          Psychology for LLMs: Our benchmark is part of a new
+that can be gained by CogBench also for understanding                                          wave of research that uses cognitive psychology to study
+the effectiveness of these prompt-engineering techniques as                                    LLMs (Binz & Schulz, 2023; Dasgupta et al., 2022; Coda-
+well as guiding users in selecting the most suitable prompt-                                   Forno et al., 2023; Ullman, 2023; Hagendorff et al., 2023;
+engineering technique based on the specific context.                                           Akata et al., 2023; Yax et al., 2023; Chen et al., 2023;
+                                                                                               Buschoff et al., 2024). The power of this approach lies in its
+Taken together, our experiments show how psychology can                                        incorporation of tools from cognitive psychology that have
+offer detailed insights into artificial agents’ behavior as we                                 been developed and refined over many decades. Instead
+provide an openly accessible1 and challenging benchmark                                        of focusing solely on how well LLMs perform, this area
+to evaluate LLMs.                                                                              of research prioritizes describing and characterizing their
+   1
+       https://github.com/juliancodaforno/CogBench                                             behavior in terms of underlying mechanisms. This shift in
+                                                                                               focus helps us understand LLMs in a more meaningful way.
+                                                                                               It is important to note that while these works have signifi-
+
+                                                                                           2
+                                CogBench: a large language model walks into a psychology lab
+
+cantly contributed to our understanding of LLMs, they have               different colored ball distributions (representing like-
+mainly targeted specific behaviors in isolation and did not              lihoods). Upon drawing a ball, agents can revise their
+establish a benchmark providing a standardized evaluation                belief about the chosen urn, considering both the wheel
+of different models and across a diverse, comprehensive set              (prior) and the ball color (evidence). This tests adapt-
+of tasks and skills.                                                     ability to different prior/likelihood scenarios by chang-
+                                                                         ing the wheel division and ball distributions. Agents
+3. Methods                                                               have to estimate the probability of the drawn ball’s
+                                                                         urn. The behavioral choices can be used to estimate an
+CogBench is a benchmark rooted in cognitive psychology                   agent’s prior and likelihood weightings. Experimen-
+for evaluating the behaviors of language models. It incorpo-             tally, people often exhibit a behavior known as system
+rates ten metrics derived from seven canonical experiments               neglect, meaning that they underweight both priors
+in the literature on learning and decision-making. These                 and likelihoods (Massey & Wu, 2005; Dasgupta et al.,
+metrics offer a robust measure of wide-ranging behaviors                 2020).
+and allow for comparisons with human behavior. In this sec-
+                                                                      2. Horizon task (Wilson et al., 2014): a two-armed bandit
+tion, we provide an overview of the models included in our
+                                                                         task with stationary reward distributions. Agents first
+study, followed by brief descriptions of the used cognitive
+                                                                         observe four reward values of randomly determined
+experiments and their respective metrics. Figure 1 displays
+                                                                         options, followed by making either one or six addi-
+a visual representation that complements the discussion in
+                                                                         tional choices. We use this task to measure whether an
+this section.
+                                                                         agent uses uncertainty to guide its exploration behavior
+                                                                         (directed exploration) and/or whether it injects noise
+3.1. Prompting and summary of included models
+                                                                         into its policy to explore (random exploration). People
+We evaluated over 40 different LLMs using our bench-                     are known to rely on a combination of both strategies
+mark. This selection includes proprietary models such as                 (Wilson et al., 2014; Brändle et al., 2021).
+Anthropic’s Claude models (Anthropic, 2023), Open-AI’s
+                                                                      3. Restless bandit task (Ershadmanesh et al., 2023): a
+GPT-3 (text-davinci-003) and GPT-4 (OpenAI, 2023), and
+                                                                         two-armed bandit task with non-stationary reward dis-
+Google’s PaLM-2 for text (text-bison@002) (Google, 2023).
+                                                                         tributions. There is always one option with a higher
+We also tested open-source models like Mosaic’s MPT (Mo-
+                                                                         average reward. Every few trials a switch between the
+saicML, 2023), Falcon (Almazrouei et al., 2023), and nu-
+                                                                         reward distributions of the two options occurs. Agents
+merous LLaMA-2 variants (Touvron et al., 2023). For a full
+                                                                         furthermore have to indicate after each choice how
+list of the models used, we refer the reader to Appendix A.
+                                                                         confident they are in their decisions. We use this task
+It is important to note that all experiments performed in                to measure meta-cognition, which indicates whether
+this paper rely entirely on the LLMs’ in-context learning                an agent can assess the quality of its own cognitive
+abilities and do not involve any form of fine-tuning. We set             abilities. People generally display this ability but its
+the temperature parameter to zero, leading to deterministic              extent is influenced by various internal and external
+responses2 , and retained the default values for all other               factors (Shekhar & Rahnev, 2021; Ershadmanesh et al.,
+parameters.                                                              2023).
+                                                                      4. Instrumental learning (Lefebvre et al., 2017): Agents
+3.2. High-level summary of tasks
+                                                                         encounter four two-armed bandit problems in an in-
+In the following, we provide a high-level summary of the                 terleaved order. Each bandit problem is identified by
+tasks included in CogBench, alongside their ten behavioral               a unique symbol pair. We use this task to investigate
+metrics. It is important to highlight that a performance met-            how an agent learns. First, we report the learning rate
+ric can also be obtained for each task. For full descriptions            of the agent which is common practice in two-armed
+of all tasks and their corresponding metrics, we refer the               bandits. Furthermore, we use it to reveal whether an
+reader to Appendix B. CogBench consists of the following                 agent learns more from positive than from negative
+tasks:                                                                   prediction errors, i.e., whether it has an optimism bias.
+  1. Probabilistic reasoning (Dasgupta et al., 2020): a                  People commonly display asymmetric tendencies when
+     task that tests how agents update beliefs based on new              updating their beliefs by showing higher learning rates
+     evidence. They are given a “wheel of fortune” (repre-               after encountering positive prediction errors compared
+     senting initial prior probabilities) and two urns with              to negative ones (Lefebvre et al., 2017; Palminteri &
+                                                                         Lebreton, 2022).
+   2
+     For some models, e.g., ChatGPT, setting the temperature to
+zero has shown to sometimes not guarantee determinism (Ouyang         5. Two-step task (Daw et al., 2011): a reinforcement
+et al., 2023)                                                            learning task in which agents have to accumulate as
+
+                                                                  3
+                                CogBench: a large language model walks into a psychology lab
+
+     many treasures as possible. Taking an action from                 4. The cognitive phenotype of LLMs
+     a starting state transfers the agent to one out of two
+     second-stage states. In each of these second-stage                This section provides the reader with a high-level overview
+     states, the agent has the choice between two options              of our benchmark’s metrics. From our suite of 7 tasks, we
+     that probabilistically lead to treasures. Finally, the            can derive two classes of metrics: 1) performance metrics
+     agent is transferred back to the initial state and the pro-       that represent the score participants aim to optimize, and 2)
+     cess repeats for a predefined number of rounds. The               behavioral metrics measuring how participants complete the
+     task experimentally disentangles model-based from                 task (tasks are typically designed in a way that allows one to
+     model-free reinforcement learning. We therefore use               disentangle between different types of behavior). Figure 2
+     it to measure an agent’s model-basedness. Previous                visualizes phenotypes for both classes of metrics for six well-
+     studies using this task have shown that people rely on a          established LLMs.3 We want to make it clear that the main
+     combination of model-free and model-based reinforce-              focus of this benchmark is inter-LLM comparison and that
+     ment learning (Daw et al., 2011).                                 the human data is only provided as an additional reference
+                                                                       point. We report the results of all 40 LLMs in Appendix C.4
+  6. Temporal discounting (Ruggeri et al., 2022): Agents               The observed differences underscore the practical value and
+     have to make a series of choices between two options.             importance of CogBench for evaluating LLMs, offering a
+     Each option is characterized by a monetary outcome                more comprehensive assessment than standard performance-
+     and an associated delay until the outcome is received.            based benchmarks alone.
+     We use this task to assess temporal discounting, indi-
+     cating whether an agent prefers smaller but immediate             4.1. Performance summary
+     gains over larger delayed ones. People generally show
+                                                                       As presented in Figure 2A, in terms of performance, GPT-4
+     a preference for immediate gains, although the pre-
+                                                                       distinguishes itself, achieving human-level scores in most
+     cise functional form of their discounting is a matter of
+                                                                       tasks (five out of six).5 In general, all models demonstrate
+     debate (Cavagnaro et al., 2016; Ruggeri et al., 2022).
+                                                                       competence in at least half of the tasks (three out of six).
+  7. Balloon Analog Risk Task (BART) (Lejuez et al.,                   Each of the six models excels in probabilistic reasoning and
+     2002): Agents have to inflate an imaginary balloon                instrumental learning. The horizon task sees most models
+     to obtain rewards. They may choose to stop inflating              outperforming humans except for text-bison. The restless
+     and cashing out all rewards accumulated so far. There             bandit task poses a challenge for the majority of models,
+     is a chance that the balloon pops at any point in time            with GPT-4 being a notable exception. Finally, the BART
+     and all rewards will be lost. We use this task to as-             proves to be a hurdle for all models.
+     sess risk-taking behavior. Human risk-taking in this
+     task is “significantly correlated with scores on self-            4.2. Differences between behavioral and performance
+     report measures of risk-related constructs and with the                metrics
+     self-reported occurrence of real-world risk behaviors”            Figure 2B shows that none of the models exhibit human-like
+     (Lejuez et al., 2002).                                            behavior on the majority of behavioral metrics, revealing a
+                                                                       complex structure that warrants further exploration.
+3.3. Human data
+                                                                       High performance indicates high meta-cognition and
+We obtained the human data directly from the authors for               model-basedness: Models that demonstrate satisfactory
+most experiments (Dasgupta et al., 2020; Wilson et al., 2014;          performance on the restless bandit task exhibit a certain
+Ershadmanesh et al., 2023; Lefebvre et al., 2017; Kool et al.,         degree of meta-cognition, although not to the same extent
+2017) except for BART and temporal discounting. For these,             as humans. Proprietary models that are capable of solving
+we averaged the reported number from the original studies              the two-step task display model-based behavior at least
+across the different subpopulations. For the performance               on par with humans, with GPT-4 significantly surpassing
+metrics, we calculated the average participant scores. We                 3
+also did this for the behavioral metrics, except for the met-                A computational phenotype is a collection of mathematically
+                                                                       derived parameters that precisely describe individuals across dif-
+rics where we had to fit a regression (model-basedness,                ferent domains (Patzelt et al., 2018; Montague et al., 2012; Schurr
+exploration, and likelihood & prior weightings). For the               et al., 2023).
+latter, we fitted a single regression across all human runs,               4
+                                                                             Also see Appendix D and E for robustness and redundancy
+combining the data from all participants. This approach                analyses, respectively, of this benchmark.
+                                                                           5
+provided a more robust estimate of the average human be-                     It is worth noting that although there are seven experiments,
+havior for these specific metrics (which is also why we did            there are only six performance metrics since the temporal dis-
+                                                                       counting experiment’s performance metric is used as a behavioral
+not include human spread for behavioral metrics in Figure              one.
+2B). More details can be found in the Appendix B.
+
+                                                                   4
+                                            CogBench: a large language model walks into a psychology lab
+ A
+                                   GPT-4      text-davinci-003     Claude-2          text-bison   LLaMA-2-70   LLaMA-2-70-chat       Humans
+   Probabilistic Reasoning
+              Horizon Task
+           Restless Bandit
+     Instrumental Learning
+            Two Step Task
+                      BART
+ B                             0        2         0       2         0     2         0      2          0  2        0     2      0      2
+                                                                        Values (Normalized: Random=0, Human average=1)
+                                    GPT-4          text-davinci-003      Claude-2            text-bison      LLaMA-2-70   LLaMA-2-70-chat
+             Prior weighting
+       Likelihood weighting
+       Directed exploration
+       Random exploration
+             Meta-cognition
+               Learning rate
+              Optimism bias
+          Model-basedness
+      Temporal discounting
+                 Risk taking
+                               0              5     0             5     0            5      0           5    0            5      0            5
+                                                                         Values (Normalized: Random=0, Human average=1)
+
+
+Figure 2. CogBench results for established LLMs. A: Performance metrics. We also included humans spread in performance to give the
+reader a feeling for how different LLMs compare to the best performing human subjects in the population; B: Behavioral metrics.
+All metrics are human-normalized: a value of zero corresponds to a random agent, while a value of one corresponds to the average human
+subject (dotted lines). Errors bars represent 95% confidence intervals.
+
+
+human levels. Thus, within the scope of these two tasks, it                            taking and temporal discounting: Temporal discounting
+seems that a model’s performance can serve as an indicator                             and risk-taking behaviors exhibit high variance among mod-
+of its corresponding behavioral metrics. In this context,                              els. While some models, such as text-bison and LLaMA-2-
+meta-cognition and model-basedness appear to emerge as                                 70, appear myopic on the temporal discounting task, others,
+properties of high-performing models.                                                  including text-davinci-003, Claude, and LLaMA-2-70-chat,
+                                                                                       demonstrate a much more far-sighted approach. GPT-4,
+High performance despite lack of exploration: Interest-
+                                                                                       interestingly, exhibits behavior akin to humans. For the
+ingly, almost all models (except for text-bison) demonstrate
+                                                                                       BART, models are positioned at extreme ends of the risk-
+super-human performance on the horizon task. While they
+                                                                                       taking spectrum, i.e., they either never take any risks at all
+exhibit high performance, they still lack exploration (except
+                                                                                       or always risk everything. LLaMA-2-70 and LLaMA-2-
+for LLaMA2-70-chat which exhibits higher-than-human
+                                                                                       70-chat, for example, display the same performance in this
+random exploration). This underscores the importance of
+                                                                                       task but exhibit opposite risk-taking behavior. This not only
+behavioral metrics in understanding the strategies employed
+                                                                                       indicates a struggle for LLMs to apprehend risks but also
+by LLMs. In this case, it appears that LLMs achieve high
+                                                                                       underscores the importance of our benchmark. Indeed, it
+performance primarily through exploitation without any
+                                                                                       raises questions about what influences a model’s behavior. It
+human-like exploration.
+                                                                                       also highlights how recording only their performance would
+Stronger priors than likelihoods: All models place much                                have overlooked the contrasting risk-taking behavior of the
+more weight on priors than observations, suggesting strong                             two LLaMA models.
+biases that are difficult to alter. Additionally, we can observe
+                                                                                       The comparison between LLaMA-2-70 and LLaMA-2-70-
+a prevalence of optimism bias and high learning rates. Al-
+                                                                                       chat is particularly compelling. Even though LLaMA-2-
+most all models exhibit a very strong optimism bias (except
+                                                                                       70-chat is a fine-tuned version of LLaMA-2-70, they ex-
+for text-bison), aligning with the notion that these LLMs
+                                                                                       hibit markedly different behavior in risk-taking, temporal
+harbor strong biases.
+                                                                                       discounting, and random exploration. This divergence is
+Low performance but high behavioral variance for risk-                                 intriguing, especially considering their performance on all
+
+                                                                                 5
+                                 CogBench: a large language model walks into a psychology lab
+
+tasks is relatively similar. This observation sets the stage             • Yij is the outcome for LLM i in group j.
+for the subsequent section, where we will conduct a more
+comprehensive analysis of how specific features of these                 • β0j is the intercept for group j.
+models influence their performance and behaviors.                        • βkj is the slope for the kth feature in group j.
+                                                                         • Xijk is the for the kth feature predictor for LLM i in
+5. Hypothesis-driven experiments                                           group j.
+CogBench provides researchers with the means to explore
+                                                                         • ϵij is the error term for LLM i in group j.
+a broad spectrum of LLMs’ behaviors. We have applied
+CogBench to 40 distinct LLMs. This diversity allows us
+                                                                      Level 2 (Between-Group) Model: At this level, we’re
+to test how different aspects of LLMs, such as the number
+                                                                      modeling the relationship between the group-level charac-
+of parameters, the application of Reinforcement Learning
+                                                                      teristics (e.g., whether the model is a ”-chat” version or not)
+from Human Feedback (RLHF), fine-tuning for code, and
+                                                                      and the group-specific regression coefficients (intercepts
+many more, can impact specific LLMs’ performance and
+                                                                      and slopes) from the Level 1 model. This allows us to see
+behaviors.
+                                                                      how the regression relationships vary across groups. The
+                                                                      group-specific intercepts and slopes (β0j and βkj ) are also
+5.1. Experimental procedure
+                                                                      modeled as outcomes from group-level predictors:
+The metrics provided by CogBench enable us to perform
+various analyses to test specific hypotheses of interest. In
+this section, we formulate and test five hypotheses about dif-                       β0j = γ00 + γ01 × Zj + u0j
+ferent mechanisms in LLMs and how these can affect their                             βkj = γk0 + γk1 × Zj + ukj
+behavioral profiles. We use both qualitative, visualization-
+based techniques (dimensionality reduction) as well as quan-
+                                                                      where:
+titative analyses (multi-level regression) to test our hypothe-
+ses. For all regression analyses, we use the features of LLMs
+to predict specific behavioral metrics from the benchmark.               • γ00 and γk0 are the average intercept and slope for the
+The multi-level regression approach was chosen because                     kth feature across all groups.
+some models are fine-tuned versions of other models. For                 • γ01 and γk1 are the effects of the group-level predictor
+instance, certain LlaMA models have a -chat version which                  Zj on the intercept and slope for the kth feature.
+adds RLHF and conversational fine-tuning, and thus are in
+the same higher-level group. This approach allows us to ac-              • u0j and ukj are the random effects for the intercept
+count for the hierarchical structure in our data and provides              and slope for the kth feature in group j.
+a more nuanced understanding of the behaviors of LLMs.
+We can isolate the effects of specific features or modifica-
+tions by comparing models within the same higher-level                5.2. Results
+group. Here is how it works:                                          Hypothesis 1: Does RLHF make LLMs more human-
+Level 1 (Within-Group) Model: At this level, we’re mod-               like?
+eling the relationship between the specific metrics (outcome          To evaluate this hypothesis, we used UMAP (McInnes et al.,
+variable) and the features of the LLMs (predictor variables)          2020) on the ten behavioral metrics of all LLMs, as illus-
+within each group. Each group in our context is formed by             trated in Figure 3A. Clear separation is evident between
+the rule that any finetuned version of another LLM is part            LLMs that incorporate RLHF and those that do not. LLMs
+of the same higher level group. For instance, LLaMA-2-                with RLHF demonstrate behaviors that appear, on average,
+13b-chat-longlora-32k, LongAlpaca-13b, CodeLlama-13B,                 roughly 2× more similar to human behavior compared to
+LLaMA-2-13-chat would all be from the same family as                  the models without. However, it is important to note that
+they are all finetuned versions of LLaMA-2-13. This is                while UMAP space retains some global structure, it is pri-
+similar to running a separate regression analysis for each            marily used for visualization purposes. Consequently, we
+group. The model can be written as follows:                           also analyzed the average distances before dimensionality
+                                                                      reduction (using normalized feature vectors), observing a
+                                                                      11.7% average decrease in L2-Norm distance for models
+                          p
+                          X                                           with RLHF (Figure 3B).
+            Yij = β0j +         βkj × Xijk + ϵij
+                                                                      Conclusion: Hypothesis is supported.
+                          k=1
+                                                                      Hypothesis 2: Does performance increase with the num-
+where:                                                                ber of parameters, training data, and the inclusion of
+
+                                                                  6
+                                             CogBench: a large language model walks into a psychology lab
+
+A                                                                             to significantly influence model-basedness. This again sug-
+                       Use of RLHF               RLAIF                        gests that the quality of the data might be more crucial than
+                       No use of RLHF            Random/Human                 its quantity when it comes to determining both performance
+                                                                              and the emergence of model-based behaviors here. How-
+                                                                              ever, identifying which factors constitute ‘quality’ in the
+                   0                                                          data requires a deeper exploration. This highlights the issue
+                                      random                                  of transparency about data. For a thorough evaluation of
+
+
+
+UMAP dimension 2
+                                                                              how specific data features impact the emergence of behav-
+                   1                                                          ioral functionalities such as model-basedness, it is essential
+                                                                              to be transparent about a model’s data and methodologies.
+                                                      LLaMA-2-70
+                                                                              Conclusion: Hypothesis is partially supported.
+                   2                     human
+                                              Claude-2                        Hypothesis 4: Does RLHF enhance meta-cognition?
+                                                  GPT-4                       To answer this question, we focus our multi-level regression
+                   3              LLaMA-2-70-chat                             on meta-cognition. Our analysis revealed a strong effect
+                                                                              (β = 0.461 ± 0.15, z = 5.9, p < 0.001; see Figure 4C),
+B                           6        7           8        9                   indicating that RLHF significantly increased meta-cognition
+                                UMAP dimension 1
+                                                                              in LLMs. This finding underscores the potential of RLHF
+                                                                              in enhancing the cognitive capabilities of LLMs.
+                                                                              Conclusion: Hypothesis is supported.
+                       0    1        2           3    4       5               Hypothesis 5: Do open-source models take more risks?
+                                Average L2 norm to humans
+                                                                              The open-source feature could be seen as a proxy for the
+                                                                              engineering efforts that proprietary models undergo. There
+Figure 3. A: UMAP visualization of the ten behavioral metrics
+                                                                              is a growing body of research suggesting that hidden pre-
+for all LLMs. Each point represents an LLM, with models using
+RLHF and models without RLHF indicated by different colors.                   prompts being one of them, can significantly influence the
+B: Difference in average L2-norm with humans between RLHF                     behavior of LLMs (Liu et al., 2023). They can act as a
+models and non-RLHF models.                                                   form of ‘priming’ that guides the model’s responses, po-
+                                                                              tentially making the model more cautious and less likely
+                                                                              to take risks by constraining the model towards safer be-
+code?                                                                         haviors. However, our regression analysis suggested oth-
+To answer this question, we used the multi-level regres-                      erwise: contrary to expectations, we observed a negative
+sion previously mentioned, focusing on the performance of                     effect (β = −0.612 ± 0.11, z = −11.4, p < 0.001; see
+LLMs. We performed a regression analysis with the average                     Figure 4D), indicating that proprietary models, which often
+standardized performance scores across all seven tasks as                     have hidden pre-prompts, are more likely to take risks. This
+the dependent variable, using LLMs’ features as predictors.                   surprising outcome could be influenced by various factors
+We found that the number of parameters indeed had a sig-                      from different engineering techniques. However, this under-
+nificant influence on performance (β = 0.277 ± 0.39, z =                      scores the limited behavioral evaluation of these techniques.
+14.1, p < 0.001; see Figure 4A). However, the size of the                     In the subsequent section, we aim to bridge this gap in un-
+training dataset and the use of code training data did not                    derstanding through an initial exploration into the change
+have a substantial impact. One possible explanation for this                  of behavior of two standard prompt-engineering techniques.
+could be that the quality of the training data, rather than                   Conclusion: Hypothesis is refuted.
+its sheer volume, plays a more determining role in perfor-
+mance, as well as that larger models also tend to be trained
+on larger datasets.
+                                                                              6. Impact of prompt-engineering
+Conclusion: Hypothesis is partially supported.                                We also explored the impact of prompt-engineering tech-
+Hypothesis 3: Does an increase of parameters, train-                          niques, namely chain-of-thought (CoT) and take-a-step-
+ing data, and the inclusion of code increase model-                           back (SB) prompting, on the behavior of LLMs. Both
+basedness?                                                                    techniques are incorporated at the end of a question:
+We again used the multi-level regression technique from
+before, this time focusing on a specific behavioral metric:
+model-basedness. We found that the number of parameters
+had a significant positive effect (β = 0.481 ± 0.22, z =
+4.2, p < 0.001; see Figure 4B), while the size of the train-
+ing dataset and the use of code training data did not appear
+
+                                                                          7
+                                                CogBench: a large language model walks into a psychology lab
+
+  A                                                                                          B
+  No Of Parameters                                                          ***                                                                    ***
+        Use Of Rlhf
+       Open Source                                                                            ***
+    Size Of Dataset
+    Context Length
+    Conversational
+              Code
+                                         0.0       0.1        0.2        0.3                  0.75      0.50      0.25   0.00     0.25     0.50      0.75
+                                     Regression coefficients                                                   Regression coefficients
+  C                                                                                          D
+  No Of Parameters                                                                                                  **
+        Use Of Rlhf                                                         ***                       ***
+       Open Source                                                                            ***
+    Size Of Dataset                                      **                                                         *
+    Context Length                  **                                                                   ***
+    Conversational
+              Code            *
+                             0.50        0.25     0.00    0.25      0.50                     0.75       0.50      0.25   0.00      0.25     0.50
+                                     Regression coefficients                                                   Regression coefficients
+Figure 4. Multi-level regressions of LLMs features onto different performance or behavioral metrics. Red bars represent effects included
+in a hypothesis. A: Regression onto all task performances. B: Regression onto model-basedness. C: Regression onto meta-cognition. D:
+Regression onto risk taking. *** : p < 0.001, ** : 0.001 ≤ p < 0.01, * : 0.01 ≤ p < 0.05
+
+  A                                                                     B
+
+                      0.20                                                                0.125                                             with CoT
+                                                                                                                                            with SB
+
+ Posterior accuracy                                                   Model-basedness
+                      0.15                                                                0.100                                             GPT-4
+                      0.10                                                                                                                  text-bison
+                                                                                          0.075
+
+ ( to no prompting)                                                  ( to no prompting)
+                                                                                                                                            Claude-2
+                      0.05                                                                                                                  Claude-1
+                                                                                          0.050
+                      0.00                                                                                                                  LLaMA-2-70
+                                                                                          0.025                                             Aggregated scores
+                      0.05
+                                                                                          0.000
+
+Figure 5. Difference of chain-of-thoughts and take-a-step-back prompting to baseline models on A: Posterior accuracy, B: Model-
+basedness. The aggregated scores are computed using a weighted average of all five models using inverse-variance weighting.
+
+
+   Take-a-step-back:                                                                              techniques have been shown to enhance performance, it
+                                                                                                  is essential to confirm whether they indeed improve the
+    First take a step back and think in the following two                                         behaviors they are designed to augment.
+    steps to answer this:
+    Step 1) Abstract the key concepts and principles rele-                                        We focused on examining two specific behaviors that are
+    vant to this question.                                                                        hypothesized to improve with the inclusion of reasoning
+    Step 2) Use the abstractions to reason through.                                               steps. These behaviors are the models’ performance in the
+                                                                                                  probabilistic reasoning task and their model-basedness.
+    Chain-of-thought:                                                                             We evaluated five specific LLMs: GPT-4, PaLM-2 for text
+                                                                                                  (text-bison@002), Claude-1/2, and LLaMA-2, applying
+    First break down the problem into smaller steps and                                           CoT and SB techniques and comparing the outcomes with
+    reason through each step logically.                                                           their base models. The selection of these five models and a
+                                                                                                  limited set of metrics was necessitated by the additional en-
+Their purpose is to stimulate the generation of reasoning                                         gineering effort required to process the outputs when using
+steps. These steps serve as an additional context that the                                        these techniques. The choice of LLMs aimed at ensuring
+LLM can use to elicit better final responses. While these                                         a diverse representation of established models, considering
+
+                                                                                              8
+                               CogBench: a large language model walks into a psychology lab
+
+the complexity of our benchmark tasks and the potential for         community.
+erratic outputs from smaller LLMs when given the freedom
+                                                                    Our analyses yielded several key findings: as expected,
+to reason. For a comprehensive explanation of the querying
+                                                                    RLHF enhanced the human-likeness of LLMs, while the
+process for these models, please refer to Appendix F.
+                                                                    number of parameters improved their performance and
+Our investigation initially focused on probabilistic reason-        model-basedness. However, we also found surprising results.
+ing, which is a fundamental cognitive ability in decision-          Despite expectations, code fine-tuning did not influence
+making. This ability facilitates the optimal integration of         performance or model-basedness and open-source models
+new information with pre-existing knowledge. We used the            exhibited less risk-taking behavior. Further, we found CoT
+performance metric from the probabilistic reasoning exper-          prompting to be a promising choice for enhancing proba-
+iment, namely posterior accuracy, which is calculated as            bilistic reasoning. Conversely, SB prompting proved more
+one minus the deviation from the Bayes optimal prediction           effective for model-based reasoning.
+for each task. As depicted in Figure 6A, both CoT and SB
+                                                                    While these results demonstrate the versatility of our bench-
+techniques generally enhanced probabilistic reasoning com-
+                                                                    mark, our analysis also faces several challenges. For in-
+pared to their base models, with CoT showing an average
+                                                                    stance, the limited transparency of certain proprietary mod-
+increase of 9.01% and SB showing an increase of 3.10%.
+                                                                    els poses an issue to our regression analysis because acquir-
+Furthermore, we discovered that model-basedness, a critical         ing details about certain models can be difficult or impossi-
+aspect of reasoning and planning, is significantly augmented        ble. This lack of transparency could potentially affect the
+by both CoT and SB techniques, as shown in Figure 6B.               precision of our analysis. It also underscores the need for
+Specifically, CoT demonstrated a 64.59% increase, while             more transparency to facilitate more thorough and accurate
+SB showed a substantial increase of 118.59%.                        evaluations (LAION, 2024; Binz et al., 2023). Furthermore,
+                                                                    evaluations of LLMs on psychological tasks have to be taken
+Interestingly, a closer examination of the figures and the
+                                                                    with some caution, as these tasks and the corresponding con-
+numerical data suggests that CoT is more effective for prob-
+                                                                    structs have not been designed for artificial agents. The
+abilistic reasoning, while SB excels in enhancing model-
+                                                                    direct comparison to average human behavior also has to
+basedness. This observation aligns with the notion that
+                                                                    be taken with caution as it is unclear if one LLM should be
+step-by-step thinking can aid mathematical reasoning (Ko-
+                                                                    considered a single subject or a population of agents.
+jima et al., 2022) while abstracting a problem by taking
+a step back can foster a better representation of the prob-         Taken together, our study highlights the importance of be-
+lem’s abstract structure. However, it is important to note          havioral metrics and cognitive modeling in evaluating LLMs
+that this analysis only serves as an initial observation. It        and presents a novel benchmark for this purpose. The anal-
+does, nonetheless, highlight potential future applications of       ysis was preliminary and intended to provide a broad view
+CogBench and illustrates how examining specific behav-              of how CogBench can be used. The primary aim of this
+iors can provide valuable context, potentially guiding future       work is to equip the LLM community with new tools, in-
+decisions on the selection of one reasoning technique over          spired by cognitive science, to evaluate their models more
+another.                                                            comprehensively. Future work should focus on three areas.
+                                                                    First, while cognitive science studies have demonstrated
+7. Discussion                                                       the external validity of the investigated tasks, it is yet to
+                                                                    be shown for LLMs. Furthermore, we aim to extend the
+We have presented CogBench, a new open-source bench-                set of included tasks to cover a broader set of domains. Fi-
+mark for evaluating LLMs. CogBench is rooted in well-               nally, we plan to properly automate our benchmark, mostly
+established experimental paradigms from the cognitive psy-          for prompt engineering techniques that were only briefly
+chology literature, providing a unique set of advantages over       examined in this study. This could include studying the
+traditional LLM benchmarks. First, it is based on tried-and-        influence of impersonation (Salewski et al., 2023), meta-in-
+tested experiments whose measures have been extensively             context learning (Coda-Forno et al., 2024), and explanations
+validated over many years and shown to capture general cog-         (Lampinen et al., 2022) on LLMs.
+nitive constructs. In addition, unlike standard benchmarks,
+CogBench does not only focus on performance metrics
+alone but also comes with behavioral metrics that allow us
+to gain insights into how a given task is solved. Finally,
+many of the included problems are procedurally-generated,
+thereby making it hard to game our benchmark by training
+on the test set. All our code and analysis will be publicly
+available, making it easy to use CogBench for the LLM
+
+
+                                                                9
+                                CogBench: a large language model walks into a psychology lab
+
+Acknowledgements                                                       Brown, T., Mann, B., Ryder, N., Subbiah, M., Kaplan, J. D.,
+                                                                         Dhariwal, P., Neelakantan, A., Shyam, P., Sastry, G.,
+This work was supported by the Max Planck Soci-                          Askell, A., et al. Language models are few-shot learners.
+ety, the Volkswagen Foundation, and funded by the                        Advances in neural information processing systems, 33:
+Deutsche Forschungsgemeinschaft (DFG, German Re-                         1877–1901, 2020.
+search Foundation) under Germany’s Excellence Strat-
+egy–EXC2064/1–390727645.15/18.                                         Bubeck, S., Chandrasekaran, V., Eldan, R., Gehrke, J.,
+                                                                         Horvitz, E., Kamar, E., Lee, P., Lee, Y. T., Li, Y.,
+Impact statement                                                         Lundberg, S., et al. Sparks of artificial general intel-
+                                                                         ligence: Early experiments with gpt-4. arXiv preprint
+The present paper attempts to advance the field of Machine               arXiv:2303.12712, 2023.
+Learning and more specifically the evaluation of LLMs.
+LLMs are permeating through our society and find more                  Burnell, R., Schellaert, W., Burden, J., Ullman, T. D.,
+and more applications every day. That is why it is of utmost             Martinez-Plumed, F., Tenenbaum, J. B., Rutar, D., Cheke,
+importance to understand how these black-box systems work                L. G., Sohl-Dickstein, J., Mitchell, M., et al. Rethink
+and how they make decisions. Our work makes a small but                  reporting of evaluation results in ai. Science, 380(6641):
+significant contribution to this problem by measuring how               136–138, 2023.
+well they perform on several cognitive abilities. This has
+potential implications for the use of these models. For exam-          Buschoff, L. M. S., Akata, E., Bethge, M., and Schulz, E.
+ple, knowing whether an LLM has meta-cognitive abilities                 Visual cognition in multimodal large language models,
+can inform if it is suitable for a particular application.               2024.
+
+References                                                             Carpenter, J., Sherman, M. T., Kievit, R. A., Seth, A. K.,
+                                                                         Lau, H., and Fleming, S. M. Domain-general enhance-
+Akata, E., Schulz, L., Coda-Forno, J., Oh, S. J., Bethge,                ments of metacognitive ability through adaptive training.
+  M., and Schulz, E. Playing repeated games with large                   Journal of Experimental Psychology: General, 148(1):51,
+  language models, 2023.                                                 2019.
+Almazrouei, E., Alobeidli, H., Alshamsi, A., Cappelli, A.,             Cavagnaro, D. R., Aranovich, G. J., McClure, S. M., Pitt,
+  Cojocaru, R., Debbah, M., Goffinet, E., Heslow, D., Lau-               M. A., and Myung, J. I. On the functional form of tempo-
+  nay, J., Malartic, Q., Noune, B., Pannier, B., and Penedo,             ral discounting: An optimized adaptive test. Journal of
+  G. Falcon-40B: an open large language model with state-                Risk and Uncertainty, 52:233–254, 2016.
+  of-the-art performance. 2023.
+Anthropic. Claude 2. Blog post, 2023. URL https:                       Chen, M., Tworek, J., Jun, H., Yuan, Q., de Oliveira Pinto,
+ //www.anthropic.com/news/claude-2. Ac-                                  H. P., Kaplan, J., Edwards, H., Burda, Y., Joseph, N.,
+  cessed: 2024-01-19.                                                    Brockman, G., Ray, A., Puri, R., Krueger, G., Petrov,
+                                                                         M., Khlaaf, H., Sastry, G., Mishkin, P., Chan, B., Gray,
+Binz, M. and Schulz, E. Using cognitive psychology to                    S., Ryder, N., Pavlov, M., Power, A., Kaiser, L., Bavar-
+  understand gpt-3. Proceedings of the National Academy                  ian, M., Winter, C., Tillet, P., Such, F. P., Cummings, D.,
+  of Sciences, 120(6):e2218523120, 2023.                                 Plappert, M., Chantzis, F., Barnes, E., Herbert-Voss, A.,
+                                                                         Guss, W. H., Nichol, A., Paino, A., Tezak, N., Tang,
+Binz, M., Alaniz, S., Roskies, A., Aczel, B., Bergstrom,                 J., Babuschkin, I., Balaji, S., Jain, S., Saunders, W.,
+  C. T., Allen, C., Schad, D., Wulff, D., West, J. D., Zhang,            Hesse, C., Carr, A. N., Leike, J., Achiam, J., Misra,
+  Q., et al. How should the advent of large language                     V., Morikawa, E., Radford, A., Knight, M., Brundage,
+  models affect the practice of science? arXiv preprint                  M., Murati, M., Mayer, K., Welinder, P., McGrew, B.,
+  arXiv:2312.03759, 2023.                                                Amodei, D., McCandlish, S., Sutskever, I., and Zaremba,
+Bommasani, R., Hudson, D. A., Adeli, E., Altman, R.,                     W. Evaluating large language models trained on code,
+  Arora, S., von Arx, S., Bernstein, M. S., Bohg, J., Bosse-             2021.
+  lut, A., Brunskill, E., et al. On the opportunities and risks
+  of foundation models. arXiv preprint arXiv:2108.07258,               Chen, Y., Liu, T. X., Shan, Y., and Zhong, S. The
+  2021.                                                                  emergence of economic rationality of gpt.    Pro-
+                                                                         ceedings of the National Academy of Sciences,
+Brändle, F., Binz, M., and Schulz, E. Exploration beyond               120(51):e2316205120, 2023.      doi: 10.1073/pnas.
+  bandits. The drive for knowledge: The science of human                 2316205120. URL https://www.pnas.org/doi/
+  information seeking, pp. 147–168, 2021.                                abs/10.1073/pnas.2316205120.
+
+                                                                  10
+                               CogBench: a large language model walks into a psychology lab
+
+Christiano, P. F., Leike, J., Brown, T., Martic, M., Legg,           Hagendorff, T., Fabi, S., and Kosinski, M. Human-like
+  S., and Amodei, D. Deep reinforcement learning from                  intuitive behavior and reasoning biases emerged in large
+  human preferences. Advances in neural information pro-               language models but disappeared in chatgpt. Nature Com-
+  cessing systems, 30, 2017.                                           putational Science, 3(10):833–838, 2023.
+
+Cobbe, K., Kosaraju, V., Bavarian, M., Chen, M., Jun, H.,            Hendrycks, D., Burns, C., Basart, S., Zou, A., Mazeika, M.,
+  Kaiser, L., Plappert, M., Tworek, J., Hilton, J., Nakano,            Song, D., and Steinhardt, J. Measuring massive multitask
+  R., Hesse, C., and Schulman, J. Training verifiers to solve          language understanding, 2021.
+  math word problems, 2021.
+                                                                     Joshi, M., Choi, E., Weld, D. S., and Zettlemoyer, L. Trivi-
+Coda-Forno, J., Witte, K., Jagadish, A. K., Binz, M., Akata,           aqa: A large scale distantly supervised challenge dataset
+  Z., and Schulz, E. Inducing anxiety in large language                for reading comprehension, 2017.
+  models increases exploration and bias. arXiv preprint
+  arXiv:2304.11111, 2023.                                            Kambhampati, S., Valmeekam, K., Guan, L., Stechly, K.,
+                                                                       Verma, M., Bhambri, S., Saldyt, L., and Murthy, A. Llms
+Coda-Forno, J., Binz, M., Akata, Z., Botvinick, M., Wang,              can’t plan, but can help planning in llm-modulo frame-
+  J., and Schulz, E. Meta-in-context learning in large lan-            works, 2024.
+  guage models. Advances in Neural Information Process-
+  ing Systems, 36, 2024.                                             Kaplan, J., McCandlish, S., Henighan, T., Brown, T. B.,
+                                                                       Chess, B., Child, R., Gray, S., Radford, A., Wu, J., and
+Collins, K. M., Wong, C., Feng, J., Wei, M., and Tenenbaum,            Amodei, D. Scaling laws for neural language models.
+  J. B. Structured, flexible, and robust: benchmarking and             arXiv preprint arXiv:2001.08361, 2020.
+  improving large language models towards more human-
+  like behavior in out-of-distribution reasoning tasks. arXiv        Kojima, T., Gu, S. S., Reid, M., Matsuo, Y., and Iwasawa,
+  preprint arXiv:2205.05718, 2022.                                    Y. Large language models are zero-shot reasoners. Ad-
+                                                                       vances in neural information processing systems, 35:
+Dasgupta, I., Schulz, E., Tenenbaum, J. B., and Gershman,
+                                                                       22199–22213, 2022.
+  S. J. A theory of learning to infer. Psychological review,
+ 127(3):412, 2020.                                                   Kool, W., Gershman, S. J., and Cushman, F. A. Cost-benefit
+                                                                       arbitration between multiple reinforcement-learning sys-
+Dasgupta, I., Lampinen, A. K., Chan, S. C., Creswell, A.,
+                                                                       tems. Psychological science, 28(9):1321–1333, 2017.
+  Kumaran, D., McClelland, J. L., and Hill, F. Language
+  models show human-like content effects on reasoning.               LAION. Towards a transparent ai future: The call
+  arXiv preprint arXiv:2207.07051, 2022.                               for less regulatory hurdles on open-source ai in eu-
+Daw, N. D., Gershman, S. J., Seymour, B., Dayan, P., and               rope. Available at: https://laion.ai/blog/
+  Dolan, R. J. Model-based influences on humans’ choices               transparent-ai/, 2024. Accessed: January 19,
+  and striatal prediction errors. Neuron, 69(6):1204–1215,             2024.
+  2011.                                                              Lampinen, A. K., Dasgupta, I., Chan, S. C., Matthewson,
+Ershadmanesh, S., Gholamzadeh, A., Desender, K., and                   K., Tessler, M. H., Creswell, A., McClelland, J. L., Wang,
+  Dayan, P. Meta-cognitive efficiency in learned value-                J. X., and Hill, F. Can language models learn from ex-
+  based choice. In 2023 Conference on Cognitive Compu-                 planations in context? arXiv preprint arXiv:2204.02329,
+  tational Neuroscience, pp. 29–32, 2023. doi: 10.32470/               2022.
+  CCN.2023.1570-0. URL https://hdl.handle.
+                                                                     Lefebvre, G., Lebreton, M., Meyniel, F., Bourgeois-Gironde,
+  net/21.11116/0000-000D-5BC7-D.
+                                                                       S., and Palminteri, S. Behavioural and neural characteriza-
+Fleming, S. M. and Lau, H. C. How to measure                           tion of optimistic reinforcement learning. Nature Human
+  metacognition. Frontiers in Human Neuroscience, 8,                   Behaviour, 1(4):0067, 2017.
+  2014. ISSN 1662-5161. doi: 10.3389/fnhum.2014.
+                                                                     Lejuez, C. W. et al. Evaluation of a behavioral measure of
+  00443. URL https://www.frontiersin.org/
+                                                                       risk taking: the balloon analogue risk task (bart). Journal
+  articles/10.3389/fnhum.2014.00443.
+                                                                       of experimental psychology. Applied, 8(2):75–84, 2002.
+Gershman, S. J. Deconstructing the human algorithms for                doi: 10.1037//1076-898x.8.2.75.
+  exploration. Cognition, 173:34–42, 2018.
+                                                                     Liu, X., Wang, J., Sun, J., Yuan, X., Dong, G., Di, P., Wang,
+Google.    Palm 2 technical report.         arXiv preprint             W., and Wang, D. Prompting frameworks for large lan-
+  arXiv:2305.10403, 2023.                                              guage models: A survey, 2023.
+
+                                                                11
+                               CogBench: a large language model walks into a psychology lab
+
+Massey, C. and Wu, G. Detecting regime shifts: The causes            Salewski, L., Alaniz, S., Rio-Torto, I., Schulz, E., and
+ of under-and overreaction. Management Science, 51(6):                 Akata, Z. In-context impersonation reveals large lan-
+ 932–947, 2005.                                                        guage models’ strengths and biases. arXiv preprint
+                                                                       arXiv:2305.14930, 2023.
+McCoy, R. T., Yao, S., Friedman, D., Hardy, M., and Grif-
+ fiths, T. L. Embers of autoregression: Understanding                Schaeffer, R., Miranda, B., and Koyejo, S. Are emergent
+ large language models through the problem they are                    abilities of large language models a mirage? arXiv
+ trained to solve. arXiv preprint arXiv:2309.13638, 2023.              preprint arXiv:2304.15004, 2023.
+McCurdy, L. Y., Maniscalco, B., Metcalfe, J., Liu, K. Y.,            Schurr, R., Reznik, D., Hillman, H., Bhui, R., and Gersh-
+ De Lange, F. P., and Lau, H. Anatomical coupling be-                  man, S. J. Dynamic computational phenotyping of human
+ tween distinct metacognitive systems for memory and                   cognition. 2023.
+ visual perception. Journal of Neuroscience, 33(5):1897–
+ 1906, 2013.                                                         Shekhar, M. and Rahnev, D. Sources of metacognitive
+                                                                       inefficiency. Trends in Cognitive Sciences, 25(1):12–23,
+McInnes, L., Healy, J., and Melville, J. Umap: Uniform                 2021.
+ manifold approximation and projection for dimension
+ reduction, 2020.                                                    Sprague, Z., Ye, X., Bostrom, K., Chaudhuri, S., and Durrett,
+                                                                       G. Musr: Testing the limits of chain-of-thought with
+Montague, P. R., Dolan, R. J., Friston, K. J., and Dayan, P.           multistep soft reasoning, 2024.
+ Computational psychiatry. Trends in cognitive sciences,
+ 16(1):72–80, 2012.                                                  Srivastava, A. and authors. Beyond the imitation game:
+                                                                       Quantifying and extrapolating the capabilities of language
+MosaicML. Introducing mpt-30b: Raising the bar for open-               models, 2023.
+ source foundation models. Blog post, 2023. URL www.
+ mosaicml.com/blog/mpt-30b. Accessed: 2023-                          Tamkin, A., Brundage, M., Clark, J., and Ganguli, D.
+ 06-22.                                                                Understanding the capabilities, limitations, and soci-
+                                                                       etal impact of large language models. arXiv preprint
+Nardo, C.          The waluigi effect (mega-post).
+                                                                       arXiv:2102.02503, 2021.
+  Available    at:       https://www.lesswrong.
+  com/posts/D7PumeYTDPfBTp3i7/                                       Touvron, H., Martin, L., Stone, K., Albert, P., Almahairi,
+  the-waluigi-effect-mega-post,             2024.                      A., Babaei, Y., Bashlykov, N., Batra, S., Bhargava, P.,
+  Accessed: January 19, 2024.                                          Bhosale, S., et al. Llama 2: Open foundation and fine-
+OpenAI.     Gpt-4 technical report.         arXiv preprint             tuned chat models. arXiv preprint arXiv:2307.09288,
+                                                                       2023.
+  arXiv:2303.08774, 2023.
+Ouyang, S., Zhang, J. M., Harman, M., and Wang, M. Llm is            Ullman, T. Large language models fail on trivial al-
+  like a box of chocolates: the non-determinism of chatgpt             terations to theory-of-mind tasks. arXiv preprint
+  in code generation. arXiv preprint arXiv:2308.02828,                 arXiv:2302.08399, 2023.
+  2023.                                                              Wei, J., Tay, Y., Bommasani, R., Raffel, C., Zoph, B.,
+Palminteri, S. and Lebreton, M. The computational roots               Borgeaud, S., Yogatama, D., Bosma, M., Zhou, D., Met-
+  of positivity and confirmation biases in reinforcement              zler, D., et al. Emergent abilities of large language models.
+  learning. Trends in Cognitive Sciences, 2022.                       arXiv preprint arXiv:2206.07682, 2022.
+
+Patzelt, E. H., Hartley, C. A., and Gershman, S. J. Computa-         Wei, J., Wang, X., Schuurmans, D., Bosma, M., Ichter, B.,
+  tional phenotyping: using models to understand individ-             Xia, F., Chi, E., Le, Q., and Zhou, D. Chain-of-thought
+  ual differences in personality, development, and mental             prompting elicits reasoning in large language models,
+  illness. Personality Neuroscience, 1:e18, 2018.                     2023.
+
+Rescorla, R. A. Classical conditioning ii: current research          Wilson, R. C., Geana, A., White, J. M., Ludvig, E. A., and
+  and theory. pp. 64, 1972.                                           Cohen, J. D. Humans use directed and random explo-
+                                                                      ration to solve the explore–exploit dilemma. Journal of
+Ruggeri, K., Panin, A., Vdovic, M., Većkalov, B., Abdul-             Experimental Psychology: General, 143(6):2074, 2014.
+  Salaam, N., Achterberg, J., Akil, C., Amatya, J., Amatya,
+  K., Andersen, T. L., et al. The globalizability of temporal        Yax, N., Anlló, H., and Palminteri, S. Studying and improv-
+  discounting. Nature Human Behaviour, 6(10):1386–1397,                ing reasoning in humans and machines. arXiv preprint
+  2022.                                                                arXiv:2309.12485, 2023.
+
+                                                                12
+                               CogBench: a large language model walks into a psychology lab
+
+Zheng, H. S., Mishra, S., Chen, X., Cheng, H.-T., Chi, E. H.,
+  Le, Q. V., and Zhou, D. Take a step back: Evoking rea-
+  soning via abstraction in large language models, 2023a.
+Zheng, L., Chiang, W.-L., Sheng, Y., Zhuang, S., Wu, Z.,
+  Zhuang, Y., Lin, Z., Li, Z., Li, D., Xing, E. P., Zhang,
+  H., Gonzalez, J. E., and Stoica, I. Judging llm-as-a-
+  judge with mt-bench and chatbot arena. arXiv preprint
+  arXiv:2306.05685, 2023b.
+
+
+
+
+                                                                13
+                                         CogBench: a large language model walks into a psychology lab
+
+A. List of LLMs used
+        Model Name                      No. of Parameters   Finetuned LLM     Use of RLHF   Open Source   Size of Dataset   Context Length   Conversational   Code
+        GPT-4                                       1760    No                Yes           No                      1.56                8    No               No
+        text-davinci-003                             170    No                Yes           No                      1.37                4    No               No
+        text-davinci-002                             170    No                No            No                      1.37                4    No               No
+        Claude-1                                     100    No                RLAIF         No                       3.7              100    No               No
+        Claude-2                                     200    No                RLAIF         No                       7.4              100    No               No
+        text-bison@002                               340    No                Yes           No                       1.4                8    No               No
+        Falcon-40b                                    40    No                No            Yes                     0.54                2    No               No
+        Falcon-40b-instruct                           40    Falcon-40b        No            Yes                      0.6                2    No               No
+        MPT-30b                                       30    No                No            Yes                     1.76                8    No               No
+        MPT-30b-instruct                              30    MPT-30b           No            Yes                      1.8                8    No               No
+        MPT-30b-chat                                  30    MPT-30b           No            Yes                      1.8                8    Yes              No
+        LLaMA-2-70                                    70    No                No            Yes                        2                4    No               No
+        LLaMA-2-13                                    13    No                No            Yes                        2                4    No               No
+        LLaMA-2-7                                      7    No                No            Yes                        2                4    No               No
+        LLaMA-2-70-chat                               70    Yes               Yes           Yes                        2                4    Yes              No
+        LLaMA-2-13-chat                               13    Yes               Yes           Yes                        2                4    Yes              No
+        LLaMA-2-7-chat                                 7    Yes               Yes           Yes                        2                4    Yes              No
+        Vicuna-7b-v1.5                                 7    LLaMA-2-7         Yes           Yes                     2.37                4    Yes              No
+        Vicuna-13b-v1.5                               13    LLaMA-2-13        Yes           Yes                     2.37                4    Yes              No
+        LLaMA-2-7b-longlora-100k-ft                    7    LLaMA-2-7         No            Yes                        2              100    No               No
+        LLaMA-2-7b-longlora-8k-ft                      7    LLaMA-2-7         No            Yes                        2                8    No               No
+        LLaMA-2-7b-longlora-16k-ft                     7    LLaMA-2-7         No            Yes                        2               16    No               No
+        LLaMA-2-7b-longlora-32k-ft                     7    LLaMA-2-7         No            Yes                        2               32    No               No
+        LLaMA-2-7b-longlora-32k                        7    LLaMA-2-7         No            Yes                        2               32    No               No
+        LLaMA-2-13b-longlora-32k-ft                   13    LLaMA-2-13        No            Yes                        2               32    No               No
+        LLaMA-2-13b-longlora-64k                      13    LLaMA-2-13        No            Yes                        2               64    No               No
+        LLaMA-2-13b-longlora-32k                      13    LLaMA-2-13        No            Yes                        2               32    No               No
+        LLaMA-2-70b-longlora-32k                      70    LLaMA-2-70        No            Yes                        2               32    No               No
+        LLaMA-2-70b-chat-longlora-32k                 70    LLaMA-2-70-chat   Yes           Yes                        2               32    Yes              No
+        LongAlpaca-7B                                  7    LLaMA-2-7         No            Yes                        2               16    Yes              No
+        LongAlpaca-13B                                13    LLaMA-2-13        No            Yes                        2               16    Yes              No
+        LongAlpaca-70B                                70    LLaMA-2-70        No            Yes                        2               16    Yes              No
+        CodeLlama-7B                                   7    LLaMA-2-7         No            Yes                      2.5               16    No               Yes
+        CodeLlama-13B                                 13    LLaMA-2-13        No            Yes                      2.5               16    No               Yes
+        CodeLlama-34B                                 34    LLaMA-2-34        No            Yes                      2.5               16    No               Yes
+        Yi-6B                                          6    No                No            Yes                        3                4    No               No
+        Yi-34B                                        34    No                No            Yes                        3                4    No               No
+        Claude-3-opus-20240229                       300    No                RLAIF         No                         2                4    No               No
+        Mistral-7B-v0.1                                7    No                Yes           Yes                        2                8    No               No
+        Mixtral-8x7B-v0.1                             56    No                Yes           Yes                        2                8    No               No
+
+
+
+
+This table lists the 40 LLMs used in this paper with different features where:
+
+   • No. of Parameters: This represents the number of parameters in the model, expressed in billions.
+
+   • Finetuned LLM: This column indicates whether the model is a fine-tuned version of another model. If it is, the name
+     of the original model from which it was fine-tuned is provided. If it is not a fine-tuned model, ’No’ is written. However,
+     if the model serves as the base model for another model listed in this table, ’Yes’ is written.
+
+   • Use of RLHF: This column specifies whether Reinforcement Learning from Human Feedback (RLHF) was used in the
+     training of the model.
+
+   • Open Source: This indicates whether the model is open source, meaning we have access to the weights of the model.
+
+   • Size of Dataset: This represents the size of the dataset on which the model was trained, expressed in trillions of tokens.
+
+   • Context Length: This refers to the length of the context available to the model during its operation.
+
+   • Conversational: This indicates whether the model was fine-tuned with conversational datasets.
+
+                                                                                    14
+                               CogBench: a large language model walks into a psychology lab
+
+  • Code: This indicates whether the model was fine-tuned with code datasets.
+
+Please note that the selection of features used for our analyses was made based on the best available knowledge of the
+authors, as some information about certain models can be challenging to obtain. This limitation could potentially impact the
+precision of the regression analysis. It underscores the need for greater transparency about LLMs to facilitate more thorough
+evaluations.
+
+
+
+
+                                                             15
+                               CogBench: a large language model walks into a psychology lab
+
+B. Comprehensive list & explanation of the cognitive experiments
+This section provides a detailed list of all seven experiments conducted in this study. For each experiment, we include
+a summary of the task, the methods used, the prompts given to the LLMs, and an explanation of the behavioral and
+performance metrics employed. These experiments were selected to target different cognitive constructs. A redundancy
+analysis, which demonstrates that the experiments capture distinct cognitive dimensions, can be found in Appendix E.
+Furthermore, we find that the metrics are relatively robust across task variants, as shown in Appendix D.
+
+B.1. Probabilistic reasoning (Dasgupta et al., 2020) - Prior & likelihood weighting
+We obtained human data for this experiment from the original study of (Dasgupta et al., 2020).
+
+B.1.1. S UMMARY
+This experiment tests how agents update beliefs based on new evidence. Participants are given a wheel of fortune
+(representing initial prior probabilities) and two urns with different colored ball distributions (representing likelihoods).
+Upon drawing a ball, participants can revise their belief about the chosen urn, considering both the wheel (prior) and the ball
+color (evidence). The task allows testing adaptability to different prior/likelihood scenarios by changing the wheel division
+and ball distributions. Agents have to estimate the probability of the drawn ball’s urn. We use this task to estimate an agent’s
+prior and likelihood weightings. In this task, people showed similar weighting between prior and likelihood, both under one.
+This underweighting is often referred to as system neglect (Massey & Wu, 2005).
+
+B.1.2. M ETHODS
+We matched the probabilities used in (Dasgupta et al., 2020) to compare to human data. There they had either an informative
+likelihood case (P (left urn|red) = 0.7, 0.8 or 0.9) and an informative prior (P (left urn) = 0.5 or 0.6) or vice versa. They
+also trained humans on this experiment, so we only compared it to data from a human’s first trial as we are not interested in
+learning but in how an LLM weighs its prior and likelihoods by default. The default number of simulations here was 100.
+
+B.1.3. P ROMPTS FOR LLM S
+    Example with informative likelihood
+
+    You are participating in an experiment where you are provided with a wheel of fortune and two urns. The wheel of
+    fortune contains 10 evenly sized sections labeled either F or J, corresponding to the urns F and J. Another person
+    will spin the wheel of fortune, select an urn based on the outcome of the spin, and then randomly pick a ball from
+    the selected urn. Your goal is to give your best estimate of the probability of the urn being F after observing the ball
+    drawn from the urn.
+
+    Q: The wheel of fortune contains 6 sections labeled F and 4 sections labeled J. The urn F contains (8, 2) and the urn
+    J contains (2, 8) red/blue balls. A red ball was drawn. What is the probability that it was drawn from Urn F? (Give
+    your probability estimate on the scale from 0 to 1 rounded to two decimal places).
+
+    A: I estimate the probability of the red ball to be drawn from the urn F to be 0.
+
+
+B.1.4. M ETRICS
+Performance: Calculated as the posterior accuracy, therefore 1 minus the Bayes optimal.
+Behaviours 1 & 2: Prior and likelihood weightings A generalized version of Bayes rule considers prior β1 and likelihood
+β2 weightings to account for biases in Bayesian updating:
+
+
+                                               P (A|B) ∝ P (B|A)β2 · P (A)β1
+
+For analytical convenience, this model can be reformulated as linear in log-odds. By fitting this model to the data using least
+squares linear regression, we can obtain the maximum likelihood estimates of the prior and likelihood weightings:
+
+                                                              16
+                                  CogBench: a large language model walks into a psychology lab
+
+
+
+
+                                                                                                                       
+                             P (Urn F|Ball)                               P (Urn F)                        P (Ball|Urn F)
+                 log                                = β0 + β1 log                           + β2 log
+                           1 − P (Urn F|Ball)                           1 − P (Urn F)                      P (Ball|Urn J)
+
+
+
+
+- P (Urn F|Ball) is the subjective probability judgment of the urn being ‘F’ given the ball’s color.
+- P (Urn F) and P (Ball|Urn F) are the prior probability and likelihood, respectively.
+- β1 and β2 are the prior and likelihood weightings, respectively, which are given as exponents in a generalized version of
+Bayes’ rule to capture specific biases. These two coefficients are the two behavioral metrics we report for this experiment.
+- β0 is the intercept term.
+
+B.2. Horizon task (Wilson et al., 2014) - Directed & random exploration
+We obtained human data for this experiment from the original study of (Wilson et al., 2014)
+
+B.2.1. S UMMARY
+This task is a two-armed bandit task with stationary reward distributions. Agents first observe four reward values of randomly
+determined options, followed by making either one or six additional choices. We use this task to measure whether an agent
+uses uncertainty to guide its exploration behavior (directed exploration) and/or whether it injects noise into its policy to
+explore (random exploration). People are known to rely on a combination of both strategies when exploring (Wilson et al.,
+2014; Brändle et al., 2021).
+
+B.2.2. M ETHODS
+We followed the same methods for prompting LLMs as in (Binz & Schulz, 2023). In the Horizon task, two distinct contexts
+are presented to participants, each differing in their time horizons. Each game involves 4 forced-choice trials, after which
+participants are given the opportunity to make a single choice (in the horizon 1 scenario) or six consecutive choices (in
+the horizon 6 scenario). The 4 forced-choice trials either offer one observation from one option and three from the other
+(unequal information condition), or two observations from each option (equal information condition).
+The design of the horizon 1 and horizon 6 scenarios inherently provides a baseline for pure exploitation. Furthermore,
+the equal and unequal information conditions are designed to differentiate between directed and random exploration by
+examining the decision made in the first trial. In the equal information condition, a choice is categorized as random
+exploration if it aligns with the option with the lower average. Conversely, in the unequal information condition, a choice is
+classified as directed exploration if it aligns with the option that was observed less frequently during the forced-choice trials.
+Our default number of simulations was 100.
+
+                                                                    17
+                               CogBench: a large language model walks into a psychology lab
+
+B.2.3. P ROMPTS FOR LLM S
+    Example with horizon 1 scenario
+
+    You are going to a casino that owns two slot machines. You earn money each time you play on one of these machines.
+
+   You have received the following amount of dollars when playing in the past:
+   - Machine J delivered 15 dollars.
+   - Machine F delivered 37 dollars.
+   - Machine F delivered 28 dollars.
+   - Machine J delivered 11 dollars.
+
+
+    Your goal is to maximize the sum of received dollars within one additional round.
+
+    Q: Which machine do you choose?
+
+    A: Machine
+
+
+B.2.4. M ETRICS
+Performance: Average delivered dollars.
+
+
+Behaviour 1 - Directed Exploration: This metric is analyzed in the unequal information condition. Here, a regression is
+performed on the choice variable using three regressors:
+
+   • x1 represents the difference in rewards,
+
+   • x2 represents the horizon (binary variable), and
+
+   • x3 is the interaction term of x1 and x2 (i.e., x1 × x2).
+
+The beta coefficient for x2 (the presence or not of a horizon) is then extracted as the measure of directed exploration.
+Behaviour 2 - Random exploration: We follow the same procedure as for the directed exploration but in the equal
+information condition to measure random exploration. However, in this case, the beta coefficient for x3 (the interaction
+effect between the difference in rewards and the presence of a horizon) from the regression provides the measure of random
+exploration.
+
+B.3. Restless bandit task (Ershadmanesh et al., 2023) - Meta-cognition
+It is worth noting that as opposed to the other chosen experiments, this restless bandit task is not considered a canonical
+experiment. We opted for this choice because meta-cognitive experiments typically use memory or perceptual tasks to
+analyze humans (Fleming & Lau, 2014; McCurdy et al., 2013), which are not applicable to LLMs. We obtained human
+data for this experiment from the original study of Ershadmanesh et al. (2023). The human data here is not available in the
+github repository as we promised the authors to only report the averages and not report the data before they publish their
+work in a journal.
+
+B.3.1. S UMMARY
+This is a two-armed bandit task with non-stationary reward distributions. There is always one option with a higher average
+reward. Every few trials a switch between the reward distributions of the two options occurs. Agents furthermore have to
+indicate after each choice how confident they are in their decisions. We use this task to measure meta-cognition, which
+indicates whether an agent can assess the quality of its own cognitive abilities. People generally display this ability but its
+extent is influenced by various internal and external factors (Shekhar & Rahnev, 2021).
+
+                                                                18
+                                CogBench: a large language model walks into a psychology lab
+
+B.3.2. M ETHODS
+In each trial, LLMs are tasked with choosing between one arm which samples a reward from a normal distribution N (60, 8),
+while the other arm samples a reward from a N (40, 8). LLMs are informed that the slot machine with the higher average
+reward changes every 18-22 trials.
+Additionally, in each trial, LLMs must express their confidence in their choice on a scale from 0 to 1, as opposed to humans
+who use a Likert scale. The task is composed of 4 blocks, each containing 18-22 trials, resulting in approximately 80 trials
+in total. This is in contrast to the human task, which consists of 20 blocks for a total of 400 trials. The decision to limit the
+number of trials was made due to context size restrictions for some LLMs.
+Our default number of simulations was 10.
+
+
+
+
+                                                               19
+                              CogBench: a large language model walks into a psychology lab
+
+B.3.3. P ROMPTS FOR LLM S
+   Example for reporting confidence at trial 23
+
+   Q: You are going to a casino that owns two slot machines named machine J and F. You earn dollars $ each time you
+   play on one of these machines with one machine always having a higher average $ reward. Every 18 to 22 trials a
+   switch of block takes place and the other slot machine will now give the higher point reward on average. However,
+   you are not told about the change of block. After each choice, you have to indicate how confident you were about
+   your choice being the best on a scale from 0 to 1. The casino includes 4 blocks of 18 to 22 trials, for a total of 80
+   trials ’t’. Your goal is to interact with both machines and optimize your $ as much as possible by identifying the best
+   machine at a given point in time which comes in hand with being attentive to a potential change of block. The
+   rewards will range between 20$ and 80$.
+
+   You have received the following amount of $ when playing in the past:
+   t=1: You chose J with a reported confidence of 0.43. It rewarded 54 $.
+   t=2: You chose J with a reported confidence of 0.53. It rewarded 57 $.
+   t=3: You chose J with a reported confidence of 0.88. It rewarded 70 $.
+   ...
+
+   t=17: You chose F with a reported confidence of 0.99. It rewarded 59 $.
+   t=18: You chose F with a reported confidence of 0.44. It rewarded 45 $.
+   t=19: You chose J with a reported confidence of 0.06. It rewarded 61 $.
+   t=20: You chose J with a reported confidence of 0.51. It rewarded 64 $.
+   t=21: You chose J with a reported confidence of 0.37. It rewarded 59 $.
+   t=22: You chose J with a reported confidence of 0.54. It rewarded 42 $.
+
+   Q: You are now in trial t=23. Which machine do you choose between machine J and F?(Think carefully remembering
+   that exploration of both machines is required for optimal rewards. Give the answer in the form ’Machine <your
+   choice>’.)
+
+   A: Machine F.
+
+   Q: How confident are you about your choice being the best on a continuous scale running from 0 represent-
+   ing ” ’this was a guess’ to 1 representing ’very certain’? (Think carefully and give your answer to two decimal places)
+
+   A: On a scale from 0 to 1, I am confident at 0.
+
+
+B.3.4. M ETRICS
+Performance: Accuracy of choosing the best arm at a given trial.
+Behaviour - Meta-cognition: We report the metacognitive sensitivity of a model by reporting the adjusted QSR (Carpenter
+et al., 2019) defined as
+
+                                      QSR = 1 − (accuracy − scaled confidence)2
+
+which is a standard metric for metacognitive sensitivity. The scaled confidence is computed as
+
+                                                    confidence − lowest reported confidence
+                     scaled confidence =
+                                           highest reported confidence − lowest reported confidence
+
+
+B.4. Experiment 2: Instrumental learning(Lefebvre et al., 2017) - Optimism bias & learning rate
+We obtained human data for this experiment from the study of (Lefebvre et al., 2017).
+
+                                                             20
+                               CogBench: a large language model walks into a psychology lab
+
+B.4.1. S UMMARY
+Instrumental learning (Lefebvre et al., 2017): LLMs encounter four two-armed bandit problems in an interleaved order.
+Each bandit problem is identified by a unique symbol pair. We use this task to investigate how an agent learns. First, we
+report the learning rate of the agent which is common practice in two-armed bandits. Furthermore, we use it to reveal
+whether an agent learns more from positive than from negative prediction errors, i.e., whether it has an optimism bias. People
+commonly display asymmetric tendencies when updating their beliefs by showing higher learning rates after encountering
+positive prediction errors compared to negative ones (Palminteri & Lebreton, 2022).
+
+B.4.2. M ETHODS
+As in (Lefebvre et al., 2017), the task is 4 two-armed bandits of 96 trials (24 per slot machine). Here we randomly sample
+(without replacement) two letters for each to avoid biases towards a given letter. We used a cover story that involved a gambler
+visiting different casinos to generate our prompts. This choice has been inspired by similar tasks for human experiments
+(Gershman, 2018) and LLMs (Binz & Schulz, 2023; Coda-Forno et al., 2024). Our default number of simulations per LLM
+is 10.
+Casinos have the same reward probabilities as in the paper’s first experiment: All arms have probabilities P=0.75 or 0.25 of
+winning 1 dollar and a reciprocal probability (1 – P) of getting nothing. In two casinos, the reward probability was the same
+for both arms (‘symmetric’ conditions), and in two other conditions, the reward probability was different across symbols
+(‘asymmetric’ conditions).
+
+B.4.3. P ROMPTS FOR LLM S
+    Example for 5th trial
+
+    You are going to visit four different casinos (named 1, 2, 3, and 4) 24 times each. Each casino owns two slot
+    machines which all return either 1 or 0 dollars stochastically with different reward probabilities. Your goal is to
+    maximize the sum of received dollars within 96 visits.
+
+   You have received the following amount of dollars when playing in the past:
+   - Machine Q in Casino 4 delivered 0.0 dollars.
+   - Machine B in Casino 1 delivered 1.0 dollars.
+   - Machine B in Casino 1 delivered 0.0 dollars.
+   - Machine R in Casino 3 delivered 0.0 dollars.
+
+    Q: You are now in visit 5 playing in Casino 4. Which machine do you choose between Machine Q and Machine D?
+    (Give the answer in the form ”Machine <your choice>”).
+
+    A: Machine
+
+
+
+B.4.4. M ETRICS
+Performance: The performance is the average amount of money retrieved by the LLM.
+Behaviour 1 - Learning rate: We fit a Rescorla-Wagner model (Rescorla, 1972) which is standard to retrieve learning
+rates in two-armed bandits. This model operates under the assumption that decisions are made according to a Softmax
+function, which takes into account the predicted values of both arms. Each predicted value is updated using ∆V = α×
+prediction error where ∆V represents the change in value, and α denotes the learning rate. We report the learning rate
+which minimizes the negative log-likelihood.
+Behaviour 2 - Optimism bias: As in (Lefebvre et al., 2017), we retrieve the optimism bias by assuming that there were
+two different learning rates, one for positive (α+ ) and one for negative (α− ) prediction errors, sometimes called the RW ±
+model. The two learning rates were fit in the same way as for the standard Rescorla-Wagner model and the Optimism bias is
+computed as α+ − α− . This measure provides a quantitative representation of an individual’s tendency to learn more from
+positive outcomes than from negative ones.
+
+                                                              21
+                                CogBench: a large language model walks into a psychology lab
+
+B.5. Two step task (Daw et al., 2011) - Model-basedness
+We obtained human data for this experiment from the study of (Kool et al., 2017).
+
+B.5.1. S UMMARY
+This is a decision-making task in which agents have to accumulate as many treasures as possible. Taking an action from a
+starting state transfers the agent to one out of two second-stage states. In each of these second-stage states, the agent has
+the choice between two options that probabilistically lead to treasures. Finally, the agent is transferred back to the initial
+state and the process repeats for a predefined number of rounds. The task experimentally disentangles model-based from
+model-free reinforcement learning. We therefore use it to measure an agent’s model-basedness. Previous studies using
+this task have shown that people rely on a combination of model-free and model-based reinforcement learning (Daw et al.,
+2011).
+
+B.5.2. M ETHODS
+We followed the same methods for LLMs as in (Binz & Schulz, 2023) with a 20-day horizon. Our default number of
+simulations was 100.
+The transition probabilities from the first stage to the chosen second stage are fixed at 70%. The two-step task gauges
+model-based decision-making by observing how past outcomes influence current choices. If a participant’s decisions reflect
+the previous trial’s second-stage state and reward, it suggests model-based decision-making, as they’re using a cognitive
+model of the task. However, if decisions are solely based on the previous trial’s first-stage choice and reward, it indicates
+model-free decision-making.
+
+B.5.3. P ROMPTS FOR LLM S
+    Example on 5th day after choosing planet Y for the first-step of the task.
+
+   You will travel to foreign planets in search of treasures. When you visit a planet, you can choose an alien to trade
+   with. The chance of getting treasures from these aliens changes over time. Your goal is to maximize the number of
+   received treasures.
+
+   Your previous space travels went as follows:
+   - 4 days ago, you boarded the spaceship to planet Y, arrived at planet Y, traded with alien J, and received treasures.
+   - 3 days ago, you boarded the spaceship to planet Y, arrived at planet X, traded with alien D, and received treasures.
+   - 2 days ago, you boarded the spaceship to planet Y, arrived at planet Y, traded with alien J, and received junk.
+   - 1 day ago, you boarded the spaceship to planet Y, arrived at planet X, traded with alien D, and received treasures.
+
+    Q: Do you want to take the spaceship to planet X or planet Y?
+
+   A: Planet Y.
+   You arrive at planet Y.
+
+    Q: Do you want to trade with alien J or K?
+
+    A: Alien
+
+
+B.5.4. M ETRICS
+Performance: Average number of received treasures. It is worth noting that the design of this experiment was done in a
+way that being model-free or model-based retrieves the same amount of rewards in average.
+
+
+Behaviour - Model-basedness: To retrieve the model-basedness of an agent, we compute a regression using three regressors:
+
+   • x1 representing rewards,
+
+                                                             22
+                               CogBench: a large language model walks into a psychology lab
+
+   • x2 representing common transitions (binary variable) and
+
+
+
+
+   • x3 is the interaction term of x1 and x2 (i.e., x1 × x2).
+
+
+
+
+The regression is performed with the ‘stay probabilities’ as the dependent variable, and x1, x2, and x3 as the independent
+variables. The ‘stay probabilities’ represent the likelihood of a participant repeating the same first-stage choice on the next
+trial. We then retrieve the beta parameter for the interaction effect.
+In essence, the interaction effect captures how the influence of rewards on stay probabilities changes depending on whether
+the previous trial involved a common or rare transition. A significant beta parameter for x3 would suggest that the effect
+of rewards on stay probabilities is not the same for common and rare transitions, indicating the presence of model-based
+decision-making.
+
+B.6. Temporal discounting (Ruggeri et al., 2022)
+For this task, we got the human averages by using the reported average in the original study of (Ruggeri et al., 2022)
+
+B.6.1. S UMMARY
+Agents have to make a series of choices between two options. Each option is characterized by a monetary outcome and
+an associated delay until the outcome is received. We use this task to assess temporal discounting, indicating whether an
+agent prefers smaller but immediate gains over larger delayed ones. People generally show a preference for immediate gains,
+although the precise functional form of their discounting is still a matter of debate (Cavagnaro et al., 2016).
+
+B.6.2. M ETHODS
+This task tests discounting patterns from three baseline scenarios to determine preference for immediate or delayed choices
+for gains (at two magnitudes) and losses (one). Second, they analyzed the prevalence of all choice anomalies using 4
+additional items. Participants responded to 10 to 13 questions, depending on their responses to the initial three sets. Each
+baseline consisted of five sub-questions. Individuals saw at most three sub-questions depending on the order of their choices.
+It is worth noting that since this task is the only one which is not procedurally generated, there is only one simulation needed
+per LLM.
+
+B.6.3. P ROMPTS FOR LLM S
+    Examples for first baseline
+
+   Q: What do you prefer between the following two options:
+   - Option 1: Receive 500 dollars now.
+   - Option 2: Receive 550 dollars in 12 months.
+   A: I prefer option 2.
+
+   Q: What do you prefer between the following two options:
+   - Option 1: Receive 500 dollars now.
+   - Option 2: Receive 600 dollars in 12 months.
+
+    A: I prefer option
+
+
+                                                                23
+                         CogBench: a large language model walks into a psychology lab
+
+Examples for 2nd baseline (different magnitude)
+
+Q: What do you prefer between the following two options:
+- Option 1: Receive 5000 dollars now.
+- Option 2: Receive 5500 dollars in 12 months.
+A: I prefer option 1.
+
+Q: What do you prefer between the following two options:
+- Option 1: Receive 5000 dollars now.
+- Option 2: Receive 5100 dollars in 12 months.
+A: I prefer option 1.
+
+“Q: What do you prefer between the following two options:
+- Option 1: Receive 5000 dollars now.
+- Option 2: Receive 5050 dollars in 12 months.
+
+A: I prefer option
+
+
+
+
+Examples for 3rd baseline (loss as opposed to gain)
+
+Q: What do you prefer between the following two options:
+- Option 1: Pay 500 dollars now.
+- Option 2: Pay 550 dollars in 12 months.
+
+A: I prefer option 1
+
+Q: What do you prefer between the following two options:
+- Option 1: Pay 500 dollars now.
+- Option 2: Pay 510 dollars in 12 months.
+
+A: I prefer option 1
+
+Q: What do you prefer between the following two options:
+- Option 1: Pay 500 dollars now.
+- Option 2: Pay 505 dollars in 12 months.
+
+A: I prefer option
+
+
+
+
+Example for testing present bias
+
+Q: What do you prefer between the following two options:
+- Option 1: Receive 500 dollars in 12 months.
+- Option 2: Receive 600 dollars in 24 months.
+
+A: I prefer option
+
+
+                                                      24
+                               CogBench: a large language model walks into a psychology lab
+
+    Example for testing subbaddictivity
+
+   Q: What do you prefer between the following two options:
+   - Option 1: Receive 500 dollars now.
+   - Option 2: Receive 700 dollars in 24 months.
+
+    A: I prefer option
+
+
+    Example for testing delay-speedup asymmetry
+
+   Q: What do you prefer between the following two options:
+   - Option 1: Receive 500 dollars now.
+   - Option 2: Wait 12 months for the 500 dollars but with an additional 99 dollars.
+
+    A: I prefer option
+
+
+    Example for testing delay-length asymmetry
+
+   Q: What do you prefer between the following two options:
+   - Option 1: Wait 12 months to receive 600 dollars now.
+   - Option 2: Pay 100 dollars and receive the 600 dollars gain now.
+
+    A: I prefer option
+
+
+B.6.4. M ETRICS
+Behaviour: We only report one temporal discounting metric as behavioral. We use the same scoring system as in (Ruggeri
+et al., 2022) where the score is between 0 and 19.
+
+
+The constructed score corresponded to the ranking of the sub-question where the individual switched from choosing the
+delayed option towards the sooner option. An individual who always chose the latter option was assigned a score of 0. An
+individual who always chose the sooner option was assigned a score of 5 (for baselines) and 1 for each of the 4 biases.
+Adding this score across questions results in a total score of 0 for individuals always choosing the delayed amount and 19
+(5+5+5+4) for individuals always choosing the sooner amount.
+
+B.7. Balloon Analogue Risk Task (BART) (Lejuez et al., 2002) - Risk
+For this task, we got the human averages by averaging the reported averages of men and women in the original study of
+(Lejuez et al., 2002).
+
+B.7.1. S UMMARY
+Agents have to inflate an imaginary balloon to obtain rewards. They may choose to stop inflating and cashing out all rewards
+accumulated so far. There is a chance that the balloon pops at any point in time and all rewards will be lost. We use this task
+to assess risk-taking behavior. Human risk-taking in this task is “significantly correlated with scores on self-report measures
+of risk-related constructs and with the self-reported occurrence of real-world risk behaviors” (Lejuez et al., 2002).
+
+B.7.2. M ETHODS
+We substitute the colors of the balloons with the letters A, B, and C. We reduce the number of balloons from 15 to 10 per
+category to avoid context-size limits from some LLMs. Our default number of simulations per LLM is 10.
+For the three balloons we sample from the same three distributions as in the paper where probabilities increase when inflating
+the balloon but start at 1/32, 1/8 and 1/128 per different balloon category. We randomly shuffle the assignment to A, B,
+
+                                                              25
+                               CogBench: a large language model walks into a psychology lab
+
+and C to avoid biases of LLMs towards certain letters.
+
+B.7.3. P ROMPTS FOR LLM S
+   Example for 5th balloon
+
+   In this game, you will encounter 3 different balloons labeled A, B, and C. There will be a total of 10 balloons for
+   each type of balloon. Your goal is to accumulate as many points as possible without popping the balloon. You will
+   be presented with a balloon and given the option to inflate it or not. Each inflation increases the balloon’s size and
+   potential points but also carries a risk of the balloon popping. Your task is to decide whether to inflate the balloon or
+   not knowing that a successful inflation adds 1 point from that balloon. Once you decide to stop inflating the balloon,
+   you can no longer earn points from that balloon. If the balloon pops before you stop inflating, you will lose all the
+   points accumulated in that balloon. Your final score will be determined by the total number of points earned across
+   all 30 balloons. Your goal is to maximize your final score.
+
+   You observed the following previously where the type of balloon is given in parenthesis:
+   -Balloon 1 (A): You inflated the balloon 1 times for a total of 1 point. It did not explode.
+   -Balloon 2 (C): You inflated the balloon 4 times for a total of 4 points. It did not explode.
+   -Balloon 3 (A): You inflated the balloon 7 times for a total of 0 points. It did explode.
+   -Balloon 4 (C): You inflated the balloon 5 times for a total of 5 points. It did not explode.
+   -Balloon 5 (A): You inflated the balloon 9 times for a total of 0 points. It did explode.
+
+   Q: You are currently with Balloon 5 which is a balloon of type A. What do you do? (Option 1 for ’skip’ or 0 for
+   ’inflate’)
+
+   A: Option
+
+
+B.7.4. M ETRICS
+Performance: The performance is the average points across all simulations.
+Behaviour: Risk In the paper they report the adjusted risk which is defined as the average number of pumps excluding
+balloons that exploded. However, this does not take into account edge behaviours which always inflate which is the case for
+some LLMs and therefore we decided to report the risk as the average number of inflation attempts.
+
+
+
+
+                                                              26
+                                           CogBench: a large language model walks into a psychology lab
+
+C. Full benchmark results for rest of LLMs
+
+                                                                hf_falcon-4
+                            text-davinci-002 hf_falcon-40b      0b-instruct      hf_mpt-30b hf_mpt-30b-instructhf_mpt-30b-chat     llama-2-13
+  Probabilistic Reasoning
+            Horizon Task
+         Restless Bandit
+  Instrumental Learning
+           Two Step Task
+                   BART
+                               0      2          0      2        0      2         0      2       0     2        0    2             0       2
+                                                                      Values (Normalized: Random=0, Human average=1)
+
+                                                                                                                 hf_Llama-2-7b-l hf_Llama-2-7b-
+                               llama-2-7      llama-2-13-chat llama-2-7-chat hf_vicuna-7b-v1.5hf_vicuna-13b-v1.5 onglora-100k-ft longlora-8k-ft
+  Probabilistic Reasoning
+            Horizon Task
+         Restless Bandit
+  Instrumental Learning
+           Two Step Task
+                   BART
+                               0      2          0      2        0      2         0      2       0     2        0    2             0       2
+                                                                      Values (Normalized: Random=0, Human average=1)
+
+                             hf_Llama-2-7b- hf_Llama-2-7b- hf_Llama-2-7b hf_Llama-2-13b- hf_Llama-2-13          hf_Llama-2-13    hf_Llama-2-70
+                             longlora-16k-ft longlora-32k-ft -longlora-32k longlora-32k-ft b-longlora-64k       b-longlora-32k   b-longlora-32k
+  Probabilistic Reasoning
+            Horizon Task
+         Restless Bandit
+  Instrumental Learning
+           Two Step Task
+                   BART
+                               0      2          0      2        0      2         0      2       0     2        0    2             0       2
+                                                                      Values (Normalized: Random=0, Human average=1)
+
+                            hf_Llama-2-70b-c
+                            hat-longlora-32k hf_LongAlpaca-7Bhf_LongAlpaca-13Bhf_LongAlpaca-70Bhf_CodeLlama-7Bhf_CodeLlama-13Bhf_CodeLlama-34B
+  Probabilistic Reasoning
+            Horizon Task
+         Restless Bandit
+  Instrumental Learning
+           Two Step Task
+                   BART
+                               0      2          0      2        0      2         0      2       0     2        0    2             0       2
+                                                                      Values (Normalized: Random=0, Human average=1)
+
+
+
+
+                                                                               27
+                                          CogBench: a large language model walks into a psychology lab
+
+
+                                                     claude-3-op
+                                claude-1            us-20240229            hf_Mistral-7B-v0.1 hf_Mixtral-8x7B-v0.1      hf_Yi-6B            hf_Yi-34B
+Probabilistic Reasoning
+          Horizon Task
+       Restless Bandit
+ Instrumental Learning
+         Two Step Task
+                  BART
+                               0          2           0           2            0        2          0      2         0      2                0        2
+                                                                               Values (Normalized: Random=0, Human average=1)
+
+
+                                                                      Figure 6. Performance metrics
+
+
+                         text-davinci-002       falcon-40b       falcon-40b-instruct     mpt-30b        mpt-30b-instruct mpt-30b-chat        llama-2-13
+       Prior weighting
+ Likelihood weighting
+ Directed exploration
+ Random exploration
+       Meta-cognition
+         Learning rate
+        Optimism bias
+    Model-basedness
+Temporal discounting
+           Risk taking
+                           0            5       0            5        0           5 0              5 0           5 0                    5    0              5
+                                                                                Values (Normalized: Random=0, Human=1)
+
+                                                                                                                      Llama-2-7b-lo         Llama-2-7b-l
+                            llama-2-7         llama-2-13-chat llama-2-7-chat           vicuna-7b-v1.5 vicuna-13b-v1.5 nglora-100k-ft        onglora-8k-ft
+       Prior weighting
+ Likelihood weighting
+ Directed exploration
+ Random exploration
+       Meta-cognition
+         Learning rate
+        Optimism bias
+    Model-basedness
+Temporal discounting
+           Risk taking
+                           0            5       0            5        0           5 0              5 0           5 0                    5    0              5
+                                                                                Values (Normalized: Random=0, Human=1)
+
+                          Llama-2-7b-lo       Llama-2-7b-lo           Llama-2-7b-      Llama-2-13b-l     Llama-2-13b-    Llama-2-13b-       Llama-2-70b-
+                          nglora-16k-ft       nglora-32k-ft           longlora-32k     onglora-32k-ft    longlora-64k    longlora-32k       longlora-32k
+       Prior weighting
+ Likelihood weighting
+ Directed exploration
+ Random exploration
+       Meta-cognition
+         Learning rate
+        Optimism bias
+    Model-basedness
+Temporal discounting
+           Risk taking
+                           0            5       0            5        0           5 0              5 0           5 0                    5    0              5
+                                                                                Values (Normalized: Random=0, Human=1)
+
+
+
+                                                                                       28
+                                             CogBench: a large language model walks into a psychology lab
+
+                            Llama-2-70b-ch
+                            at-longlora-32k LongAlpaca-7B LongAlpaca-13B LongAlpaca-70B CodeLlama-7B CodeLlama-13B CodeLlama-34B
+          Prior weighting
+    Likelihood weighting
+    Directed exploration
+    Random exploration
+          Meta-cognition
+            Learning rate
+           Optimism bias
+       Model-basedness
+   Temporal discounting
+              Risk taking
+                             0               5       0          5       0           5 0              5 0           5 0               5       0           5
+                                                                                  Values (Normalized: Random=0, Human=1)
+
+                                                          claude-3-op
+                                  claude-1               us-20240229        hf_Mistral-7B-v0.1 hf_Mixtral-8x7B-v0.1   hf_Yi-6B               hf_Yi-34B
+          Prior weighting
+    Likelihood weighting
+    Directed exploration
+    Random exploration
+          Meta-cognition
+            Learning rate
+           Optimism bias
+       Model-basedness
+   Temporal discounting
+              Risk taking
+                              0                  5       0              5     0            5      0           5    0             5       0               5
+                                                                               Values (Normalized: Random=0, Human average=1)
+
+
+                                                                        Figure 7. Behavioral metrics
+
+
+
+
+Figures 6 & 7 show the metrics for the remaining LLMs not included in the paper. In the original submission, the five
+LLMs ’claude-3-opus-20240229’, ’hf Mixtral-8x7B-v0.1’, ’hf Mistral-7B-v0.1’, ’hf Yi-34B’, ’hf Yi-6B’ were not included.
+This explains why they were not considered at first for the original figures of established LLMs in the main paper. It is
+noteworthy that Claude-3-opus is one of the few models that engages in both directed and random exploration and it is the
+only one above human-level in terms of meta-cognition.
+
+                                                                                        29
+                               CogBench: a large language model walks into a psychology lab
+
+D. Robustness analysis
+Robustness analysis in the following four tasks: probabilistic reasoning, two-step task, restless bandit, and BART. We chose
+these tasks because the temporal discounting task is not procedurally generated and already accounts for different biases
+(e.g., present bias, different magnitudes, loss vs. gain, delay-speedup asymmetry) within its varying question sets. The
+horizon and instrumental learning tasks, being neutral bandits, were expected to exhibit similar changes to the restless bandit
+task and were thus not included. Below you can find example for the changed prompts. Figure 8 shows the results. We
+observe that the CogBench metrics are relatively robust across task variants. This is with the exception of prior weightings
+for Mixtral-8x7B which seem to be very different when changing from the wheel of fortune/urns to the coin/dices contexts.
+
+
+For the restless bandit, we changed money to points and the mean reward distributions from 40/60 to -10/10:
+
+
+
+    Restless bandit V2
+    Q: You are participating in an experiment where you need to interact with two gaming machines named machine F
+    and J. You earn points each time you play on one of these machines with one machine always having a higher
+    average point reward. Every 18 to 22 trials a switch of block takes place and the other gaming machine will now
+    give the higher point reward in average. However, you are not told about the change of block. After each choice you
+    have to indicate how confident you were about your choice being the best on a scale from 0 to 1. The experiment
+    includes 4 blocks of 18 to 22 trials, for a total of 80 trials ’t’. Your goal is to interact with both machines and
+    optimize your points as much as possible by identifying the best machine at a given point in time which comes in
+    hand with being attentive at a potential change of block. The rewards will range between -20 and 20 points.
+
+   You are now in trial t=1. Which machine do you choose between machine J and F? Give the answer in the form
+   ’Machine <your choice>’.
+
+    A: Machine
+
+
+
+For the two-step task, we changed the cover story from aliens to a musician with a magical carpet:
+
+
+
+    Two-step task V2
+
+    You are a musician earning a living by traveling the mountains of a fantasy land with your magical carpet. When
+    you visit a mountain, you must decide for which of the local genies you want to perform. If the selected genie likes
+    your music, you will receive one gold coin. The music tastes of the genies change slightly over time. Your goal is to
+    maximize the number of received gold coins.
+
+    Q: Do you want to take the magical carpet to mountain X or mountain Y? X.
+    You arrive at mountain Y.
+
+    Q: Do you want to perform for genie J or K?
+
+    A: Genie
+
+
+
+For the BART, we changed from 3×15 to 3×30 different balloons as for the original study and included a new cover story
+changing the balloons to candies dispensers. The choice of 15 to 30 was made because in the original paper, they had 30
+balloons per types of balloons and in the benchmark we only included 15 due to constraints in some LLMs’ context sizes.
+And this was not an issue for the five LLMs we were analyzing here for robustness:
+
+                                                              30
+                                                             CogBench: a large language model walks into a psychology lab
+
+                    BART V2
+                  In this game you will encounter 3 different candy dispensers labeled A, B and C. There will be a total of 30 candy
+                  dispensers for each type. Your goal is to accumulate as many candies as possible without causing the dispenser to
+                  explode. You will be presented with a candy dispenser and given the option to pump candies into a container or not.
+                  Each pump adds one candy to the container but also carries a risk of the dispenser exploding. Your task is to decide
+                  whether to pump candies or not, knowing that a successful pump adds 1 candy from that dispenser. Once you decide
+                  to stop pumping candies from a dispenser, you can no longer earn candies from that dispenser. If the dispenser
+                  explodes before you stop pumping, you will lose all the candies accumulated from that dispenser. Your final score
+                  will be determined by the total number of candies earned across all 90 dispensers. Your goal is to maximize your
+                  final number of candies.
+
+                    Q: You are currently with dispenser 1 which is a dispenser of type C. What do you do? (Option 1 for ’skip’ or
+                    Option 2 for ’pump candies’)
+
+                  A: Option
+
+For the probabilistic reasoning task, we changed from wheel of fortunes & urns to coin & dices:
+
+                    Probabilistic reasoning V2
+
+                  You are participating in an experiment where you are provided with a wheel of fortune and two ten-sided dice, F
+                  and J. The coin is a biased coin where heads corresponds to dice F and tail to dice J. Another person will toss the
+                  coin, select one of the two dice based on the outcome of the toss, and then randomly throw the selected dice which
+                  has only red or blue faces. Your goal is to give your best estimate of the probability of the dice being dice F after
+                  observing the face of the dice thrown.
+
+                  Q: The coin has a bias of 0.5 towards heads (representing dice F). The dice F contains (7, 3) and the
+                  dice J contains (3, 7) red/blue faces respectively. A blue face was observed. What is the probability that it
+                  was from the throw of dice F? (Give your probability estimate on the scale from 0 to 1 rounded to two decimal places)
+
+                  A: I estimate the probability of the blue face to be drawn from the dice F to be 0.
+
+
+                        Original                  Changed prompt              GPT-4       Claude-3-opus                              Yi-34B   Mixtral-8x7B                                            LLaMA-2-70-chat
+                        Human average             Random average
+
+    A
+
+
+
+
+                                                                                                                                                  Posterior accuracy
+                                                                                                           12
+
+
+
+
+                                                                                             Average rewards
+                  0.8                                                                                                                                              0.8
+                                                                        0.5
+
+
+
+
+Mean accuracy                                                Rewards mean
+                                                                                                           10
+                                                                        0.4
+                  0.6                                                                                                                                              0.6
+                                                                                                               8
+
+                                                                        0.3
+                                                                                                               6
+                  0.4                                                                                                                                              0.4
+
+                                                                        0.2                                    4
+
+                  0.2                                                                                                                                              0.2
+                                                                        0.1                                    2
+
+
+                                                                                                               0
+                  0.0                                                   0.0                                                                                        0.0
+
+
+
+
+    B
+                                                                                  30                                             1.6
+
+
+
+
+                                        Model-basedness                                                                                                                  Likelihood weighting
+              0.8                                                                                                                1.4                                                            0.8
+                                                      0.20
+
+
+
+
+ Meta-cognition                                                                                                    Prior weighting
+                                                                                  25
+                                                                                                                                 1.2
+                                                      0.15                                                                                                                                      0.6
+              0.6                                                                 20                                             1.0
+
+
+
+
+              0.4
+                                                      0.10
+                                                                               Risk
+                                                                                  15
+                                                                                                                                 0.8
+
+                                                                                                                                 0.6
+                                                                                                                                                                                                0.4
+
+
+
+                                                      0.05                                                                                                                                      0.2
+                                                                                  10
+                                                                                                                                 0.4
+              0.2
+                                                                                                                                 0.2                                                            0.0
+                                                      0.00                            5
+
+                                                                                                                                 0.0
+              0.0                                                                     0                                                                                                         0.2
+
+
+
+
+Figure 8. Comparison of results in 4 tasks (from left to right: restless bandit, two-step task, BART probabilistic reasoning) between
+original and changed prompts for 5 LLMs. A: Performance metrics of B: Behavioral metrics.
+
+
+                                                                                           31
+                               CogBench: a large language model walks into a psychology lab
+
+E. Redundancy analysis
+We first performed a Principal Component Analysis (PCA) on both the behavioral and performance metrics for all 40
+LLMs. The results of this analysis show that to retain up to 95% of the variance in the benchmark, all dimensions for both
+performance and behavior are needed. More specifically, the explained variance for the 10 behavioral metrics is: [0.21, 0.18,
+0.18, 0.11, 0.08, 0.06, 0.06, 0.06, 0.04, 0.03], and for the 6 performance metrics: [0.52, 0.17, 0.13, 0.09, 0.05, 0.04].
+Furthermore, we looked at the average correlations between metrics for the three bandit tasks (restless bandit, instrumental
+learning horizon task). We found that the average correlations for these tasks’ metrics seemed indistinguishable compared
+to the average correlations across all tasks for both behavioral metrics (0.0 ± 0.27 vs 0.05 ± 0.20) and performance metrics
+(0.45 ± 0.18 vs 0.41 ± 0.16) respectively. This suggests that even though many tasks share a similar bandit structure, the
+metrics used for CogBench seem to capture different cognitive dimensions.
+
+
+
+
+                                                             32
+                                   CogBench: a large language model walks into a psychology lab
+
+    F. Prompt Engineering techniques
+    In both the CoT and SB experiments, we appended specific prompts at the end (details provided below) where the function
+    ‘self.format answer’ was different for each experiment. We imposed a limit of 300 tokens for an LLM. This approach,
+    however, presented some challenges when compared with the standard benchmark analysis, which is designed to output a
+    maximum of one token to ensure a context that enforces a one-token answer.
+    When we permit an LLM to modify the context with a flexible number of tokens, despite our attempts to enforce a maximum
+    word limit, some LLMs do not consistently adhere to this constraint. This flexibility introduces complexity into the process
+    of automating these engineering techniques across different experiments for various types of LLMs.
+    Additionally, some LLMs begin to exhibit chaotic behavior, and once this occurs, it becomes difficult to revert to a controlled
+    state. This phenomenon, known as the ‘Waluigi effect’ (Nardo, 2024), underscores the challenges of managing the balance
+    between flexibility and control in the design and operation of LLMs. In addition, it is important to note that recent criticisms
+    and limitations of the CoT approach, particularly regarding faithfulness and inadequacy in some reasoning tasks (Sprague
+    et al., 2024; Kambhampati et al., 2024), have emerged.
+
+        Example for take-a-step-back
+
+        First, take-a-step-back and think in the following two steps to answer this:
+        Step 1) Abstract the key concepts and principles relevant to this question in a maximum of 60 words.”
+        Step 2) Use the abstractions to reason through the question in a maximum of 60 words.
+
+        Finally, give your final answer in the format ’Final answer: {self.format answer}<your choice>’. It is very impor-
+        tant that you always answer in the right format even if you have no idea or you believe there is not enough information.
+
+        A: Step 1)
+
+        Example for chain-of-thought
+
+        First break down the problem into smaller steps and reason through each step logically in a maximum of 100 words
+        before giving your final answer in the format ’Final answer: {self.format answer}<your choice>’. It is very impor-
+        tant that you always answer in the right format even if you have no idea or you believe there is not enough information.
+
+        A: Let’s think step by step:
+
+
+    G. Regression package
+    We fitted the multi-level regression model using the statsmodels.formula.api package in Python:
+1   import statsmodels.formula.api as smf
+2   model = mixedlm(f"{score}∼{'+'.join(llm_features)}", df_standardized, groups=
+       df_standardized['type_of_llm'])
+
+                                              Listing 1. Python multi-level regression code
+
+
+
+
+                                                                   33
+

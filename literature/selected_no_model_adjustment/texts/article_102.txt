@@ -1,0 +1,1161 @@
+Say What You Mean! Large Language Models Speak Too Positively about
+                Negative Commonsense Knowledge
+          Jiangjie Chen♠ , Wei Shi♠ , Ziquan Fu♡∗, Sijie Cheng♠ , Lei Li♣ , Yanghua Xiao♠♢†
+    ♠
+        Shanghai Key Laboratory of Data Science, School of Computer Science, Fudan University
+                        ♡
+                          System Inc. ♣ University of California, Santa Barbara
+                     ♢
+                       Fudan-Aishu Cognitive Intelligence Joint Research Center
+                    {jjchen19, sjcheng20, shawyh}@fudan.edu.cn
+         wshi22@m.fudan.edu.cn, frank@system.com, leili@cs.ucsb.edu
+
+                          Abstract                                 The Question Answering Task
+                                                                   - Answer the commonsense question.
+        Large language models (LLMs) have been
+                                                                             Question                      Answer
+        widely studied for their ability to store and                Do lions live in the ocean?              No           Conflict?
+        utilize positive knowledge. However, nega-                                                 LLM
+
+
+        tive knowledge, such as “lions don’t live in               The Constrained Generation Task
+        the ocean”, is also ubiquitous in the world but            - Make a correct commonsense sentence based on the keywords.
+
+        rarely mentioned explicitly in the text. What do                    Keywords                               Sentence
+        LLMs know about negative knowledge? This                       lion, located at, ocean
+                                                                                                   LLM
+                                                                                                           Lions live in the ocean.
+
+        work examines the ability of LLMs to nega-
+        tive commonsense knowledge. We design a                   Figure 1: An example of the probing tasks studied in
+        constrained keywords-to-sentence generation               this paper. For the same negative commonsense knowl-
+        task (CG) and a Boolean question-answering                edge <lion, located at, ocean> which is false, we find
+        task (QA) to probe LLMs. Our experiments                  LLMs often fail to generate texts grounded in such neg-
+        reveal that LLMs frequently fail to generate              ative knowledge while knowing its validity according
+        valid sentences grounded in negative common-              to question answering.
+        sense knowledge, yet they can correctly answer
+        polar yes-or-no questions. We term this phe-
+        nomenon the belief conflict of LLMs. Our fur-             for cognitive skills such as knowing what is not true
+        ther analysis shows that statistical shortcuts and        or what not to think (MacDonald, 1965; Minsky,
+        negation reporting bias from language model-              1997; Barker and Jago, 2012). Therefore, we ask
+        ing pre-training cause this conflict.1                    this question: Do LLMs (such as GPT-3 models)
+1       Introduction                                              acquire such implicit negative knowledge through
+                                                                  extensive language modeling pre-training?
+Most of the world knowledge exists in a positive                     One important way of probing LLMs, which are
+and affirmative form (Molnar, 2000; Barker and                    mostly generative models, is checking whether the
+Jago, 2012; Vrandečić and Krötzsch, 2014; Speer                 generated texts are knowledge-grounded. This is
+et al., 2017). As a result, large language models                 because the generation of texts is a direct man-
+(LLMs) pre-trained on a colossal amount of texts,                 ifestation of a model’s internal beliefs towards
+such as GPT-3 (Brown et al., 2020; Ouyang et al.,                 world knowledge (Kassner et al., 2021; Sumers
+2022) and PaLM (Chowdhery et al., 2022), have                     et al., 2021; Tafjord et al., 2022).3 Knowledge-
+demonstrated their remarkable abilities for storing               grounded text generation has been a focus of NLP
+and utilizing positive knowledge in downstream                    research (Yu et al., 2022). For example, the C OM -
+tasks. In contrast, negative knowledge, such as                   MON G EN benchmark (Lin et al., 2020) evaluates
+the commonsense statement that “lions do not live                 generative commonsense reasoning that organizes
+in the ocean”, is rarely mentioned in the textual                 concepts as keyword input and generates a sentence
+world (Hossain et al., 2022).2 Such negative knowl-               grounded in commonsense knowledge. However,
+edge also exists in the real world, and is important              previous work does not consider negative knowl-
+        ∗
+       Work done while at Brain Technologies, Inc.                edge, nor do they probe the consistency between
+        †
+       Corresponding author.
+    1                                                                 3
+      Resources of this paper are available at https://                 Our definition of belief is derived from Kassner et al.
+github.com/jiangjiechen/uncommongen.                              (2021), which is the assignment of a truth value to a propo-
+    2
+      Hossain et al. (2022) report that sentences with negation   sition. In our study, the context for the proposition is the
+hold up to 14.5% in the CommonsenseQA dataset (Talmor             world knowledge that models learned. Therefore, we define a
+et al., 2019), 8.7% in QNLI (Rajpurkar et al., 2016), and         model’s belief about such knowledge as its prediction about
+22.6-29.9% in general-purposed texts.                             the truth value of a certain piece of world knowledge.
+
+                                                              9890
+                     Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics
+                                            Volume 1: Long Papers, pages 9890–9908
+                               July 9-14, 2023 ©2023 Association for Computational Linguistics
+what models know and what they generate. An-                  The main contributions of this paper are sum-
+other line of work on probing (Petroni et al., 2019;       marized as follows: 1) We are the first to investi-
+Ettinger, 2020; Kassner and Schütze, 2020; Cao             gate LLMs’ belief about negative knowledge in the
+et al., 2021) is conducted through the mask-infilling      commonsense domain, which may shed light on
+task. However, this task mainly evaluates bidirec-         a previously unstudied aspect of LLMs’ abilities.
+tional models (Devlin et al., 2019), and is not natu-      2) We propose to probe generative LLMs through
+ral for unidirectional LLMs. Also, this task suffers       constrained sentence generation, which is effective
+from the open-world problem in evaluation, i.e.,           for evaluating generated texts grounded in positive
+there could be multiple valid answers to fill the          and negative knowledge. 3) Through extensive ex-
+mask. This is vital for evaluating negative knowl-         periments, we identify and analyze LLMs’ belief
+edge, which has an infinite answer space, e.g., lions      conflict phenomenon on negative commonsense
+don’t live in the sky, water, desk, car, etc.              knowledge, and provide insights on the causes and
+                                                           solutions of such problems.
+   In this study, we investigate the belief of LLMs
+about negative commonsense knowledge through               2   Related Work
+the lens of text generation. Since LLMs have be-
+come a foundational service (Bommasani et al.,             Negative Knowledge Negative knowledge refers
+2021) and cannot be easily trained, we apply in-           to information that describes what is not true, what
+context learning (Brown et al., 2020) for the prob-        cannot be done, or what does not exist, while every-
+ing tasks, which is tuning-free. We design a Con-          thing that exists is positive (Molnar, 2000; Barker
+strained Sentence Generation (CG) probing task,            and Jago, 2012). It plays an important role in the
+following Lin et al. (2020), where the model must          human reasoning process, because to think effec-
+generate a knowledge-grounded sentence based on            tively, we need to know what “not to think” (Min-
+a given triple <s, r, o>. For example, given a triple      sky, 1997). Current research of negative knowl-
+“<lion, located at, ocean>”, a model should gener-         edge in NLP mainly focuses on developing nega-
+ate “lions do not live in the ocean”. This task is         tive knowledge bases that store relational negative
+rather simple and clear. The output sentence ba-           commonsense knowledge (Arnaout et al., 2021;
+sically contains the same information as the input         Safavi et al., 2021; Arnaout et al., 2022) and utiliz-
+keywords. Thus, the generated texts are easy to            ing negative knowledge within arguments or expla-
+evaluate according to the appearance of negation.          nations to refute a candidate (Camburu et al., 2018;
+We also add a Boolean Question Answering (QA)              Aggarwal et al., 2021; Chen et al., 2022). This pa-
+task that asks LLMs whether a knowledge triple is          per is based on these resources to probe the belief
+valid, which shows their beliefs about this piece of       of LLMs about the relations of everyday concepts
+knowledge. An example is given in Figure 1.                that are not true.
+   In our experiments, we find that LLMs of dif-           Understanding Negation in Texts The manifes-
+ferent sizes and shapes often produce hallucinated         tation of negative knowledge in texts is the phe-
+claims of negative knowledge, even if they answer          nomenon of negation (Horn and Wansing, 2022),
+yes-or-no questions about it correctly. We term            which is difficult for pre-trained LMs to under-
+this phenomenon the belief conflict, i.e., actions         stand, e.g., filling “birds cannot [MASK]” with
+(generating texts with it) conflict with its belief (an-   “fly” (Kassner and Schütze, 2020). Negation has
+swering question about it). Hallucinated generation        been shown to be spuriously correlated with neg-
+of negative knowledge is seen in both our probing          ative or contradictory labels due to the data dis-
+tasks and downstream tasks, such as explanation            tribution (Gururangan et al., 2018; Ettinger, 2020;
+generation (Chen et al., 2022; Jung et al., 2022),         Lai et al., 2021; Branco et al., 2021; Tian et al.,
+where negative knowledge plays an important role           2022), raising doubts about the performance of pre-
+in the argumentation of refutation. Further analysis       vious models. Furthermore, LMs may ignore the
+shows that this problem stems from the statistical         existence of negative words when understanding
+shortcuts and reporting bias of negation during pre-       texts (Kassner and Schütze, 2020) or processing
+training. Moreover, such implicit biases can be            prompts (Jang et al., 2022), which can be allevi-
+alleviated through explicit reasoning with Chain-          ated with unlikelihood training objective (Welleck
+of-Thought prompting (Wei et al., 2022b), such as          et al., 2020) during training (Hosseini et al., 2021)
+syllogistic deduction and related fact comparison.         or specifying pragmatic contexts (Gubelmann and
+                                                       9891
+Handschuh, 2022). While most current research                 NotMadeOf (n=12)
+                                                           NotCapableOf (n=537)
+                                                                                                        MadeOf (n=37)
+                                                                                                        CapableOf (n=533)
+focuses on NLU, this work fills in a gap in the
+                                                          NotHasProperty (n=190)
+investigation of the negation phenomenon in the                  NotHasA (n=69)      13.43% 13.33%      HasProperty (n=405)
+                                                                  NotIsA (n=108)
+context of text generation.                                                                    10.13%
+                                                                                                        HasA (n=139)
+                                                                                   27.10%
+Knowledge-Grounded Language Models A                                                         20.33%
+
+major goal of NLP has been to ground LMs in                  NotDesires (n=1084)                        IsA (n=813)
+world knowledge, such as factual knowledge (Vran-                                                       Desires (n=73)
+dečić and Krötzsch, 2014) and commonsense
+knowledge (Speer et al., 2017). A line of                 Figure 2: The configuration of the CSK-PN dataset.
+work (Petroni et al., 2019; Kassner and Schütze,
+2020; Cao et al., 2021) directly probes the knowl-
+edge implicitly learned by LMs through mask-           exist widely in knowledge graphs and are com-
+infilling. However, such a probing paradigm only       monly studied by the community (Auer et al., 2007;
+works for contextual LMs such as BERT (De-             Vrandečić and Krötzsch, 2014; Speer et al., 2017).
+vlin et al., 2019), leaving generative ones, espe-     Given a triplet in the form of <s, r, o> with a sub-
+cially modern LLMs, understudied. Another line         ject concept s, a relation r and an object concept
+of work focuses on making LM-generated sen-            o, we define a negative fact as ¬r(s, o) if the truth
+tences grounded in knowledge (Petroni et al., 2020;    value of r(s, o) is False according to common-
+Liu et al., 2021). Lin et al. (2020) designed a        sense knowledge, and a (positive) fact if otherwise.
+constrained text generation task, C OMMON G EN,
+which asks a model to generate a sentence given        Dataset Statistics We build the probing dataset
+a set of concepts, testing the generative common-      (denoted as CSK-PN) based on the knowledge
+sense reasoning of LMs. However, these studies do      triples filtered by Safavi et al. (2021), which are the
+not investigate text generation grounded in negative   challenging ones sourced from ConceptNet (Speer
+knowledge, which is the focus of this work.            et al., 2017). We also remove invalid triples with
+                                                       pronouns, negation, and adjectives as subjects or
+In-Context Learning In-context learning (ICL;
+                                                       objects. The final dataset contains a total of 4,000
+Brown et al., 2020) has become a prevailing
+                                                       triples with six pairs of positive or negative rela-
+paradigm for deploying LLMs (e.g., the GPT-3 fam-
+                                                       tions (e.g., I S A and N OT I S A), and the positive and
+ily Brown et al., 2020; Chen et al., 2021; Ouyang
+                                                       negative splits have the same size (1:1). Detailed
+et al., 2022) for downstream tasks. Through ICL,
+                                                       information of CSK-PN is shown in Figure 2.
+LLMs can solve tasks directly based on input-
+output examples without parameter updates (Min
+et al., 2022a; Rubin et al., 2022). Furthermore, re-   3.2       Probing Task Formulation
+cent work (Wei et al., 2022b; Wang et al., 2022)       The most commonly used probing task for under-
+reveals that the ceiling performance determined by     standing whether LMs have certain types of knowl-
+the scaling law can be beaten with ICL by generat-     edge is mask-infilling (Devlin et al., 2019; Petroni
+ing immediate rationales, i.e., the Chain of Thought   et al., 2020; Kassner and Schütze, 2020). However,
+(CoT) prompting. Since LLMs are becoming a             this task is not suitable for generative LMs, as the
+foundational service that do not need fine-tuning,     mask must exist at the end of a sentence.
+our probing on LLMs are based on ICL.
+                                                          We argue that LLMs, which are mainly autore-
+3   Probing Protocol                                   gressive text generation models (Radford et al.,
+                                                       2019; Brown et al., 2020; Ouyang et al., 2022; Scao
+In this section, we set up an evaluation protocol      et al., 2022), should be investigated by text genera-
+to understand what LLMs know about (negative)          tion with text decoding from a large sentence space.
+commonsense knowledge of everyday concepts.            Therefore, we propose to use Constrained Sentence
+                                                       Generation (CG) as the primary task to investigate
+3.1 The CSK-PN Dataset                                 LLMs, coupled with Boolean Question Answering
+We limit the scope of the knowledge probed to          (QA) for comparison, which is a common approach
+relational knowledge between commonsense con-          to probing the belief of models (Tafjord et al., 2022;
+cepts, i.e., relational knowledge triples, which       Richardson et al., 2022).
+                                                   9892
+Task 1: Boolean Question Answering (QA)                             Metric for CG Due to the controlled task setting,
+The Boolean QA task requires LLMs to express                        which essentially forces LLMs to decide whether
+its belief about a fact by answering a yes-or-no                    and how to add a negation cue during decoding,
+question. We first transform every triplet <s, r, o>                the CG task can be efficiently evaluated by detect-
+into a yes or no question q, where we remove the                    ing the existence of negation cues (e.g., not, un-
+negation in r for negative facts. For example, a                    able, etc.) in the generations. Following the QA
+prompt goes like this:                                              task, we also use TP and TN as accuracy metrics.
+                                                                    To implement this metric, we first use keywords-
+        Answer commonsense questions with yes or no:
+        (Examples for in-context learning)                          based matching for negation cues, followed by a
+        Question: do lions live in the ocean?                       RoBERTa model (Liu et al., 2019) as a token clas-
+        Answer: no                                                  sifier looking for unmatched negation cues.5 This
+                                                                    metric produces 1 or 0 based on the finding of nega-
+where underlined texts are completed by LLMs. To
+                                                                    tion cues in a sentence. After manual inspection of
+generate the questions, we adopt InstructGPT us-
+                                                                    200 cases, we find that this metric is correct 97%
+ing in-context learning (§4.1). The questions are
+                                                                    of the time, which is reliable for evaluating such
+94% valid according to a manual inspection of 50
+                                                                    a constrained probing task. Errors are mostly due
+random cases.4
+                                                                    to double negations and ambiguous negative cues
+Task 2: Constrained Sentence Generation (CG)                        (e.g., less, opposite, etc.), which are quite rare.
+Generating texts is a direct manifestation of a                     Can we trust negation detection as the metric to
+model’s belief. However, evaluating generated                       evaluate CG? We manually evaluate the factu-
+texts is notoriously difficult in NLP, especially with-             ality of generated texts based on commonsense
+out references. Therefore, we design a keyword-                     knowledge and see whether the CG metric (detec-
+to-sentence task to make the probing more control-                  tion of negation) correlates well with humans in
+lable, which is similar to C OMMON G EN (Lin et al.,                this task. Note that only the sentences that make
+2020). Given a triple <s, r, o>, models need to gen-                common sense and adhere to the keywords con-
+erate sentences grounded in (negative) knowledge,                   straints are accepted as true during manual anno-
+i.e., add negation cues (e.g., not, unable) in the                  tation. After examining 100 cases, we find that
+sentence if necessary, e.g.,                                        the agreement between human judgment and this
+        Write a short and factual sentence according to             metric achieves 95%. This is predictable, since this
+        commonsense based on the keywords:                          task is rather easy and constrained, yet LLMs do
+        (Examples for in-context learning)
+        Keywords: lion, located at, ocean
+                                                                    not solve it well, especially not very consistent with
+        Sentence: lions don’t live in the ocean.                    the QA task. Errors made by the metric are mostly
+                                                                    because 1) generated sentences use uncertain ad-
+We remove the N OT prefix from the negated re-                      verbs to modify the sentences, e.g., may, some, etc.;
+lations. Note that we allow the paraphrasing of                     2) noisy triples in the dataset. Overall, we think
+the input keywords, making it a soft-constrained                    this metric is trustworthy and evaluates this task far
+sentence generation task.                                           better than most popular text generation metrics.
+
+3.3 Evaluation Metrics                                              4       Do LLMs have negative commonsense
+Metric for QA The QA task can be easily eval-                               knowledge?
+uated by checking the generated token yes and no                    In this section, we use CSK-PN to investigate
+(cased and uncased). We define TP and TN as                         LLMs’ belief about negative commonsense knowl-
+the accuracy on the positive and negative splits in                 edge. More importantly, can LLMs generate texts
+CSK-PN, and Acc as the accuracy on the whole                        grounded in negative commonsense knowledge?
+dataset (i.e., Acc = (TP + TN)/2, since the posi-
+tive and negative splits have equal size). For rare                 4.1      Probing LLMs with In-Context Learning
+scenarios (< 1%) that LLMs do not generate a yes                    To execute the probing tasks without fine-tuning,
+or no token, we compare the conditional probabil-                   we exploit the few-shot in-context learning (Brown
+ity of these two tokens.
+                                                                        5
+                                                                         The model is trained on the C ONDAQA dataset (Ravichan-
+    4
+    Bad cases are mostly due to the quality of the triples, e.g.,   der et al., 2022), which has 14,182 QA pairs with more than
+<swim, has property, full of water>: is swimming full of water?     200 unique negation cues.
+
+                                                                9893
+  Model        k
+                     Perf. on QA       Perf. on CG
+                                                       Cns.
+                                                                 instructions), and text-davinci-003 (further
+                   TP    TN   Acc    TP    TN    Acc             tuned with reinforcement learning with human
+ Flan-T5       2 79.1 84.0 81.5 96.5 19.4 57.9 56.2              feedback, RLHF).8 For deterministic predictions,
+  (3B)        10 82.7 80.2 81.4 96.9 19.8 58.4 59.7              all models use greedy decoding (temperature as
+ Flan-T5       2 84.1 81.0 82.6 97.5 15.9 56.7 57.7              0.0)9 . We use InstructGPT002 as the default LLM
+  (11B)       10 85.4 80.8 83.1 97.6 28.2 62.9 65.9              for experiments due to its powerful capability and
+  GPT-3
+               2 76.0 58.9 67.5 83.9 28.4 56.1 54.4              the fact that it has been extensively researched and
+              10 74.7 66.9 70.8 30.9 79.8 55.3 53.7              applied as of the time of writing this paper. We
+ Codex002
+               2 89.2 81.7 85.4 96.6 38.0 67.3 70.1              also include the recent ChatGPT (OpenAI, 2022),
+              10 88.1 81.8 84.9 93.2 68.8 81.0 84.5              which is built upon InstructGPT and trained with
+Instruct- 2 85.2 51.1 68.2 90.1 21.9 56.0 67.3                   dialogue data and RLHF.
+GPTcurie
+    001   10 70.0 65.8 67.9 71.5 40.8 56.1 58.2
+ Instruct-     2 78.1 83.6 80.9 94.9 25.0 60.0 57.7              4.2    The Belief Conflict
+ GPT001       10 79.5 81.6 80.6 79.2 55.4 67.3 68.2
+ Instruct-     2 81.7 86.1 83.9 92.9 48.7 72.1 71.2
+                                                                 We report the results of the probing tasks in Table 1
+ GPT002       10 84.1 84.7 84.4 88.9 61.4 75.1 77.5              for LLMs with 2- and 10-shot in-context learning.
+ Instruct-     2 87.9 81.3 84.6 95.1 58.1 76.6 80.5              Based on the results, we discover a clear conflict
+ GPT003       10 89.0 79.5 84.2 91.1 73.6 82.3 87.9              of LLMs, that LLMs behave inconsistently in QA
+               2 82.9 82.0 82.4 89.8 69.8 79.8 79.2              and CG tasks on negative commonsense knowl-
+ ChatGPT
+              10 81.5 85.7 83.6 90.4 78.4 84.4 84.1              edge, which we term belief conflict. Such conflict
+                                                                 manifests itself in two ways: the gap between TP
+Table 1: Main results of different LLMs, which are
+                                                                 and TN on the CG task, and the gap of TN be-
+obtained with k examples (|E + | = |E − |). Cns. denotes
+the consistency between QA and CG. The best results
+                                                                 tween the QA and CG tasks. In general, belief
+are bolded and the second best are underlined.                   conflicts exist across LLMs of various sizes and
+                                                                 structures. Ablated results per relation is presented
+                                                                 in Appendix B.3.
+et al., 2020) ability of LLMs. We manually write 32                 When specifically asked, LLMs can distin-
+examples, with 16 examples for positive knowledge                guish between positive and negative commonsense
+(denoted as E + ) and 16 for negative knowledge                  knowledge, as evidenced by stable and balanced
+(E − ).6 In the experiments, we randomly sample                  scores for positive and negative splits in the QA
+a total number of k examples from E + and E − ,                  task. For CG, LLMs seem to accurately gener-
+where |E + | = |E − | if not specified.7                         ate sentences grounded in positive knowledge ac-
+Choices of LLMs We use LLMs that can do                          cording to TP. However, they perform poorly in
+in-context learning, so that models stay fixed dur-              negative knowledge, even for the best-performing
+ing probing. We choose Flan-T5 (Chung et al.,                    LLMs, i.e., Codex002 , InstructGPT002,003 , as
+2022), GPT-3 (175B, davinci; Brown et al.,                       shown by the lower bars of the CG on the neg-
+2020) and GPT-3.5 series, e.g. Codex (≥175B,                     ative split.10 Also, the inconsistency between QA
+code-davinci-002; Chen et al., 2021) and                         and CG reflects this conflict, as the content gener-
+InstructGPT (Ouyang et al., 2022): all are ca-                   ated by a trustworthy AI system should consistent
+pable of in-context learning. Flan-T5 is an                      and faithful to what it believes. We present a case
+encoder-decoder LLM with instruction tuning                      study and error analysis in Appendix B.5.
+based on T5 (Raffel et al., 2020). Codex ex-                        Among these LLMs, InstructGPT003 and Chat-
+tends GPT-3 through code training and instruc-                   GPT achieve much better results than others. We
+tion fine-tuning, and InstructGPT extends Codex                  assume that such improvements are probably a re-
+through further tuning of the instructions. In our               sult of training LLMs with human feedback (e.g.,
+experiments, we mainly explore GPT-3.5 mod-                          8
+                                                                       https://beta.openai.com/docs/
+els. We use the 6.7B variant of InstructGPT                      model-index-for-researchers
+                                                                     9
+(text-curie-001) and the ≥175B variants,                               We find our findings in the experiments are consistent for
+                                                                 different temperatures, according to Appendix B.1.
+i.e., text-davinci-001 (tuned on instruc-                           10
+                                                                       The only exception is GPT-3 (davinci). It scores
+tions), text-davinci-002 (tuned on code and                      poorly on the positive split with 10-shot learning, with TN
+                                                                 exceeding TP. This happens when k ≥ 4, while its 6.7B
+   6
+       Examples can be found in Appendix A.1                     variant (curie) behaves consistently with others. Detailed
+   7
+       Example prompts for two tasks are in Appendix A.2.        results for GPT-3 are in Appendix B.2.
+
+                                                              9894
+    100                          100                                 100                           100
+      80                          80                                  80                            80
+                                                                      60                            60
+      60                          60
+                         TP                           TP              40                            40
+      40                 TN       40                  TN                      question-to-answer          keywords-to-sentence
+                        Acc                          Acc
+                                                                      20      keywords-to-answer
+                                                                                                    20     question-to-sentence
+      20                          20                                   0                             0
+           024 8 16         32         024 8 16          32                TP      TN     Acc            TP      TN      Acc
+               k-shot ICL                  k-shot ICL
+                                                                     (a) Results (%) on QA.        (b) Results (%) on CG.
+    (a) Results (%) on QA.       (b) Results (%) on CG.
+
+                                                                 Figure 4: Results of InstructGPT002 when switching
+Figure 3: Performance change for InstructGPT002 on
+                                                                 the task inputs between question and keywords, where
+both tasks as the number of example (k) increases.
+                                                                 k = 10. Columns with error bars show the ranges of the
+                                                                 influence brought by different instruction wordings.
+RLHF) based on the disclosed differences between
+them by OpenAI. Another evidence is that the re-
+                                                                 As for the question-to-sentence task:
+cent ChatGPT also expresses great capabilities of
+generating negative knowledge, even better than                        Answer the question by writing a short sentence
+                                                                       that contains correct common sense knowledge.
+InstructGPT003 in this regard. We hypothesize that                     Question: do lions live in the ocean?
+this is because negative knowledge and rebuttal                        Sentence: lions don’t live in the ocean.
+statements are frequently used in human feedback
+                                                                 Results In Figure 4(a), we see a 4-point perfor-
+to steer the model, e.g., admitting errors or instruct-
+                                                                 mance decrease given keywords as input for QA,
+ing the model not to do something. To validate
+                                                                 which is not significant in comparison, and the
+this claim, future work could conduct more rigor-
+                                                                 results on the positive and negative splits are as
+ous comparisons on public available LLMs, which
+                                                                 balanced as before. This implies that LLMs’ imbal-
+would be an interesting research problem to trace
+                                                                 anced performance in CG is not due to the use of
+certain abilities of LLMs to a specific period of
+                                                                 keywords as input. In Figure 4(b), CG performance
+training.
+                                                                 is greatly improved given question as input, approx-
+Sensitivity to the Number of In-Context Exam-                    imating QA results. Our assumption is that CG is
+ples To find whether adding more examples helps                  basically transformed into QA, because the textual
+solve the probing tasks, we increase the in-context              corpus has seen too many negated texts following
+examples from 0 to 32. Figure 3(a) shows a con-                  a Boolean question and rephrasing it, e.g., “...? No,
+sistent finding with previous results, that LLMs are             lions do not live in the ocean.” To validate this, we
+so good at answering yes or no questions that the                provide LLMs with zero-shot question-to-sentence
+number of examples does not affect much of the                   instructions, and check if the output sentences start
+QA performance. Figure 3(b) shows that, adding                   with yes or no given an input question. If our
+more examples helps generate both positive and                   assumption is correct, models without examples
+negative commonsense knowledge. However, the                     will be biased toward QA even with a question-to-
+gap between TP and TN in the CG task still exists.               sentence instruction. The results of models opti-
+                                                                 mized for instructions show that: 84.58% of sen-
+5     Analysis on the Belief Conflict                            tences generated by InstructGPT002 begin with yes
+5.1        Could keywords as task input hinder the               or no, and 80.28% for InstructGPT003 . With 10
+           manifestation of LLMs’ belief?                        examples, this number drops to less than 4%. Thus,
+                                                                 these results confirms that question-to-sentence
+The task input difference for CG and QA leads to a               generation degenerates to the QA task.
+concern that LMs may find it easier to understand                   As a result, we conclude that the keyword-to-
+natural questions (QA) than keywords (CG); hence,                sentence (CG) is an appropriate and challenging
+the belief conflict. In response to this concern, we             task to probe generative LLMs. Employing key-
+change the input of the two tasks. For example, the              words as input does not impact LLMs’ grasp of the
+keywords-to-answer task takes the form as:                       task (Figure 4(a)), while using questions as input
+       Can these keywords form a truthful common sense           may produce shortcuts that obscure whether LLMs
+       fact? Answer with yes or no.
+       Keywords: lion, located at, ocean                         can generate texts of negative commonsense knowl-
+       Answer: no                                                edge (Figure 4(b)). Even if we use different instruc-
+                                                              9895
+tion wordings (instructions are at Appendix A.2),               100
+none escapes the belief conflict, as shown by the                90
+error bars in Figure 4. Additionally, this experi-     TP (%)    80                     code-davinci-002       text-davinci-003
+                                                                                        text-davinci-002
+ment brings up the problem of how LLMs encode                    70 0~100     100~200      200~500         500~1000       >1000
+commonsense knowledge. According to this exper-                   (n=1399)    (n=227)      (n=196)          (n=74)       (n=104)
+                                                                 80
+iment, commonsense knowledge seems to be stored
+                                                                 70
+
+                                                        TN (%)
+in LLMs in the same manner as it is in the corpus.               60
+LLMs struggle to generalize them, as evidenced by                50
+the keyword inputs for negative knowledge that do                40
+                                                                    0~100     100~200      200~500         500~1000       >1000
+not have a statistical shortcut from pre-training.                (n=1189)    (n=245)      (n=306)          (n=134)      (n=126)
+                                                                             Keywords Co-occurrence Buckets
+5.2   Will the keyword co-occurrence within
+                                                       Figure 5: 10-shot CG results of three best-performing
+      corpus affect LLMs’ generation?                  LLMs on different co-occurrence buckets. a ∼ b de-
+LLMs are essentially statistical models. In this       notes that keywords co-occurrence in a bucket ranges
+experiment, we investigate the influence of word       from a to b. n is the number of triples in a bucket.
+co-occurrence in the corpus on the CG task, which
+is one of the most common statistical factors. We      LLMs are encouraged to generate more negations.
+categorize the dataset into buckets based on key-
+words co-occurrence on naturally existing corpora      Results Figure 6(a), 6(b) adjust the ratio η =
+such as OMCS (706K sentences, Singh et al., 2002)      |E − |
+                                                              while fixing k. Figure 6(a) shows that
+                                                         k
+and Wikipedia (1M, a subset built by Gao et al.        InstructGPT002 is very resilient against the ex-
+(2021)). The
+         P co-occurrence for each triple is calcu-     ample ratio in the QA task, except for extreme
+             cooccur(wi ,wj )
+lated by i,j ls lo           , where wi ∈ s, wj ∈ o,   cases where only E + s or E − s are presented (i.e.,
+and ls , lo denote the word count of subject s and     η ∈ {0, 1}). This also demonstrates the robust-
+object o, discarding stopwords.                        ness of adopting QA results as LLMs’ belief. In
+   From Figure 5, we have an interesting finding       Figure 6(b), the CG performance on the negative
+that three of the best-performing LLMs from Ta-        split is improving as η grows. The turning point
+ble 1 suffer from a performance drop at the > 1000     appears somewhere near η ∈ (0.9, 1) when E −
+bucket of the negative split (TN), the most frequent   takes over all the examples. Also, TP drops as
+data bucket. In contrast, LLMs achieve the best per-   E + becomes less. What if we add E − without
+formance this bucket on the positive split (TP). We    dropping E + ? In Figure 6(c), 6(d), we keep E +
+conclude that the hard-to-generate negative knowl-     as constant (|E + | = 5) and increase |E − | from
+edge for LLMs tend to be those in which they have      5 to 15. With enough amount of E + , TN to CG
+seen many subjects and objects appear together.        continues to increase without sacrificing TP.
+For example, worm and bird usually co-occur in            Overall, Figure 6 presents the possibility that we
+sentences, but models tend to generate “worms can      can overcome the belief conflict brought about by
+eat birds.” Such statistical shortcuts hinder the      reporting bias by increasing negated texts in the
+generation of negative knowledge. This is also val-    training data or in-context examples. However, this
+idated by TP results, where LLMs find it easy to       is not always feasible in practice.
+generate sentences with frequently co-occurring
+entities in a positive fact.                           5.4 Do Chain-of-Thought help generate texts
+                                                           with negative commonsense knowledge?
+5.3   How does the balance of positive and
+                                                       Can the implicit reporting bias be overcome by
+      negative examples affect negation bias?
+                                                       explicit reasoning? Recent studies (Wei et al.,
+A possible answer for the difference between CG        2022b,a) discover that the Chain-of-Thought (CoT)
+and QA is that: LMs suffer from reporting bias         prompting technique shows the emergent reason-
+of negation during pre-training, while answering       ing abilities of LLMs. CoT generates intermediate
+questions with yes or no is quite balanced in the      steps in natural language, extending <input, output>
+corpora. We validate this problem by mitigating        to <input, chain-of-thought, output>. We adopt
+the negation bias through adjusting the examples       two instances of CoT: deductive reasoning and fact
+of positive and negative cases. With more E − s,       comparison, whose examples are manually written,
+                                                   9896
+  100                             100                                                        k = 2 (1:1)     k = 10 (1:1)
+                                                                     Model       CoT
+    80                             80                                                      TP    TN   Acc   TP    TN   Acc
+
+    60                             60                                         None      96.6 38.0 67.3 93.2 68.8 81.0
+                           TP                             TP
+                                                                     Codex002 Deduction 86.9 56.6 71.7 83.5 73.0 78.3
+    40                     TN      40                     TN                  Fact      92.9 53.7 73.3 86.8 76.6 81.7
+                          Acc                            Acc
+    20                             20                                            None      92.9 51.4 72.1 88.9 61.4 75.1
+         0 0.2 0.4 0.6 0.8 1            0 0.2 0.4 0.6 0.8 1          Instruct-
+                                                                                 Deduction 87.0 57.3 72.1 84.3 70.7 77.5
+            ηQA (k = 10)                   ηCG (k = 10)              GPT002
+                                                                                 Fact      89.1 55.5 72.2 85.5 69.2 77.4
+   (a) Results (%) on QA.         (b) Results (%) on CG.
+                                                                     Table 2: Performance on the CG task when enhanced
+  100                             100                                with different types of CoT prompting, i.e., deductive
+                                                                     argumentation (Deduction) and fact comparison (Fact).
+   80                              80
+   60                              60
+                          TP                              TP
+   40                     TN       40                     TN         example, the related fact for “lions do not live in
+   20
+                         Acc
+                                   20
+                                                         Acc
+                                                                     the ocean” is “lions live in the land”. A negative
+         5 7 9 11 13 15                  5 7 9 11 13 15              fact often comes with a core fact that is true, which
+        |E − | (k = 5 + |E − |)         |E − | (k = 5 + |E − |)
+                                                                     has been shown to be useful in explaining why a
+   (c) Results (%) on QA.          (d) Results (%) on CG.            claim is wrong (Cheng et al., 2022). Therefore, we
+                                                                     extend the <input, output> in each example by <in-
+Figure 6: Results of InstructGPT002 as the numbers                   put, “Related fact: ...”, output>. For positive cases,
+of E + and E − change. Figure (a) and (b) increase                   we write a related fact for consistent examples.
+η = |E − |/k while fixing k = 10. Figure (c) and (d)
+add more E − while fixing |E + | = 5.                                Results Table 2 displays the results of Codex002
+                                                                     and InstructGPT002 . Both CoT instances improve
+which are in Appendix A.1.                                           LLMs’ performance on TN, showing the benefit
+                                                                     of explicit reasoning for deriving negative knowl-
+Deductive Reasoning Prompting We instantiate                         edge, where different models prefer different ratio-
+CoT with deductive argumentation in the form of                      nales. However, the increase in TN comes at the ex-
+syllogism (two premises and one conclusion). The                     pense of a performance drop in TP. This is mostly
+prompt is extended into <input, “Let’s think step                    because models previously predicted most of the
+by step: ...”, output> with intermediate steps. A                    cases to be positive, making TP irrationally high.
+natural way to identify a negative proposition is de-                Overall, these results suggest that, even though
+ductive reasoning with modus tollens, i.e., denying                  LLMs picked up implicit bias during pre-training,
+the consequent (Speranza and Horn, 2010; Bobzien,                    it can be overcome by making the reasoning chain
+2020): “If P then Q. Not Q. Therefore, Not P.” For                   explicit.
+example, “If something is a intelligent being (P),                      Nevertheless, deductive reasoning seems to be
+then it must have the ability to think (Q). Comput-                  more rigid about confirming commonsense knowl-
+ers cannot think (Not Q). Therefore, computers are                   edge with a lower TP. This can be attributed to
+not intelligent beings (Not P).”                                     the fact that commonsense knowledge contains ex-
+   To reason about positive propositions, we                         ceptions (Allaway et al., 2022), e.g., birds can fly
+use modus ponens logic, i.e., affirming the an-                      but penguins can’t. Thus, LLMs with deductive
+tecedent (Bobzien, 2020): “If P then Q. P. There-                    reasoning may hold concerns about exceptions for
+fore, Q.” For example, “Things with lightweight                      confirming a commonsense fact, leading to a signif-
+bodies and strong wing muscles (P) can usually                       icant lower TP than fact comparison. We conduct a
+fly (Q). Birds have these physical characteristics                   simple experiment of exceptions in Appendix B.4,
+(P). Therefore, birds can fly. (Q)” Notice that the                  which shows that adding adverbs of degree (e.g.,
+deduction is not strictly logical but is enough to                   usually, generally) in the texts alleviates the belief
+arrive at commonsense knowledge.                                     conflict, but the problem still exists.
+Fact Comparison Prompting Deduction empha-                           6   Closing Remarks
+sizes the intensional aspects of the fact, whereas
+fact comparison highlights the extensional compar-                   In this study, we explored and quantified the lim-
+ison between counterpart facts (Fitting, 2006). For                  itations of LLMs in generating texts grounded in
+                                                                  9897
+negative commonsense knowledge that they seem           LLMs’ belief about negative knowledge in more
+to know, a phenomenon we term as “belief con-           complex tasks are beyond the scope of this work,
+flict”. To investigate this, we probe LLMs with a       but really interesting and challenging. Also, other
+constrained sentence generation (CG) task, coupled      types of knowledge could be studied in a similar
+with a QA task. Our experiments demonstrated the        way, such as negative social, temporal and spatial
+existence of the belief conflict in all LLMs when       knowledge, to name but a few.
+it comes to negative knowledge, which is mostly            In this paper, we identify the belief conflict prob-
+brought by quantifiable statistical shortcuts such as   lem in LLMs through extensive experiments. Fu-
+keywords co-occurrence. We also see that this can       ture work could explore more advanced training
+be lessened by giving more in-context examples of       or prompting-based methods to improve the con-
+negative knowledge or by using a chain-of-thought       sistency between a model’s belief and its actions
+(CoT) prompting method to explain the explicit rea-     (text generation for various tasks), especially for
+soning process for deriving negative knowledge.         negative knowledge.
+   With the rapid increase of the study on language-
+based reasoning (Clark et al., 2020; Tafjord et al.,    Ethical Statement
+2021; Wei et al., 2022b), there would be cause for      The commonsense knowledge triples from Con-
+concern if LLMs have trouble generating proofs or       ceptNet may include offensive and biased sen-
+reasoning steps with negative knowledge. With all       tences, which may also exist in the dataset that we
+the good scores they achieve at QA tasks, whether       use in this work. As stated before, the identification
+they can be trusted with their knowledge expressed      of commonsense negative knowledge may slightly
+during generation, which is one of the most promi-      vary from people from different cultural and social
+nent way of human-AI interaction, is still question-    background when considering exceptions.
+able. In this sense, the study of negative knowledge
+creates a good testbed for assessing real language-     Acknowledgement
+based reasoning skills for LLMs without the statis-
+                                                        We thank the anonymous reviewers for their valu-
+tical heuristics they memorized. We hope that the
+                                                        able comments. We also thank Siyu Yuan and
+findings in this work could raise the awareness of
+                                                        Jian Xie from Fudan University, and Kexun Zhang,
+the community on negative knowledge for LLMs
+                                                        Yujian Liu, Qingxiu Dong and Xuandong Zhao
+in downstream text generation tasks.
+                                                        from UC Santa Barbara for their useful sugges-
+                                                        tions and discussions for the manuscript. This re-
+Limitations
+                                                        search is funded by the Science and Technology
+In this work, we highlight that the probing tasks are   Commission of Shanghai Municipality Grant (No.
+placed in the commonsense domain that are gen-          22511105902).
+erally acknowledged by people in most situations.
+We do not consider the exceptions of commonsense
+                                                        References
+knowledge, which has gradually drawn some re-
+search attentions (Do and Pavlick, 2021; Allaway        Shourya Aggarwal, Divyanshu Mandowara, Vishwa-
+                                                          jeet Agrawal, Dinesh Khandelwal, Parag Singla, and
+et al., 2022). Exceptions are important for negative
+                                                          Dinesh Garg. 2021. Explanations for Common-
+knowledge and are widely used in tasks such as            senseQA: New Dataset and Models. In Proceedings
+argumentation or deductive reasoning. However,            of the 59th Annual Meeting of the Association for
+in the experiments, we find that such exceptions          Computational Linguistics and the 11th International
+might make models generate commonsense state-             Joint Conference on Natural Language Processing
+                                                          (Volume 1: Long Papers), pages 3050–3065, Online.
+ments with uncertain adverbs (e.g., may, some, etc.)      Association for Computational Linguistics.
+on rare cases.
+   Another limitation of this work is that the prob-    Emily Allaway, Jena D Hwang, Chandra Bhagavatula,
+                                                          Kathleen McKeown, Doug Downey, and Yejin Choi.
+ing task is based only on relational commonsense          2022. Penguins don’t fly: Reasoning about generics
+knowledge from commonsense knowledge bases                through instantiations and exceptions. arXiv preprint
+such as ConceptNet. We design the keyword-to-             arXiv:2205.11658.
+sentence task mostly for the purpose of convenient      Hiba Arnaout, Simon Razniewski, Gerhard Weikum,
+evaluation for text generation, which is notoriously      and Jeff Z. Pan. 2021. Negative knowledge for open-
+known as difficult. The probing and evaluation of         world wikidata. In Companion Proceedings of the
+
+                                                    9898
+  Web Conference 2021, WWW ’21, page 544–551,                Knowledgeable or educated guess? revisiting lan-
+  New York, NY, USA. Association for Computing               guage models as knowledge bases. In Proceedings
+  Machinery.                                                 of the 59th Annual Meeting of the Association for
+                                                             Computational Linguistics and the 11th International
+Hiba Arnaout, Simon Razniewski, Gerhard Weikum,              Joint Conference on Natural Language Processing
+  and Jeff Z. Pan. 2022. Uncommonsense: Informative          (Volume 1: Long Papers), pages 1860–1874, Online.
+  negative knowledge about everyday concepts. In Pro-        Association for Computational Linguistics.
+  ceedings of the 31st ACM International Conference
+  on Information & Knowledge Management, CIKM             Jiangjie Chen, Rui Xu, Ziquan Fu, Wei Shi, Zhongqiao
+  ’22, page 37–46, New York, NY, USA. Association            Li, Xinbo Zhang, Changzhi Sun, Lei Li, Yanghua
+  for Computing Machinery.                                   Xiao, and Hao Zhou. 2022. E-KAR: A benchmark
+                                                             for rationalizing natural language analogical reason-
+Sören Auer, Christian Bizer, Georgi Kobilarov, Jens          ing. In Findings of the Association for Computa-
+  Lehmann, Richard Cyganiak, and Zachary Ives. 2007.         tional Linguistics: ACL 2022, pages 3941–3955,
+  Dbpedia: A nucleus for a web of open data. In The          Dublin, Ireland. Association for Computational Lin-
+  semantic web, pages 722–735. Springer.                     guistics.
+Stephen Barker and Mark Jago. 2012. Being positive        Mark Chen, Jerry Tworek, Heewoo Jun, Qiming
+   about negative facts. Philosophy and Phenomenolog-      Yuan, Henrique Ponde de Oliveira Pinto, Jared Ka-
+   ical research, pages 117–138.                           plan, Harri Edwards, Yuri Burda, Nicholas Joseph,
+                                                           Greg Brockman, et al. 2021. Evaluating large
+Susanne Bobzien. 2020. Ancient Logic. In Edward N.         language models trained on code. arXiv preprint
+  Zalta, editor, The Stanford Encyclopedia of Philos-      arXiv:2107.03374.
+  ophy, Summer 2020 edition. Metaphysics Research
+  Lab, Stanford University.                               Sijie Cheng, Zhiyong Wu, Jiangjie Chen, Zhixing Li,
+                                                             Yang Liu, and Lingpeng Kong. 2022. Unsuper-
+Rishi Bommasani, Drew A Hudson, Ehsan Adeli,                 vised explanation generation via correct instantia-
+  Russ Altman, Simran Arora, Sydney von Arx,                 tions. arXiv preprint arXiv:2211.11160.
+  Michael S Bernstein, Jeannette Bohg, Antoine Bosse-
+  lut, Emma Brunskill, et al. 2021. On the opportuni-     Aakanksha Chowdhery, Sharan Narang, Jacob Devlin,
+  ties and risks of foundation models. arXiv preprint       Maarten Bosma, Gaurav Mishra, Adam Roberts,
+  arXiv:2108.07258.                                         Paul Barham, Hyung Won Chung, Charles Sutton,
+                                                            Sebastian Gehrmann, et al. 2022. Palm: Scaling
+Ruben Branco, António Branco, João António Ro-              language modeling with pathways. arXiv preprint
+  drigues, and João Ricardo Silva. 2021. Shortcutted        arXiv:2204.02311.
+  commonsense: Data spuriousness in deep learning
+  of commonsense reasoning. In Proceedings of the         Hyung Won Chung, Le Hou, Shayne Longpre, Bar-
+  2021 Conference on Empirical Methods in Natural           ret Zoph, Yi Tay, William Fedus, Eric Li, Xuezhi
+  Language Processing, pages 1504–1521, Online and          Wang, Mostafa Dehghani, Siddhartha Brahma, et al.
+  Punta Cana, Dominican Republic. Association for           2022. Scaling instruction-finetuned language models.
+  Computational Linguistics.                                arXiv preprint arXiv:2210.11416.
+
+Tom Brown, Benjamin Mann, Nick Ryder, Melanie             Peter Clark, Oyvind Tafjord, and Kyle Richardson. 2020.
+  Subbiah, Jared D Kaplan, Prafulla Dhariwal, Arvind        Transformers as soft reasoners over language. In Pro-
+  Neelakantan, Pranav Shyam, Girish Sastry, Amanda          ceedings of the Twenty-Ninth International Joint Con-
+  Askell, Sandhini Agarwal, Ariel Herbert-Voss,             ference on Artificial Intelligence, IJCAI-20, pages
+  Gretchen Krueger, Tom Henighan, Rewon Child,              3882–3890. International Joint Conferences on Arti-
+  Aditya Ramesh, Daniel Ziegler, Jeffrey Wu, Clemens        ficial Intelligence Organization. Main track.
+  Winter, Chris Hesse, Mark Chen, Eric Sigler, Ma-
+  teusz Litwin, Scott Gray, Benjamin Chess, Jack          Jacob Devlin, Ming-Wei Chang, Kenton Lee, and
+  Clark, Christopher Berner, Sam McCandlish, Alec            Kristina Toutanova. 2019. BERT: Pre-training of
+  Radford, Ilya Sutskever, and Dario Amodei. 2020.           deep bidirectional transformers for language under-
+  Language models are few-shot learners. In Ad-              standing. In Proceedings of the 2019 Conference of
+  vances in Neural Information Processing Systems,           the North American Chapter of the Association for
+  volume 33, pages 1877–1901. Curran Associates,            Computational Linguistics: Human Language Tech-
+  Inc.                                                       nologies, Volume 1 (Long and Short Papers), pages
+                                                            4171–4186, Minneapolis, Minnesota. Association for
+Oana-Maria Camburu, Tim Rocktäschel, Thomas                  Computational Linguistics.
+  Lukasiewicz, and Phil Blunsom. 2018. e-snli: Natu-
+  ral language inference with natural language explana-   Nam Do and Ellie Pavlick. 2021. Are rotten apples edi-
+  tions. In Advances in Neural Information Processing       ble? challenging commonsense inference ability with
+  Systems, volume 31. Curran Associates, Inc.               exceptions. In Findings of the Association for Com-
+                                                            putational Linguistics: ACL-IJCNLP 2021, pages
+Boxi Cao, Hongyu Lin, Xianpei Han, Le Sun, Lingy-           2061–2073, Online. Association for Computational
+  ong Yan, Meng Liao, Tong Xue, and Jin Xu. 2021.           Linguistics.
+
+                                                      9899
+Allyson Ettinger. 2020. What BERT is not: Lessons         Nora Kassner and Hinrich Schütze. 2020. Negated and
+  from a new suite of psycholinguistic diagnostics for      misprimed probes for pretrained language models:
+  language models. Transactions of the Association for      Birds can talk, but cannot fly. In Proceedings of the
+  Computational Linguistics, 8:34–48.                       58th Annual Meeting of the Association for Compu-
+                                                            tational Linguistics, pages 7811–7818, Online. Asso-
+Melvin Fitting. 2006. Intensional logic.                    ciation for Computational Linguistics.
+Tianyu Gao, Xingcheng Yao, and Danqi Chen. 2021.          Nora Kassner, Oyvind Tafjord, Hinrich Schütze, and
+  SimCSE: Simple contrastive learning of sentence em-       Peter Clark. 2021. BeliefBank: Adding memory to a
+  beddings. In Proceedings of the 2021 Conference           pre-trained language model for a systematic notion
+  on Empirical Methods in Natural Language Process-         of belief. In Proceedings of the 2021 Conference
+  ing, pages 6894–6910, Online and Punta Cana, Do-          on Empirical Methods in Natural Language Process-
+  minican Republic. Association for Computational           ing, pages 8849–8861, Online and Punta Cana, Do-
+  Linguistics.                                              minican Republic. Association for Computational
+Reto Gubelmann and Siegfried Handschuh. 2022. Con-          Linguistics.
+  text matters: A pragmatic study of PLMs’ negation
+                                                          Yuxuan Lai, Chen Zhang, Yansong Feng, Quzhe Huang,
+  understanding. In Proceedings of the 60th Annual
+                                                            and Dongyan Zhao. 2021. Why machine reading
+  Meeting of the Association for Computational Lin-
+                                                            comprehension models learn shortcuts? In Find-
+  guistics (Volume 1: Long Papers), pages 4602–4621,
+                                                            ings of the Association for Computational Linguis-
+  Dublin, Ireland. Association for Computational Lin-
+                                                            tics: ACL-IJCNLP 2021, pages 989–1002, Online.
+  guistics.
+                                                            Association for Computational Linguistics.
+Suchin Gururangan, Swabha Swayamdipta, Omer Levy,
+  Roy Schwartz, Samuel Bowman, and Noah A. Smith.         Bill Yuchen Lin, Wangchunshu Zhou, Ming Shen, Pei
+  2018. Annotation artifacts in natural language infer-     Zhou, Chandra Bhagavatula, Yejin Choi, and Xiang
+  ence data. In Proceedings of the 2018 Conference of       Ren. 2020. CommonGen: A constrained text gen-
+  the North American Chapter of the Association for         eration challenge for generative commonsense rea-
+  Computational Linguistics: Human Language Tech-           soning. In Findings of the Association for Computa-
+  nologies, Volume 2 (Short Papers), pages 107–112,         tional Linguistics: EMNLP 2020, pages 1823–1840,
+  New Orleans, Louisiana. Association for Computa-          Online. Association for Computational Linguistics.
+  tional Linguistics.
+                                                          Ye Liu, Yao Wan, Lifang He, Hao Peng, and Philip S. Yu.
+Laurence R. Horn and Heinrich Wansing. 2022. Nega-          2021. Kg-bart: Knowledge graph-augmented bart
+  tion. In Edward N. Zalta and Uri Nodelman, editors,       for generative commonsense reasoning. Proceedings
+  The Stanford Encyclopedia of Philosophy, Winter           of the AAAI Conference on Artificial Intelligence,
+  2022 edition. Metaphysics Research Lab, Stanford          35(7):6418–6425.
+  University.
+                                                          Yinhan Liu, Myle Ott, Naman Goyal, Jingfei Du, Man-
+Md Mosharaf Hossain, Dhivya Chinnappa, and Eduardo          dar Joshi, Danqi Chen, Omer Levy, Mike Lewis,
+ Blanco. 2022. An analysis of negation in natural lan-      Luke Zettlemoyer, and Veselin Stoyanov. 2019.
+ guage understanding corpora. In Proceedings of the         Roberta: A robustly optimized bert pretraining ap-
+ 60th Annual Meeting of the Association for Compu-          proach. arXiv preprint arXiv:1907.11692.
+ tational Linguistics (Volume 2: Short Papers), pages
+ 716–723, Dublin, Ireland. Association for Computa-       Charles MacDonald. 1965. The role of negation in hu-
+ tional Linguistics.                                        man knowledge. Laval théologique et philosophique,
+                                                            21(1):80–114.
+Arian Hosseini, Siva Reddy, Dzmitry Bahdanau, R De-
+  von Hjelm, Alessandro Sordoni, and Aaron Courville.     Sewon Min, Mike Lewis, Luke Zettlemoyer, and Han-
+  2021. Understanding by understanding not: Model-          naneh Hajishirzi. 2022a. MetaICL: Learning to learn
+  ing negation in language models. In Proceedings of        in context. In Proceedings of the 2022 Conference of
+  the 2021 Conference of the North American Chap-           the North American Chapter of the Association for
+  ter of the Association for Computational Linguistics:     Computational Linguistics: Human Language Tech-
+  Human Language Technologies, pages 1301–1312,             nologies, pages 2791–2809, Seattle, United States.
+  Online. Association for Computational Linguistics.        Association for Computational Linguistics.
+
+Joel Jang, Seonghyeon Ye, and Minjoon Seo. 2022. Can      Sewon Min, Xinxi Lyu, Ari Holtzman, Mikel Artetxe,
+   large language models truly understand prompts? a        Mike Lewis, Hannaneh Hajishirzi, and Luke Zettle-
+   case study with negated prompts. arXiv preprint          moyer. 2022b. Rethinking the role of demonstra-
+   arXiv:2209.12711.                                        tions: What makes in-context learning work? arXiv
+                                                            preprint arXiv:2202.12837.
+Jaehun Jung, Lianhui Qin, Sean Welleck, Faeze Brah-
+   man, Chandra Bhagavatula, Ronan Le Bras, and           Marvin Minsky. 1997. Negative expertise.
+  Yejin Choi. 2022. Maieutic prompting: Logically
+   consistent reasoning with recursive explanations.      George Molnar. 2000. Truthmakers for negative truths.
+   arXiv preprint arXiv:2205.11822.                         Australasian Journal of philosophy, 78(1):72–86.
+
+                                                      9900
+OpenAI. 2022. Chatgpt.                                      Computational Linguistics: Human Language Tech-
+                                                            nologies, pages 2655–2671, Seattle, United States.
+Long Ouyang, Jeffrey Wu, Xu Jiang, Diogo Almeida,           Association for Computational Linguistics.
+  Carroll Wainwright, Pamela Mishkin, Chong Zhang,
+  Sandhini Agarwal, Katarina Slama, Alex Gray, John      Tara Safavi, Jing Zhu, and Danai Koutra. 2021.
+  Schulman, Jacob Hilton, Fraser Kelton, Luke Miller,      NegatER: Unsupervised Discovery of Negatives in
+  Maddie Simens, Amanda Askell, Peter Welinder,            Commonsense Knowledge Bases. In Proceedings of
+  Paul Christiano, Jan Leike, and Ryan Lowe. 2022.         the 2021 Conference on Empirical Methods in Natu-
+  Training language models to follow instructions with     ral Language Processing, pages 5633–5646, Online
+  human feedback. In Advances in Neural Information        and Punta Cana, Dominican Republic. Association
+  Processing Systems.                                      for Computational Linguistics.
+Fabio Petroni, Patrick Lewis, Aleksandra Piktus, Tim     Teven Le Scao, Angela Fan, Christopher Akiki, El-
+  Rocktäschel, Yuxiang Wu, Alexander H. Miller, and        lie Pavlick, Suzana Ilić, Daniel Hesslow, Roman
+  Sebastian Riedel. 2020. How context affects lan-         Castagné, Alexandra Sasha Luccioni, François Yvon,
+  guage models’ factual predictions. In Automated          Matthias Gallé, et al. 2022. Bloom: A 176b-
+  Knowledge Base Construction.                             parameter open-access multilingual language model.
+                                                           arXiv preprint arXiv:2211.05100.
+Fabio Petroni, Tim Rocktäschel, Sebastian Riedel,
+  Patrick Lewis, Anton Bakhtin, Yuxiang Wu, and          Push Singh, Thomas Lin, Erik T. Mueller, Grace Lim,
+  Alexander Miller. 2019. Language models as knowl-        Travell Perkins, and Wan Li Zhu. 2002. Open mind
+  edge bases? In Proceedings of the 2019 Confer-           common sense: Knowledge acquisition from the gen-
+  ence on Empirical Methods in Natural Language Pro-       eral public. In On the Move to Meaningful Internet
+  cessing and the 9th International Joint Conference       Systems 2002: CoopIS, DOA, and ODBASE, pages
+  on Natural Language Processing (EMNLP-IJCNLP),           1223–1237, Berlin, Heidelberg. Springer Berlin Hei-
+  pages 2463–2473, Hong Kong, China. Association           delberg.
+  for Computational Linguistics.
+                                                         Robyn Speer, Joshua Chin, and Catherine Havasi. 2017.
+Alec Radford, Jeffrey Wu, Rewon Child, David Luan,         Conceptnet 5.5: An open multilingual graph of gen-
+  Dario Amodei, and Ilya Sutskever. 2019. Language         eral knowledge. Proceedings of the AAAI Conference
+  models are unsupervised multitask learners. OpenAI       on Artificial Intelligence, 31(1).
+  Blog, 1(8):9.
+                                                         J.L. Speranza and Laurence R. Horn. 2010. A brief his-
+Colin Raffel, Noam Shazeer, Adam Roberts, Katherine         tory of negation. Journal of Applied Logic, 8(3):277–
+  Lee, Sharan Narang, Michael Matena, Yanqi Zhou,           301.
+  Wei Li, and Peter J Liu. 2020. Exploring the lim-
+  its of transfer learning with a unified text-to-text   Theodore R Sumers, Robert D Hawkins, Mark K Ho,
+  transformer. Journal of Machine Learning Research,       and Thomas L Griffiths. 2021. Extending rational
+  21(140):1–67.                                            models of communication from beliefs to actions.
+                                                           arXiv preprint arXiv:2105.11950.
+Pranav Rajpurkar, Jian Zhang, Konstantin Lopyrev, and
+   Percy Liang. 2016. SQuAD: 100,000+ questions for      Oyvind Tafjord, Bhavana Dalvi, and Peter Clark. 2021.
+   machine comprehension of text. In Proceedings of        ProofWriter: Generating implications, proofs, and
+   the 2016 Conference on Empirical Methods in Natu-       abductive statements over natural language. In Find-
+   ral Language Processing, pages 2383–2392, Austin,       ings of the Association for Computational Linguis-
+  Texas. Association for Computational Linguistics.        tics: ACL-IJCNLP 2021, pages 3621–3634, Online.
+                                                           Association for Computational Linguistics.
+Abhilasha Ravichander, Matt Gardner, and Ana Maraso-
+  vić. 2022. Condaqa: A contrastive reading compre-     Oyvind Tafjord, Bhavana Dalvi Mishra, and Peter Clark.
+  hension dataset for reasoning about negation. arXiv      2022. Entailer: Answering questions with faithful
+  preprint arXiv:2211.00295.                               and truthful chains of reasoning. arXiv preprint
+                                                           arXiv:2210.12217.
+Ehud Reiter. 2019. Natural language generation
+  challenges for explainable ai. arXiv preprint          Alon Talmor, Jonathan Herzig, Nicholas Lourie, and
+  arXiv:1911.08794.                                        Jonathan Berant. 2019. CommonsenseQA: A ques-
+                                                           tion answering challenge targeting commonsense
+Kyle Richardson, Ronen Tamari, Oren Sultan, Reut           knowledge. In Proceedings of the 2019 Conference
+  Tsarfaty, Dafna Shahaf, and Ashish Sabharwal.            of the North American Chapter of the Association for
+  2022.     Breakpoint transformers for modeling           Computational Linguistics: Human Language Tech-
+  and tracking intermediate beliefs. arXiv preprint        nologies, Volume 1 (Long and Short Papers), pages
+  arXiv:2211.07950.                                        4149–4158, Minneapolis, Minnesota. Association for
+                                                           Computational Linguistics.
+Ohad Rubin, Jonathan Herzig, and Jonathan Berant.
+  2022. Learning to retrieve prompts for in-context      Bing Tian, Yixin Cao, Yong Zhang, and Chunxiao Xing.
+  learning. In Proceedings of the 2022 Conference of       2022. Debiasing nlu models via causal intervention
+  the North American Chapter of the Association for        and counterfactual reasoning.
+
+                                                     9901
+Denny Vrandečić and Markus Krötzsch. 2014. Wiki-
+  data: a free collaborative knowledgebase. Communi-
+  cations of the ACM, 57(10):78–85.
+Xuezhi Wang, Jason Wei, Dale Schuurmans, Quoc Le,
+  Ed Chi, and Denny Zhou. 2022. Self-consistency im-
+  proves chain of thought reasoning in language mod-
+  els. arXiv preprint arXiv:2203.11171.
+Jason Wei, Yi Tay, Rishi Bommasani, Colin Raffel,
+   Barret Zoph, Sebastian Borgeaud, Dani Yogatama,
+   Maarten Bosma, Denny Zhou, Donald Metzler, Ed H.
+   Chi, Tatsunori Hashimoto, Oriol Vinyals, Percy
+   Liang, Jeff Dean, and William Fedus. 2022a. Emer-
+   gent abilities of large language models. Transactions
+   on Machine Learning Research. Survey Certifica-
+   tion.
+Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten
+   Bosma, brian ichter, Fei Xia, Ed H. Chi, Quoc V Le,
+   and Denny Zhou. 2022b. Chain of thought prompt-
+   ing elicits reasoning in large language models. In
+  Advances in Neural Information Processing Systems.
+Sean Welleck, Ilia Kulikov, Stephen Roller, Emily Di-
+  nan, Kyunghyun Cho, and Jason Weston. 2020. Neu-
+  ral text generation with unlikelihood training. In
+  International Conference on Learning Representa-
+  tions.
+
+Wenhao Yu, Chenguang Zhu, Zaitang Li, Zhiting Hu,
+ Qingyun Wang, Heng Ji, and Meng Jiang. 2022. A
+ survey of knowledge-enhanced text generation. ACM
+ Computing Surveys (CSUR).
+
+
+
+
+                                                       9902
+       Task 1: Boolean Question Answering (QA)                 100                          100
+Answer the commonsense questions with yes or no:
+/* Examples */                                                  80                           80
+Question: can birds fly?                                        60                           60
+Answer: yes
+###                                                             40                           40
+                                                                                       TP                       TP
+Question: is water spicy?                                       20                     TN    20                 TN
+                                                                                      Acc                      Acc
+Answer: no
+                                                                 0                            0
+/* Test data */                                                       0 0.20.40.60.8 1            0 0.20.40.60.8 1
+Question: are needles used for writing?                                  temperature                 temperature
+Answer: no
+                                                               (a) Results (%) on QA.       (b) Results (%) on CG.
+    Task 2: Constrained Sentence Generation (CG)
+Write a short and factual sentence according to common-
+sense based on the keywords:                              Figure 7: Performance change for InstructGPT002 on
+/* Examples */                                            both tasks as the temperature changes.
+Keywords: birds, capable of, fly
+Sentence: birds can fly.
+###                                                           100                           100
+Keywords: water, has property, spicy                           80                            80
+Sentence: water isn’t spicy.
+/* Test data */                                                60                            60
+Keywords: needles, used for, writing                           40                            40
+Sentence: needles are not used for writing.                                        TP
+                                                                                   TN
+                                                                                                                TP
+                                                                                                                TN
+                                                               20                            20
+                                                                                  Acc                          Acc
+
+Table 3: Example prompts of the two probing tasks for           0                             0
+                                                                     0 2 4 6 10        16         0 2 4 6 10       16
+in-context learning, which consists of a task instruc-                   k-shot ICL                   k-shot ICL
+tion at the beginning and several in-context examples.    (a) GPT-3 davinci (175B)          (b) GPT-3 curie (6.7B)
+Underlined texts denote the model completion.
+                                                          Figure 8: CG results of GPT-3 for the davinci (175B)
+                                                          and curie (6.7B) variants, where |E − | = |E + |. Un-
+A     Demonstrations for In-Context                       like other LLMs, the TN of GPT-3 surpasses TP when
+      Learning                                            k ≥ 4.
+A.1 Manually-written Examples for
+    In-Context Learning                                       For the CG task, the instructions include:
+Some of the manually designed examples are
+                                                              1. Write a short and factual sentence according
+shown in Table 6.
+                                                                 to commonsense based on the keywords:
+A.2 Example Prompts for the Probing Tasks                     2. Use the keywords to create a short and fac-
+                                                                 tual sentence that accurately reflects common-
+The task inputs to the LLMs are presented in Ta-                 sense knowledge.
+ble 3. Note that instructions can be replaced by              3. Create a short, factual sentence based on the
+others. LLMs with in-context learning are known                  keywords and what is generally accepted as
+to be sensitive to the wording and examples in the               true.
+prompts (Min et al., 2022b). Therefore, we manu-              4. Construct a factual and concise statement
+ally write 4 interchangeable instructions for each               based on the provided keywords and common-
+probing tasks. For the QA task, the instructions                 sense knowledge.
+include:
+                                                          B     Additional Results
+    1. Answer the commonsense questions with yes
+       or no.                                             B.1       Sensitivity to Temperature Tuning
+    2. Choose “yes” or “no” to indicate whether           Figure 7 shows that temperature does not influence
+       you agree or disagree with the commonsense         much of the performance, thus the findings of this
+       questions.                                         paper are not sensitive to temperature tuning.
+    3. Respond to the questions using “yes” or
+      “no”.                                               B.2       Abnormal Results of GPT-3 (davinci)
+    4. Indicate whether the commonsense questions         Different from the trends of other LLMs reported
+       are correct or incorrect by writing “yes” or       in § 4.2, GPT-3 davinci shows a confusing pat-
+      “no”.                                               tern of the results on the CG task. A more de-
+                                                      9903
+         100
+                                                                                                                               Perf. on QA     Perf. on CG
+         90                                                                                           Model       Exception
+         80                                                                                                                   TP   TN   Acc   TP   TN   Acc
+TP (%)   70
+                                                                                                                     -        88.1 81.8 84.9 93.2 68.8 81.0
+         60
+                                                                                                  Codex002
+         50                                                                                                          ✓        87.2 79.6 83.4 91.9 72.2 82.1
+         40
+               Total    CapableOf    Desires    MadeOf       IsA      HasProperty    HasA             Instruct-      -        84.1 84.7 84.4 88.9 61.4 75.1
+         100
+                            code-davinci-002       text-davinci-002         text-davinci-003          GPT002         ✓        84.0 85.4 84.7 90.9 70.1 80.5
+         90
+         80
+
+TN (%)   70                                                                                       Table 4: 10-shot QA and CG results of LLMs when
+         60                                                                                       adding adverbs of degree into texts, making them some-
+         50
+                                                                                                  how consider exceptions of commonsense knowledge.
+         40
+               Total   NotCapableOf NotDesires NotMadeOf   NotIsA NotHasProperty NotHasA
+                                               Relation
+                                                                                                            Well generated negated sentence
+                                                                                                  1 Triple      <deer, desires, be shoot by hunter>
+Figure 9: The 10-shot CG results per relation type on
+                                                                                                    Label       negative
+CSK-PN. The results are obtained with 10-shot learning.                                             Generation Deer do not desire to be shot by hunters.
+n denotes the triple number per relation.
+                                                                                                                     Weak negation
+                                                                                                  2 Triple      <person, desires, eat alone>
+                                                                                                    Label       negative
+tailed experiment in Figure 8(a) shows that, when                                                   Generation Some people desire to eat alone.
+k < 4, GPT-3 (davinci) performs similarly with                                                               Unfaithful generated sentence
+its sibling LLMs, with TP greatly surpasses TN. TN                                                3 Triple      <student, desires, exam>
+                                                                                                    Label       negative
+continues to enlarge as k increases, even beating
+                                                                                                    Generation Students generally desire to do well on
+TP. Based on Acc over the whole dataset, GPT-3                                                                  exams.
+does not achieve results as good as other GPT-3                                                                     Wrong data label
+derivatives. However, a smaller version of GPT-                                                   4 Triple      <horse, is a, bird>
+3 (i.e., curie, 6.7B) does not express such pat-                                                    Label        positive
+tern, according to Figure 8(a). We do not have                                                      Generation horses are not birds.
+                                                                                                               High co-occurrence words
+proper reasons for this finding, but further train-
+                                                                                                  5 Triple      <worm, capable of, eat bird>
+ing on code and instruction tuning (i.e., Codex and                                                 Label       negative
+InstructGPT) seem to fix this problem.                                                              Generation Worms can eat birds.
+
+B.3            Results of Different Relation Types                                                Table 5: Examples of the generated texts by
+                                                                                                  InstructGPT002 on the CG task.
+What types of relations do LLMs find the most dif-
+ficult to verbalize? As seen in Figure 9, we see
+LLMs achieve good results in the positive split.                                                  don’t live in the ocean.” into “lions don’t usually
+On the negative split, LLMs unanimously believe                                                   live in the ocean.” In this way, we make language
+N OT H AS P ROPERTY to be the most difficult rela-                                                explicitly convey uncertainty (Reiter, 2019) and try
+tions.                                                                                            to rule out exceptions in the tasks.
+                                                                                                     Based on the results in Table 4, we find that
+B.4 Do LLMs hold concerns about exceptions                                                        adding adverbs of degree to the texts does im-
+    for commonsense knowledge?                                                                    prove LLMs’ performance on both CG and QA.
+Commonsense knowledge usually comes with ex-                                                      This suggests that LLMs do hold a certain amount
+ceptions. Could LLMs answer or generate com-                                                      of concerns toward exceptions when dealing with
+monsense knowledge incorrectly be because they                                                    commonsense reasoning, especially for negative
+are thinking about exceptions? For example, “birds                                                knowledge. However, considering exceptions with
+can fly, but penguins cannot.” (Allaway et al.,                                                   this trick still does not resolve the belief conflict.
+2022). So when asked “can birds fly?”, LLMs                                                       Also, this approach could also serve as a useful
+may think of a counterexample and thus arrive at                                                  trick for future commonsense research.
+the answer no. We rephrase the in-context exam-
+ples by adding adverbs of degree (e.g., typically,                                                B.5       Case Study
+generally, usually, most, etc.) to make the tasks be                                              Table 5 presents some examples of generated by
+about the commonsense instead of exceptions. For                                                  InstructGPT002 (10-shot). In the 1st case, the
+instance, we rewrite “can birds fly?” into “can most                                              model correctly generated negative commonsense
+birds fly?” or “can birds generally fly?”, and “lions                                             sentences. The 2nd one suffers from the problem
+                                                                                               9904
+of weak negation, i.e., for negative triple, the model
+sometimes use “may” or “some” for weak negation,
+which is not detected by the negation cue detector
+metric. The 3rd one suffers from unfaithful genera-
+tion to the constraints, where the model generates
+information outside the input triples to avoid gen-
+erating negation. The 4th one is wrong due to the
+noise in the dataset. The 5th one is probably due
+to the high co-occurrence of the concept worms
+and birds, the model finally generates a positive
+sentence.
+
+
+
+
+                                                     9905
+                                     Examples for Positive Commonsense Knowledge
+1 Triple      <birds, capable of, fly>
+  Sentence    Birds can fly.
+  Question    Can birds fly?
+  Deduction   Things with lightweight bodies and strong wing muscles can usually fly. Birds have these physical characteris-
+              tics.
+  Fact        Birds have wings.
+2 Triple      <playing tennis, causes, feeling relaxed>
+  Sentence    Playing tennis makes one feel relaxed.
+  Question    Does playing tennis cause someone to feel relaxed?
+  Deduction   Sport can make people feel relaxed. Tennis is a kind of sport.
+  Fact        Tennis is a kind of sport.
+3 Triple      <basketball players, desires, winning>
+  Sentence    Basketball players want to win.
+  Question    Do basketball players want to win?
+  Deduction   Winning is an important goal for many athletes. Basketball players are athletes.
+  Fact        Athletes usually desire winning in competitions.
+4 Triple      <people, desires, relax after work>
+  Sentence    People want to relax after work.
+  Question    Do people want to relaxed after work?
+  Deduction   Tired people want to relax. Work makes people tired.
+  Fact        People will be tired after work.
+5 Triple      <sheepskin, used for, writing>
+  Sentence    Sheepskin can used for writing.
+  Question    can sheepskin be used for writing?
+  Deduction   Things with a smooth and consistent surface can be used for writing. Sheepskins have that texture.
+  Fact        Sheepskin is the hide of a sheep.
+                                     Examples for Negative Commonsense Knowledge
+1 Triple      <shoes, has a, sleeves>
+  Sentence    Shoes have no sleeve.
+  Question    Do shoes have sleeves?
+  Deduction   Sleeves are parts of garments that cover the arms. Shoes are not garments.
+  Fact        Shoe is a type of footwear.
+2 Triple      <banana, is a, tree>
+  Sentence    Bananas are not trees.
+  Question    Are bananas a kind of trees?
+  Deduction   If something is a tree, then it has an elongated trunk. Bananas do not have elongated trunks.
+  Fact        bananas are a type of fruit.
+3 Triple      <computer, is a, intelligent being>
+  Sentence    Computers aren’t intelligent beings.
+  Question    Is a computer an intelligent being?
+  Deduction   Intelligent beings have the ability to think. Computers cannot think like humans do.
+  Fact        Computer is a type of electronic device.
+4 Triple      <guns, used for, healing>
+  Sentence    Guns can’t be used for healing.
+  Question    Are guns used for healing?
+  Deduction   Healing instruments are tools that are used to treat injuries or illnesses. Guns are not tools that are used to treat
+              injuries or illnesses.
+  Fact        Guns are used for killing.
+5 Triple      <elephant, capable of, jump>
+  Sentence    Elephants cannot jump.
+  Question    Can elephants jump?
+  Deduction   Jumping needs sufficient force to overcome the effects of gravity. Elephants are too heavy to overcome gravity.
+  Fact        elephants can walk slowly.
+
+                  Table 6: Some of the manually written examples used in in-context learning.
+
+
+
+
+                                                            9906
+    ACL 2023 Responsible NLP Checklist
+A For every submission:
+    3 A1. Did you describe the limitations of your work?
+    
+      Limitations
+    3 A2. Did you discuss any potential risks of your work?
+    
+      Ethical Statement
+    3 A3. Do the abstract and introduction summarize the paper’s main claims?
+    
+      Abstract and Section 1
+    3 A4. Have you used AI writing assistants when working on this paper?
+    
+      Grammarly, Quillbot. For grammar check and writing polish.
+  3 Did you use or create scientific artifacts?
+B 
+    Section 3.1
+    3 B1. Did you cite the creators of artifacts you used?
+    
+      Section 3.1
+    3 B2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+    
+      Open-sourced resource.
+    3 B3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+    
+      that it was specified? For the artifacts you create, do you specify intended use and whether that is
+      compatible with the original access conditions (in particular, derivatives of data accessed for research
+      purposes should not be used outside of research contexts)?
+      Section 3.1
+    3 B4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+    
+      information that names or uniquely identifies individual people or offensive content, and the steps
+      taken to protect / anonymize it?
+      Section 3.1
+
+    
+    7 B5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+      linguistic phenomena, demographic groups represented, etc.?
+      Open-sourced resource.
+    3 B6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+    
+      etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+      number of examples in train / validation / test splits, as these provide necessary context for a reader
+      to understand experimental results. For example, small differences in accuracy on large test sets may
+      be significant, while on small test sets they may not be.
+      Section 3.1
+
+C     3 Did you run computational experiments?
+      
+    Section 4, Section 5
+    3 C1. Did you report the number of parameters in the models used, the total computational budget
+    
+      (e.g., GPU hours), and computing infrastructure used?
+      Section 4.1
+The Responsible NLP Checklist used at ACL 2023 is adopted from NAACL 2022, with the addition of a question on AI writing
+assistance.
+
+
+
+                                                         9907
+    3 C2. Did you discuss the experimental setup, including hyperparameter search and best-found
+    
+      hyperparameter values?
+      Section 3.2
+    3 C3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+    
+      statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+      etc. or just a single run?
+      Section 5
+    3 C4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+    
+      you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+      etc.)?
+      Section 3
+
+D     
+      7 Did you use human annotators (e.g., crowdworkers) or research with human participants?
+    Left blank.
+
+     D1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+      disclaimers of any risks to participants or annotators, etc.?
+      No response.
+
+     D2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+      and paid participants, and discuss if such payment is adequate given the participants’ demographic
+      (e.g., country of residence)?
+      No response.
+
+     D3. Did you discuss whether and how consent was obtained from people whose data you’re
+      using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+      crowdworkers explain how the data would be used?
+      No response.
+
+     D4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+      No response.
+
+     D5. Did you report the basic demographic and geographic characteristics of the annotator population
+      that is the source of the data?
+      No response.
+
+
+
+
+                                                    9908
+

@@ -1,0 +1,1032 @@
+        Think Twice: Perspective-Taking Improves Large Language Models’
+                          Theory-of-Mind Capabilities
+
+                 Alex Wilf, Sihyun Shawn Lee, Paul Pu Liang, Louis-Philippe Morency
+                                      Carnegie Mellon University
+                                         awilf@cs.cmu.edu
+
+
+
+                          Abstract                                  Chain-of-Thought                                    SimToM
+                                                                     Jim put the ball in the box.                 Jim put the ball in the box.
+        Human interactions are deeply rooted in the                 While Jim wasn’t looking, Avi                While Jim wasn’t looking, Avi
+        interplay of thoughts, beliefs, and desires made            moved the ball to the basket.                moved the ball to the basket.
+
+        possible by Theory of Mind (ToM): our cog-
+                                                                                                         1. Perspective-Taking
+        nitive ability to understand the mental states                                                  “What does Jim know?”
+        of ourselves and others. Although ToM may
+                                                                         Question-Answering
+        come naturally to us, emulating it presents a               Where does Jim think the ball is?             Jim put the ball in the box.
+                                                                       Let’s think step by step.
+        challenge to even the most advanced Large
+        Language Models (LLMs). Recent improve-                                                                     2. Question-Answering
+        ments to LLMs’ reasoning capabilities from                                                              Where does Jim think the ball is?
+
+        simple yet effective prompting techniques such                     The basket          X
+        as Chain-of-Thought (CoT) (Wei et al., 2022)
+                                                                                                                       The box
+        have seen limited applicability to ToM (Gandhi
+        et al., 2023). In this paper, we turn to the              Figure 1: Instead of performing Theory-of-Mind
+        prominent cognitive science theory “Simula-               question-answering in a single inference pass, S IM T O M
+        tion Theory” to bridge this gap. We introduce             first prompts LLMs to perform perspective-taking: fil-
+        S IM T O M, a novel two-stage prompting frame-            tering the context only to what the character in question
+        work inspired by Simulation Theory’s notion of            knows. Then, the LLM answers the question given this
+        perspective-taking. To implement this idea on             filtered context. The example in this figure is represen-
+        current ToM benchmarks, S IM T O M first filters          tative of the core idea underlying current benchmarks
+        context based on what the character in question           used to gauge LLMs’ ToM capabilities, called the Sally-
+        knows before answering a question about their             Anne false-belief tests (Baron-Cohen et al., 1985).
+        mental state. Our approach, which requires no
+        additional training and minimal prompt-tuning,
+        shows substantial improvement over existing
+                                                                  often unconscious ability is foundational to human
+        methods, and our analysis reveals the impor-
+        tance of perspective-taking to Theory-of-Mind             cognition (Carruthers, 2009) and social interaction
+        capabilities. Our findings suggest perspective-           (Langley et al., 2022), yet it is a task that, despite
+        taking as a promising direction for future re-            its simplicity, seems to perplex even the most ad-
+        search into improving LLMs’ ToM capabilities.             vanced Large Language Models (LLMs) (Gandhi
+        Our code is publicly available.                           et al., 2023; Sap et al., 2022). Recently, simple
+                                                                  prompting strategies such as Chain-of-Thought
+   1    Introduction                                              (CoT) (Wei et al., 2022) have gained popularity be-
+   What did the group of friends feel as they gathered            cause they can substantially improve LLM reason-
+   around the fire, exchanging stories and laughter               ing capabilities on some tasks without additional
+   and knowing glances? Underlying this seemingly                 training or prompt tuning across models. Yet sim-
+   commonplace setting is an intricate interplay of               ple solutions to ToM still elude us (Gandhi et al.,
+   thoughts, beliefs, and desires weaving together the            2023). Are LLMs incapable of performing ToM
+   fabric of human interaction. This is the domain                reasoning? Or have we just not found the right way
+   of Theory of Mind (ToM): the cognitive ability to              to prompt them yet?
+   attribute mental states to ourselves and others, and              Although most current LLM probing strategies
+   to understand that others have beliefs, desires, and           employ a single inference pass to answer ToM
+   intentions that may differ from our own (Premack               questions (Gandhi et al., 2023), a prominent the-
+   and Woodruff, 1978; Wellman et al., 2001). This                ory from cognitive science called “Simulation The-
+                                                             8292
+Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pages 8292–8308
+                              August 11-16, 2024 ©2024 Association for Computational Linguistics
+ory” (Goldman, 2006) postulates that humans uti-         Perspective-Taking ST argues that perspective-
+lize a distinct step before answering ToM questions      taking, or placing oneself in another’s position, is
+called perspective-taking in which we “step into         the initial step to simulating another’s mental state.
+the other person’s shoes”, understanding their be-       It involves simulating the beliefs and goals of the
+liefs and goals before answering questions about         other individual. Crucial to this type of simulating
+their mental state (Barlassina and Gordon, 2017).        are “imagining believing” what they believe (Cur-
+In the example in Figure 1, understanding Jim’s          rie, 2002a; Goldman, 2006), or “imagining desir-
+perspective amounts to understanding Jim’s lack of       ing” what they desire (Currie, 2002b).
+knowledge about a recent development (Avi mov-
+ing the ball to the basket).
+                                                         Question-Answering After perspective-taking,
+   In this paper, we propose a simple two-stage
+                                                         ST theorists argue that humans then answer a ToM
+prompting framework for LLMs inspired by Sim-
+                                                         question by observing and reasoning as if you were
+ulation Theory called S IM T O M that first imple-
+                                                         in their shoes (Barlassina and Gordon, 2017; Gold-
+ments perspective-taking, filtering the context only
+                                                         man, 2008). Some theorists describe this as “reuse”
+to what the person in question knows, before an-
+                                                         of a “cognitive mechanism” (Hurley, 2008; Craver,
+swering Theory-of-Mind questions given that fil-
+                                                         2007) shared between humans.
+tered context. Our approach seamlessly integrates
+with pre-trained LLMs, requiring no additional
+training and minimal prompt-tuning across models,        2.2   Are LLMs Capable of ToM?
+while still demonstrating substantial performance
+improvements over off-the-shelf models using 0-          Supervised models can perform well on ToM tasks
+shot MC and CoT probing.                                 after finetuning, but Sclar et al. (2023) show that
+   We perform extensive analysis and ablations of        they are brittle and overfit in ways that do not gener-
+our method and find that LLM’s are surprisingly          alize to out-of-domain ToM tasks, suggesting that
+capable of perspective-taking when prompted and          zero-shot methods may be more robust. As zero-
+that improved perspective-taking capabilities are        shot methods and evaluation becoming increasingly
+tied closely to further improvements in ToM ca-          common in NLP for this reason (Zhao et al., 2023;
+pabilities. These findings suggest that future re-       Sap et al., 2019), we consider the unsupervised
+search into Theory-of-Mind may find it useful to         zero-shot setting for this work as well.
+include S IM T O M as a simple yet effective baseline,      Most modern LLMs struggle zero-shot on simple
+and that this framework for thinking about ToM in        ToM tasks (Gandhi et al., 2023; Sap et al., 2022).
+LLMs may open new avenues for understanding              Some have claimed that recent ToM capabilities
+and improving LLMs’ abilities to simulate human-         have emerged in large models (Bubeck et al., 2023;
+like ToM reasoning. Our code is publicly available.      Kosinski, 2023), but others have argued that LLMs
+                                                         still fail on “trivial” alterations (Ullman, 2023) to
+2   Background                                           existing datasets, suggesting limitations in current
+                                                         benchmark approaches or possible dataset leak-
+2.1 “Simulation” Theory of Mind                          age to closed-source models’ training sets (Shapira
+“Simulation Theory” (ST) (Goldman, 2006) pro-            et al., 2023).
+poses an explanation for humans’ ability to perform         Experimentally, current large models still lag
+ToM that relies on a cognitive mechanism compris-        behind human performance: for example, GPT-
+ing two processes: perspective-taking (“putting          3.5-Turbo gets only 12.5% on the “action” sub-
+yourself in their shoes”), followed by answering a       set of false belief questions in BigTOM (Gandhi
+ToM question from that perspective (Hurley, 2008;        et al., 2023). We find in Section 6 that GPT-4 still
+Goldman, 2008). ST has strong philosophical (Gor-        lags behind human performance substantially on
+don, 2007; Evans, 1982; Gordon, 1986) and empir-         ToMI (Le et al., 2019), and although it performs
+ical supporte from decades of cognitive science re-      well on BigTOM, this may be partly because GPT-
+search (Gallese and Goldman, 1998; Gallese et al.,       4 itself was used to create the BigTOM dataset.
+2004; Hurley, 2008), though it is still an active area   From the literature and these results, it appears that
+of debate (see Appendix A for a detailed discus-         LLMs do not yet reliably display zero-shot ToM
+sion).                                                   capabilities (Gandhi et al., 2023).
+                                                     8293
+3       Benchmarking Theory-of-Mind                               BigTOM create these templates, and generate the
+        Capabilities                                              outputs using GPT-4.
+
+One well studied method for evaluating theory of                  4       S IM T O M: S IMULATED Theory of Mind
+mind capabilities is through the Sally Anne false-
+belief tests (Baron-Cohen et al., 1985). In essence,              S IM T O M is a simple two-stage prompting frame-
+one agent (Sally) knows something about the world,                work for that enhances zero-shot ToM capabilities
+then they leave, and another agent (Anne) changes                 in LLMs.
+something about the world. For example: Sally                     4.1      Motivation
+puts a ball in the basket then leaves the room, after
+which Anne moves the ball to the box.                             We illustrate a motivating example in Figure 2.4
+   We can then ask a few different types of ques-                 The story is as follows: the woman in green fills
+tions, for example: “Where does Sally believe the                 a cup with steamed whole milk, after which the
+ball is?” If Anne has moved the ball, Sally’s belief              woman does not see the man in purple replace the
+will be incorrect – this type of question is called               whole milk in the cup with oat milk. The woman
+false belief, and has its counterpart in true be-                 then adds cinnamon spice on top, which the man
+lief questions, where Sally’s belief about the world              does not see, then both observe that the customer re-
+is correct. We can also ask about actions Sally                   ceives their drink. The question is “Which kind of
+would take as a result of those beliefs, for example:             latte does the woman in green believe was served?
+“What will Sally do when she returns looking for the              Whole milk + cinnamon spice, or oat milk + cinna-
+ball?”. And instead of asking about Sally directly,               mon spice?” The correct answer is whole milk +
+we could also ask about what Anne thinks Sally                    cinnamon spice, because the woman is not aware
+thinks – this is called a second order question,                  of the change the man made.
+contrasted with the first order questions above.                     0-shot CoT prompting will pass the whole story
+   To the best of our knowledge, there are two exist-             in as context and ask the LLM to reason through
+ing datasets that test these capabilities in the read-            the answer:
+ing comprehension setting: ToMI and BigTOM.1                            CoT Prompting
+3.1 ToMI                                                                {story}
+                                                                        {question}
+ToMI (Le et al., 2019) is a dataset of Sally-Anne                       {answer choices}
+stories, questions, and answer choices.2 For this                       Answer the question based on the context.
+paper, we use the updated version of ToMI from                          Reason step by step before answering.
+(Arodi and Cheung, 2021; Sap et al., 2022) that
+has relabelled mislabelled second-order questions                    However, CoT will often output the true answer
+and disambiguated the location of containers after                – in this case, the type of latte the customer actually
+their reference (e.g., “The ball is in the basket. The            received: oat milk + cinnamon spice. This amounts
+basket is in the front yard.”).                                   to a failure of perspective-taking: answering the
+                                                                  question based on what she knows and what she
+3.2 BigTOM                                                        does not know, regardless of whether it is correct
+BigTOM (Gandhi et al., 2023) is also a Sally-Anne                 or not.
+false belief-style ToM benchmark.3 However, Big-                     Motivated by this intuition and the literature on
+TOM evaluates ToM capabilities on a larger space                  Simulation Theory, we hypothesize that LLMs’
+of tasks than modification in object location and                 may be having difficulty with ToM reasoning be-
+frames its stories in more natural language and so-               cause they are attempting to perform two tasks
+cial settings. BigTOM achieves this by building a                 in a single inference pass: perspective-taking and
+causal template defining an agent’s desire, percept,              question-answering. To solve this, we break the
+and initial belief, before generating a causal event              ToM reasoning process into two inference passes:
+that changes the environment and generating the                       1. Perspective-Taking: understand what the
+resulting agent’s belief or action. The authors of                       woman knows
+    1
+      Both datasets are available in the English language only.       4
+                                                                       The example we use is very similar to an actual question
+    2
+      Made publicly available with the CC License.                from BigTOM (Gandhi et al., 2023), although with two false
+    3
+      Made publicly available with the MIT license.               beliefs instead of one.
+
+                                                              8294
+          Question                                      Original Story                                    Who Knows?
+          Which kind of latte does                       a        fills     with steamed whole milk
+          believe was served?
+                                                         b         replaces     with oat milk =>
+          Answer Choices                                 c         adds cinnamon spice on top =>
+              : whole milk + cinnamon spice              d        and      serve    to a customer
+              : oat milk + cinnamon spice
+
+
+
+                                                    Story from            ’s perspective
+                     1   Perspective-Taking
+                     “Which events does                  a        = whole milk                     a    = whole milk
+                     know about?”                        c        = whole + spice                  b    = oat milk
+                                                         d Customer has                            d Customer has
+        LLM
+
+                     2 Inference
+                     “What kind of latte was
+                     served?”
+
+
+
+Figure 2: An overview of S IM T O M, a two-stage prompting framework for enhancing zero-shot Theory-of-Mind
+capabilities in LLMs. The first step is perspective-taking, in which a model attempts to understand what the agent
+knows and wants. We then query the LLM to infer the answer to the question given this perspective.
+
+
+  2. Question-Answering: answer the question                         the LLM when it answers the question. In this
+     given what the woman knows (not the whole                       example, the woman does not know that the man
+     story)                                                          swapped the milk, so that information is removed
+                                                                     during perspective-taking.
+4.2 Perspective-Taking
+    Barlassina and Gordon (2017) describe                                  SimToM Step #2: Question-Answering
+Perspective-Taking as “switching roles” to                                 {story from character_name’s perspective}
+understand the other person’s “relevant beliefs                            Answer the following question:
+                                                                           {question}
+and goals”. In S IM T O M, we implement this in a
+simple, concrete way: by asking models to first
+filter the story to only the events that the character                 In this example, the story from the woman in
+in question knows about.5 . To do this, we prompt                    green’s perspective is: she fills a cup with steamed
+an LLM as follows:                                                   whole milk, adds cinnamon spice, and serves it to a
+                                                                     customer. During Question-Answering, we would
+    SimToM Step #1: Perspective-Taking                               prompt the model only with this perspective, then
+                                                                     ask the same question of the model.
+    The following is a sequence of events:
+    {story}
+    Which events does {character_name} know                          5      Experimental Details
+    about?
+                                                                     Our experiments are intended to investigate the ef-
+                                                                     fectiveness of our method by evaluate LLMs 0-shot
+4.3 Question-Answering                                               on ToM benchmarks with and without our S IM -
+Question-Answering proceeds just as in baseline                      T O M prompting framework. In this section, we
+0-shot or CoT, except that we replace the full story                 detail how models are prompted and evaluated on
+with our modified version resultig from Perspective-                 the benchmarks described in Section 3: BigTOM
+Taking. The story is modified so that information                    and ToMI.
+that the agent does not know about is hidden from
+                                                                     5.1      Prompting
+   5
+    Our implementation of S IM T O M requires the name of the
+character the question asks about – e.g., “the woman in green”.      We evaluate LLMs using MC-probing: we prompt
+We parse this during preprocessing, described in Section 5.          models with a story, a question, and answer choices,
+                                                              8295
+Table 1: S IM T O M results on BigTOM and ToMI across False Belief and All question types. We include the
+absolute accuracy difference between S IM T O M and the baselines (0-shot and 0-shot CoT) in parentheses.
+
+                                     False Belief                                     All
+ Method                    BigTOM                   ToMI                BigTOM                  ToMI
+ 0-Shot
+ Llama2-7b-chat               47.5                  28.25                53.62                  44.5
+ Llama2-13b-chat             41.25                  39.25                51.38                  51.0
+ gpt-3.5-turbo                41.0                  67.25                66.38                  68.6
+ gpt-4                        89.0                   25.5                 92.5                  66.5
+ 0-shot CoT
+ Llama2-7b-chat               31.5                   24.0                48.62                  43.7
+ Llama2-13b-chat             52.25                   16.5                 56.0                  45.0
+ gpt-3.5-turbo               56.25                   34.0                75.88                  64.1
+ gpt-4                       93.25                  74.25                95.5                   74.4
+ S IM T O M
+ Llama2-7b-chat       70.5 (+23.0, 39.0)     40.0 (+11.8, 16.0)     57.25 (+3.6, 8.6)     48.1 (+3.6, 4.4)
+ Llama2-13b-chat      61.75 (+20.5, 9.5)     35.5 (-3.8, +19.0)     58.0 (+6.6, 2.0)     61.1 (+10.1, 16.1)
+ gpt-3.5-turbo        70.5 (+29.5, 14.2)     81.0 (+13.8, 47.0)    81.62 (+15.2, 5.7)     72.8 (+4.2, 8.7)
+ gpt-4                 92.0 (+3.0, -1.2)    87.75 (+62.2, 13.5)     95.0 (+2.5, -0.5)    87.8 (+21.3, 13.4)
+
+
+and ask it to choose the correct answer choice given    source models on a single A100 GPU, and query
+the question and story. Models can decline to an-       the closed-source models using their API. The re-
+swer (and the Llama models often do this), which        sult for one model on one benchmark takes around
+can reduce their performance below 50% random           three hours to run.
+accuracy. We reproduce our 0-shot prompts exactly
+in Appendix E.                                          BigTOM In our experiments we consider the
+   Our prompts for S IM T O M vary somewhat based       “Forward Action” and “Forward Belief” questions
+on the structure of the dataset, and vary minimally     and not the “Backward Belief” so as to closely
+between Llama and GPT models. We reproduce              mimic the structure of the ToMI questions. Big-
+the exact prompts used in Appendix B.                   TOM is balanced, with 200 questions per question
+                                                        type, so we do not randomly sample as we do for
+5.2 Evaluation                                          ToMI. BigTOM is a binary MC task, with random
+                                                        accuracy being 50%. We parse the character name
+Because false belief questions are the most             deterministically: it is the first word in each story.
+challenging question category for modern mod-
+els (Gandhi et al., 2023) and are at the core of the    ToMI To evaluate our methods on ToMI (Le
+“Sally-Anne False-Belief Tests”, we report our re-      et al., 2019), we randomly sample 100 samples
+sults averaged across all false belief question types   from each of the ten question types to create a bal-
+and across All question types in our results. For       anced dataset of 1000 samples. We parse the name
+BigTOM, this means averaging across “Forward            of the character in question deterministically: be-
+Action” and “Belief” false belief questions; for        cause ToMI is created from templates, the character
+ToMI, this includes averaging across first and sec-     name is always the third word in the question.
+ond order question types.                                  The original ToMI dataset does not include the
+   We evaluate our approach on four state of the        answer choices in the questions. We find that
+art language models: two open source – Llama2-          this artificially depresses baseline performance, as
+7b and 13-b chat (Touvron et al., 2023) – and two       LLMs often output ambiguous answers. For ex-
+closed source: GPT-3.5-Turbo and GPT-4 (OpenAI,         ample, an LLM outputted this answer to a ToMI
+2023). We query all models with temperature=0.0         question: “Charlotte look for the melon in the front
+for reproducibility. We run inference on the open       yard”, despite the only valid choices being either
+                                                    8296
+container A or B (both situated in the front yard).    still substantial, with GPT-4 seeing a 13.4% im-
+To rectify this, we parse the ToMI stories and in-     provement and Llama-2-13b-chat improving by
+clude both possible answer choices (e.g., A and        16.1% over 0-shot CoT probing. Additionally, we
+B) from the template used for story creation when      tested two additional prompting strategies: Self-
+querying the model. This process makes this set-       Consistency CoT (Wang et al., 2022) and Tree-
+ting a binary multiple-choice task similar to Big-     of-Thoughts (Yao et al., 2023) on the GPT-3.5-
+TOM. A random guessing baseline would have             Turbo model. SC-CoT performs similarly to CoT
+50% accuracy.                                          across question categories, underperforming S IM -
+                                                       T O M significantly (33.50% on FB compared to
+6   Results and Discussion                             81.00%). Tree-of-Thoughts also underperforms
+                                                       S IM T O M substantially, perhaps because the origi-
+We find that S IM T O M leads to substantial perfor-
+                                                       nal Tree-of-Thoughts voting evaluates creative writ-
+mance improvements over 0-shot MC and CoT
+                                                       ing generations instead of rationales. In general,
+prompting. Our results in Table 1 reflect these
+                                                       we find that second-order questions are more diffi-
+gains across both the BigTOM and ToMI bench-
+                                                       cult for most models than first-order questions; a
+marks.
+                                                       detailed breakdown of these results across question
+BigTOM Results On the BigTOM benchmark,                types can be found in Appendix G.
+S IM T O M provides substantial performance im-
+provements across models. Notably, on the chal-        7     Analysis
+lenging false belief subset, S IM T O M provides       We rigorously analyze S IM T O M with additional
+29.5% and 14.2% absolute accuracy improve-             experiments and ablations intended to better under-
+ments over the 0-shot and 0-shot CoT GPT-3.5-          stand our method explore the opportunities and it
+Turbo baselines, along with similarly strong re-       uncovers.
+sults across other model types. S IM T O M led to a
+slight decrease with GPT-4, though this result may     7.1     Ablation Study: Single-Prompt S IM T O M
+be partially confounded by the fact that BigTOM        Given S IM T O M’s strong performance, we are cu-
+was generated using GPT-4. Across all question         rious to determine whether our intuition from Sec-
+types as well, S IM T O M performed strongly com-      tion 4 is correct: that performing perspective-taking
+pared with 0-shot CoT probing, leading to 8.6%         in a separate prompt before question-answering is
+and 5.7% absolute improvements on Llama2-7b-           important for enhancing LLMs’ ToM capabilities.
+chat and GPT-3.5-Turbo for False Belief questions.        To evaluate this, we implement a one-prompt
+We again saw comparable performance with the           ablation of S IM T O M, S IM T O M-Single, that com-
+strongest model, GPT-4, which had saturated hu-        bines perspective-taking and question-answering in
+man performance 0-shot (Gandhi et al., 2023).          a single prompt. A simplified version of our prompt
+                                                       is below, and our prompts are reproduced in full
+ToMI Results S IM T O M also yields improve-
+                                                       in Appendix C. We run our ablation experiments
+ment over 0-shot baselines across LLMs on the
+                                                       using GPT-3.5-Turbo. Our results are depicted in
+ToMI benchmark. Compared to 0-shot CoT on
+                                                       Table 2.
+false belief (FB) questions S IM T O M increased
+absolute accuracy by 16%, 19%, and a surpris-                SimToM-Single
+ing 47% absolute accuracy for Llama2-7b-chat,
+Llama2-13b-chat, and GPT-3.5-Turbo. It is worth              Your task is in two steps.
+                                                             Step 1. output only the events that
+noting that 0-shot CoT did not perform reliably              {character_name} knows about.
+better than 0-shot, though our method performed              Step 2. Imagine you are {character_name},
+better than both most of the time. Across all                then answer a question based only on the
+                                                             events {character_name} knows about.
+question types, S IM T O M also provided perfor-             Story: {story}
+mance increases as well, although more modest,               Question: {question}
+as modern models find control conditions much
+less challenging (e.g., “True Belief” tests, which        Interestingly, we find that performing
+can be answered by understanding the true state        perspective-taking before question-answering
+of objects without understanding mental states         in a single prompt is not nearly as effective as
+relating to them). These improvements were             performing the same process with two prompts.
+                                                   8297
+Table 2: Ablation Analysis of S IM T O M: we find that performing perspective-taking and question-answering in
+two prompts is necessary, as S IM T O M-Single does not lead to the same performance improvements over baselines.
+We also find that perspective-taking is important, as S IM T O M-Multi implements a two-step prompting asking
+first for rationale. By contrast, domain-specific perspective-taking prompting (S IM T O M-Domain) designed to
+simulate more advanced perspective-taking systems, leads to substantial performance gains, and oracle perspective-
+taking (S IM T O M-Oracle) from human-annotated perspectives can help today’s LLM’s nearly solve current ToM
+benchmarks. +/- values are absolute accuracy differences relative to S IM T O M, described in Section 4.
+
+                                            False Belief                              All
+          Method                      ToMI               BigTOM           ToMI              BigTOM
+          0-shot                      67.25              41.0              68.6            66.38
+          0-shot CoT                   34.0             56.25              64.1            75.88
+          S IM T O M                   81.0              70.5              72.8            81.62
+          S IM T O M-Single       58.75 (-22.25)    50.75 (-19.75)      67.5 (-5.3)    54.75 (-26.87)
+          S IM T O M-Multi        31.75 (-49.25)    37.25 (-33.25)     46.8 (-26.0)    58.25 (-23.37)
+          S IM T O M-Domain        85.5 (+4.5)        90.5 (+20)       79.3 (+6.5)      91.5 (+9.88)
+          S IM T O M-Oracle          96 (+15)         96 (+25.5)         82 (+9.2)      98 (+16.38)
+
+
+Qualitatively, we find that single-inference               formance gap can be improved with more effective
+approaches (i.e., 0-shot, 0-shot CoT, and S IM T O M-      perspective taking. Put another way, can today’s
+Single) fail in similar ways: LLMs prompted in             models answer ToM questions in ToMI and Big-
+this way often answer the question with respect            TOM given a well-filtered story? If so, perspective-
+to the world state instead of with respect to the          taking may be justifiably described as a core chal-
+person’s mental state. For example, in the example         lenge in future ToM research.
+from Figure 2, LLMs would output “oat milk +                  To evaluate this, we create a small dataset of “or-
+cinnamon spice”. This result supports our intuition        acle perspectives”: we ask four paid human annota-
+from Section 4, that LLMs may benefit from a               tors to output the “perspective” given the story and
+separate perspective-taking step when performing           the name of the person, then use models to perform
+ToM reasoning tasks.                                       question-answering contingent on this perspective,
+   In addition to ablating our method, we were cu-         a human-edited subset of the story. We give an-
+rious whether SimTOM’s strong performance was              notators the same perspective-taking prompts as
+a result of its multi-turn nature instead of the exact     we give to GPT-3.5-Turbo (see Appendix B), and
+structure of its multistep prompting strategy. To          additionally instruct them to output only a subset of
+evaluate this, we also attempted a multi-step ver-         the story, not add any additional information. Just
+sion of CoT: in the first step asking the model to         as in Section 4, they are not shown the question or
+output its reasoning, thinking “step by step”, then        answer choices during the process of perspective-
+in the second asking it to answer a question given         taking. To construct this dataset, we sample from
+this reasoning. This strategy effectively replaces         the benchmarks in a balanced manner: 100 ques-
+our “perspective-taking” with a “reasoning” step,          tions from each question type across both bench-
+holding the rest of the experiment constant. The           marks.
+performance of the 0-shot CoT model plummeted;                We find that with oracle perspective-taking, mod-
+reducing to 58.25% on BigTOM total (a reduction            els can infer substantially better than with model-
+of 17.63% from 0-shot CoT and a reduction of               generated perspective-taking: improving on ToMI
+23.37 from S IM T O M) and to 46.8% on ToMI (a re-         False Belief from 81.0% to 96% accuracy, and on
+duction of (17.3%). This indicates that the strength       BigTOM False Belief from 70.5% to 96.0% accu-
+of SimTOM is not purely in its multi-step nature,          racy, close to solving these challenging false belief
+but in the perspective-taking step specifically.           tasks. Performance lags behind on all ToMI ques-
+                                                           tions, likely because of the different question types
+7.2 Oracle Perspective-Taking                              that do not specifically test this kind of simulation,
+In this analysis, we investigate perspective-taking        including true belief, “memory” and “reality”-style
+further by asking how much of the remaining per-           questions. Our analysis results are shown in Ta-
+                                                      8298
+ble 2, in the row S IM T O M-Oracle. From this we      scenarios than the synthetic BigTOM and ToMI
+conclude that human-level perspective-taking ca-       datasets. To evaluate this, we investigate our
+pabilities could enable today’s LLM’s to nearly        method qualitatively on a small, hand-selected sub-
+solve current ToM benchmarks.                          set of 30 questions drawn from the real-world Cos-
+                                                       mosQA dataset (Huang et al., 2019) that test ToM
+7.3 Domain-Specific Perspective-Taking
+                                                       capabilities.
+    Strategies
+                                                          On BigTOM and ToMI, perspective-taking takes
+We next investigate to what extent current LLM’s       the form of hiding information because all informa-
+are capable of improving their perspective-taking      tion is known to the omniscient narrator. However,
+capabilities.                                          in a real-world context this will not always be the
+   To explore this question, we simulate how           case, and so perspective-taking may involve more
+LLMs with advanced perspective-taking capabili-        inferring than hiding information. We observed
+ties would perform on ToM by enhancing the S IM -      this to be the case on the CosmosQA dataset. For
+T O M with 3 examples of perspective-taking drawn      example, given a question drawn from a blog post
+from in-domain ToMI stories. The prompts follow        about why the speaker’s romantic interest did not
+the simplified form below. For the exact prompts,      return a message, GPT-3.5-Turbo outputted the fol-
+please refer to Appendix D.                            lowing as the person of interest’s perspective: “it’s
+                                                       possible that I wasn’t yet completely invested in the
+   SimToM-Domain
+                                                       relationship or had other priorities such as school-
+   Story:                                              work”. Interestingly, in this case the perspective-
+   1 Jackson is wearing the pajamas
+   2 Logan entered the dining room                     taking actually infers the key information necessary
+   ...                                                 to answer the question correctly (that the person
+   Which events does Logan know about?                 may have been busy with schoolwork) based on
+   Logan knows about the following events:
+   2 Logan entered the dining room                     only a tangential mention of studying in the original
+   ...                                                 question. However, this was not always the case;
+                                                       oftentimes model imputations were more “halluci-
+   Because we include examples of perspective-         nation” than “inference”. In some cases the model
+taking, we refer to this result as Domain-Specific     took liberties with the framing of the perspective
+Perspective-Taking, depicted in Table 2 as S IM -      that led to incorrect inferences; in another case the
+T O M-Domain. We find that Domain-Specific             model even outputted a detailed perspective based
+perspective taking strategies lead to a substantial    on an entirely made up premise absent from the
+performance gain over S IM T O M, including from       question. The relationship between hallucination
+70.5% to 90.5% on False Belief tests in BigTOM,        and inference will be of particular importance when
+a 20% absolute accuracy improvement (a 34.25%          applying perspective-taking to scenarios with lim-
+absolute improvement over 0-shot CoT), and from        ited information, such as many real-world ToM
+72.8 to 79.3 across all ToMI questions, a 6.5% accu-   applications.
+racy improvement. This result suggests that LLMs
+with improved perspective-taking capabilities          8   Related Work
+may display subsantially stronger ToM capabili-
+ties. And although these performances are strong,      Evaluating LLM Capabilities on ToM Recent
+there is still a gap to ToM based on oracle-level      approaches on evaluating zero-shot LLM capabil-
+perspective-taking: S IM T O M-Domain lags behind      ities on ToM have made use of LM probing (Sap
+S IM T O M-Oracle by over 10% on ToMI false belief,    et al., 2022), often replaced by MC (Sap et al.,
+by 5.5% on BigTOM false belief, and by over 3 and      2022; Shapira et al., 2023) and CoT probing (Wei
+6% on All question types respectively. Future work     et al., 2022; Kojima et al., 2022) for instruction-
+in ToM may therefore find it fruitful to investigate   tuned models. Though these prompt-styles can
+perspective-taking capabilities more deeply.           elicit different performance capabilities (Wei et al.,
+                                                       2022), we modify our prompts only minimally to
+7.4 Extension to Complex Theory-of-Mind                evaluate our hypotheses, motivated by Shapira et al.
+    Scenarios                                          (2023)’s argument that excessive prompt-tuning
+One concern with SimTOM may be that it fails           violates a “reasonable expectation” of evaluation
+to generalize to more complex, real-world ToM          standards for LLMs on ToM.
+                                                   8299
+Enhancing LLM Reasoning Capabilities Moti-                10   Future Work
+vated in part by early results that transformers can
+                                                          Future work on building ToM capabilities into
+engage in reasoning tasks (Clark et al., 2020), a
+                                                          LLMs may find it fruitful to explore both evaluating
+number of prompt-based methods for enhancing
+                                                          and enhancing LLMs’ perspective-taking capabili-
+LLM reasoning capabilities have been published
+                                                          ties. The idea of perspective-taking has a broader
+in recent years, such as ProofWriter (Tafjord et al.,
+                                                          scope in cognitive science (Barlassina and Gordon,
+2020). Shi et al. (2023) point out that LLMs can be
+                                                          2017; Gordon, 1986) than is currently being tested
+easily distracted by irrelevant information during
+                                                          in simple Sally-Anne false-belief tests, where be-
+reasoning, and Creswell et al. (2022) use LLMs to
+                                                          lief states primarily concern object locations. Fur-
+select relevant facts before inferring new ones. This
+                                                          ther evaluating models’ perspective-taking capabil-
+selection is somewhat similar to our perspective-
+                                                          ities in more complex, lifelike ToM settings may
+taking, but a key distinction lies in that perspective-
+                                                          uncover new challenges in modeling perspective-
+taking attempts not only to isolate relevant facts,
+                                                          taking.
+but ones that agents should not know about when
+being simulated – it is not clear how to implement        Limitations
+relevance for selection in ToM.
+                                                          One limitation of our work is that perspective-
+   Recent approaches have also combined LLM rea-          taking is currently implemented by “hiding” parts
+soning with symbolic reasoning algorithms. Nye            of the original story when answering the question
+et al. (2021) separates “System 1” and “System            from an agent’s perspective. Perspective-taking
+2” into neural- and symbolic-systems respectively         may not always involve “hiding” information from
+to perform reasoning tasks. A relevant contempo-          a complete knowledge of the world state, and in
+raneous work, Sclar et al. (2023), uses LLMs to           some cases could require feasibly imputing un-
+construct a symbolic belief state graph and answers       seen information (e.g., “Imagine you were in their
+questions using an inference-time graph algorithm.        shoes...”). This is mainly due to a limitation in
+It is not clear, however, how to apply these sym-         the datasets we use to test our method; to the best
+bolic methods to naturalistic ToM datasets in such        of our knowledge current reading comprehension
+as BigTOM. More broadly, these approaches both            datasets for ToM are of the Sally-Anne belief form,
+represent a distinct direction to ours, as our ap-        which tests basic abilities to anticipate beliefs and
+proach studies how to enable ToM capabilities in          actions given a change to the world state that we
+LLMs without external memory or human-written             (omniscient viewers) are aware of, but the char-
+inference-time algorithms.                                acter is not. Another limitation is that we have
+                                                          not performed tests with smaller language models
+                                                          than 7B parameters; it may be the case that only
+9   Conclusion                                            LLMs are capable of performing ToM to this level
+                                                          using S IM T O M. As LLMs are improving in perfor-
+In this paper, we propose a two-prompt approach           mance, however, this may not be a limitation that
+to eliciting Theory-of-Mind capabilities in LLMs          is particularly disruptive to future research in ToM.
+by first asking LLMs to perspective-take: to filter
+                                                          Acknowledgements
+context to what the character in question knows.
+We find that LLMs are substantially stronger at           This material is based upon work partially sup-
+ToM reasoning than they appear when probed with           ported by National Science Foundation awards
+a single inference pass. Our key takeaways from           1722822 and 1750439, and National Institutes of
+rigorously analyzing S IM T O M are that (1) that         Health awards R01MH125740, R01MH132225,
+perspective-taking is best implemented as a sep-          R01MH096951 and R21MH130767. Any opin-
+arate prompt before question-answering, instead           ions, findings, conclusions, or recommendations
+of in a single prompt (Section 7.1); (2) that to-         expressed in this material are those of the author(s)
+day’s LLMs could close-to-solve ToM benchmarks            and do not necessarily reflect the views of the spon-
+with access to oracle perspective-taking capabilities     sors, and no official endorsement should be in-
+(Section 7.2); and (3) that LLMs with improved            ferred. We would also like to thank Daniel Fried
+perspective-taking capabilities could achieve even        for insightful comments and suggestions related to
+stronger performance on ToM tasks (Section 7.3).          this project.
+                                                      8300
+Ethics                                                       Peter Clark, Oyvind Tafjord, and Kyle Richardson. 2020.
+                                                               Transformers as soft reasoners over language. arXiv
+Advanced ToM capabilities applied to real world                preprint arXiv:2002.05867.
+settings could have unethical use cases and modes            Carl F. Craver. 2007. Explaining the Brain: Mecha-
+of operation. Unethical use cases could include in-            nisms and the Mosaic Unity of Neuroscience. New
+ferring mental states without consent, particularly            York : Oxford University Press,: Oxford University
+as part of deceptive politically or financially mo-            Press, Clarendon Press.
+tivated automated persuasion techniques. Unethi-             Antonia Creswell, Murray Shanahan, and Irina Higgins.
+cal modes of operation could include inaccurately,             2022. Selection-inference: Exploiting large language
+harmfully, or unfairly interacting with users based            models for interpretable logical reasoning. arXiv
+                                                               preprint arXiv:2205.09712.
+on ToM inferences in ways that could amplify the
+negative effects of biases in LLMs. However, there           Gregory Currie. 2002a. 1Introduction. In Recreative
+are many upsides of advanced ToM capabilities                  Minds. Oxford University Press.
+as well, including the benefits of more empathetic           Gregory Currie. 2002b. Desire in imagination. In
+and socially aware technology. As AI seems to                  Tamar Szabo Gendler and John Hawthorne, editors,
+be trending towards inclusion in a broader swath               Conceivability and Possibility, pages 201–221. Ox-
+                                                               ford University Press.
+of interactive products, advanced ToM could be-
+come increasingly impactful to the way we interact           Gareth Evans. 1982. The Varieties of Reference. Ox-
+with the software systems around us. We would                  ford: Oxford University Press.
+recommend that future research that focuses on               Vittorio Gallese and Alvin Goldman. 1998. Mirror
+use cases that directly interact with people (instead          neurons and the simulation theory of mind-reading.
+of offline prediction, as in our experiments), par-            Trends in cognitive sciences, 2(12):493–501.
+ticularly in domains or tasks that may be harmful            Vittorio Gallese, Christian Keysers, and Giacomo Riz-
+(such as unconscious belief change) carefully con-             zolatti. 2004. A unifying view of the basis of social
+sider the distribution of outcomes improved ToM                cognition. Trends in cognitive sciences, 8(9):396–
+                                                               403.
+capabilities in that domain would effect.
+                                                             Kanishk Gandhi, Jan-Philipp Fränken, Tobias Gersten-
+                                                               berg, and Noah D Goodman. 2023. Understanding
+References                                                     social reasoning in language models with language
+                                                               models. arXiv preprint arXiv:2306.15448.
+Akshatha Arodi and Jackie Chi Kit Cheung. 2021. Tex-
+                                                             Alvin I. Goldman. 2006. Simulating Minds: The Philos-
+  tual time travel: A temporally informed approach
+                                                               ophy, Psychology, and Neuroscience of Mindreading.
+  to theory of mind. In Findings of the Association
+                                                               New York, US: Oxford University Press USA.
+  for Computational Linguistics: EMNLP 2021, pages
+  4162–4172.                                                 Alvin I. Goldman. 2008. Hurley on simulation. Phi-
+                                                               losophy and Phenomenological Research, 77(3):775–
+Luca Barlassina and Robert M. Gordon. 2017. Folk               788.
+  Psychology as Mental Simulation. In Edward N.
+  Zalta, editor, The Stanford Encyclopedia of Philos-        Alison Gopnik and Henry M Wellman. 1994. The the-
+  ophy, Summer 2017 edition. Metaphysics Research              ory theory. In An earlier version of this chapter was
+  Lab, Stanford University.                                    presented at the Society for Research in Child Devel-
+                                                               opment Meeting, 1991. Cambridge University Press.
+Simon Baron-Cohen, Alan M Leslie, and Uta Frith.             Robert M. Gordon. 1986. Folk psychology as simula-
+  1985. Does the autistic child have a “theory of              tion. Mind and Language, 1(2):158–71.
+  mind”? Cognition, 21(1):37–46.
+                                                             Robert M. Gordon. 1995. Simulation without intro-
+Sébastien Bubeck, Varun Chandrasekaran, Ronen El-              spection or inference from me to you. In Martin
+  dan, Johannes Gehrke, Eric Horvitz, Ece Kamar,               Davies and Tony Stone, editors, Mental Simulation.
+  Peter Lee, Yin Tat Lee, Yuanzhi Li, Scott Lund-              Blackwell.
+  berg, et al. 2023. Sparks of artificial general intelli-
+                                                             Robert M. Gordon. 2007. Ascent routines for proposi-
+  gence: Early experiments with gpt-4. arXiv preprint
+                                                               tional attitudes. Synthese, 159(2):151–165.
+  arXiv:2303.12712.
+                                                             Jane Heal. 1994. Simulation vs. theory-theory: What is
+Peter Carruthers. 2009. How we know our own                     at issue? In Christopher Peacocke, editor, Objectivity,
+  minds: The relationship between mindreading and               Simulation and the Unity of Consciousness: Current
+  metacognition. Behavioral and Brain Sciences,                 Issues in the Philosophy of Mind. Oxford University
+  32(2):121–138.                                                Press.
+
+                                                         8301
+Lifu Huang, Ronan Le Bras, Chandra Bhagavatula, and          Computational Linguistics (Volume 1: Long Papers),
+  Yejin Choi. 2019. Cosmos qa: Machine reading com-          pages 13960–13980, Toronto, Canada. Association
+   prehension with contextual commonsense reasoning.         for Computational Linguistics.
+   arXiv preprint arXiv:1909.00277.
+                                                          Natalie Shapira, Mosh Levy, Seyed Hossein Alavi,
+Susan Hurley. 2008. Understanding simulation1. Phi-         Xuhui Zhou, Yejin Choi, Yoav Goldberg, Maarten
+  losophy and Phenomenological Research, 77(3):755–         Sap, and Vered Shwartz. 2023. Clever hans or
+  774.                                                      neural theory of mind? stress testing social rea-
+Takeshi Kojima, Shixiang Shane Gu, Machel Reid, Yu-         soning in large language models. arXiv preprint
+  taka Matsuo, and Yusuke Iwasawa. 2022. Large lan-         arXiv:2305.14763.
+  guage models are zero-shot reasoners. Advances in
+  neural information processing systems, 35:22199–        Freda Shi, Xinyun Chen, Kanishka Misra, Nathan
+  22213.                                                    Scales, David Dohan, Ed H Chi, Nathanael Schärli,
+                                                            and Denny Zhou. 2023. Large language models can
+Michal Kosinski. 2023. Theory of mind may have spon-        be easily distracted by irrelevant context. In Inter-
+  taneously emerged in large language models. arXiv         national Conference on Machine Learning, pages
+  preprint arXiv:2302.02083.                                31210–31227. PMLR.
+
+Christelle Langley, Bogdan Ionut Cirstea, Fabio Cuz-      Oyvind Tafjord, Bhavana Dalvi Mishra, and Peter
+  zolin, and Barbara J Sahakian. 2022. Theory of mind       Clark. 2020. Proofwriter: Generating implications,
+  and preference learning at the interface of cognitive     proofs, and abductive statements over natural lan-
+  science, neuroscience, and ai: A review. Frontiers in     guage. arXiv preprint arXiv:2012.13048.
+  Artificial Intelligence, 5:62.
+Matthew Le, Y-Lan Boureau, and Maximilian Nickel.         Hugo Touvron, Louis Martin, Kevin Stone, Peter Al-
+ 2019. Revisiting the evaluation of theory of mind          bert, Amjad Almahairi, Yasmine Babaei, Nikolay
+ through question answering. In Proceedings of the          Bashlykov, Soumya Batra, Prajjwal Bhargava, Shruti
+ 2019 Conference on Empirical Methods in Natu-              Bhosale, et al. 2023. Llama 2: Open founda-
+ ral Language Processing and the 9th International          tion and fine-tuned chat models. arXiv preprint
+ Joint Conference on Natural Language Processing            arXiv:2307.09288.
+ (EMNLP-IJCNLP), pages 5872–5877.
+                                                          Tomer Ullman. 2023. Large language models fail on
+Maxwell Nye, Michael Tessler, Josh Tenenbaum, and           trivial alterations to theory-of-mind tasks. arXiv
+ Brenden M Lake. 2021. Improving coherence and              preprint arXiv:2302.08399.
+ consistency in neural sequence models with dual-
+ system, neuro-symbolic reasoning. Advances in            Xuezhi Wang, Jason Wei, Dale Schuurmans, Quoc Le,
+ Neural Information Processing Systems, 34:25192–           Ed Chi, Sharan Narang, Aakanksha Chowdhery, and
+ 25204.                                                     Denny Zhou. 2022. Self-consistency improves chain
+                                                            of thought reasoning in language models. arXiv
+OpenAI. 2023. Gpt-4 technical report.
+                                                            preprint arXiv:2203.11171.
+David Premack and Guy Woodruff. 1978. Does the
+  chimpanzee have a theory of mind? Behavioral and        Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten
+  brain sciences, 1(4):515–526.                              Bosma, Fei Xia, Ed Chi, Quoc V Le, Denny Zhou,
+                                                             et al. 2022. Chain-of-thought prompting elicits rea-
+Maarten Sap, Ronan LeBras, Daniel Fried, and Yejin           soning in large language models. Advances in Neural
+ Choi. 2022. Neural theory-of-mind? on the limits            Information Processing Systems, 35:24824–24837.
+ of social intelligence in large lms. arXiv preprint
+ arXiv:2210.13312.                                        Henry M. Wellman, David Cross, and Julanne Watson.
+                                                            2001. Meta-analysis of theory-of-mind development:
+Maarten Sap, Hannah Rashkin, Derek Chen, Ronan              The truth about false belief. Child Development,
+ Le Bras, and Yejin Choi. 2019. Social IQa: Com-            72(3):655–684.
+ monsense reasoning about social interactions. In
+ Proceedings of the 2019 Conference on Empirical
+ Methods in Natural Language Processing and the           Shunyu Yao, Dian Yu, Jeffrey Zhao, Izhak Shafran,
+ 9th International Joint Conference on Natural Lan-         Thomas L Griffiths, Yuan Cao, and Karthik
+ guage Processing (EMNLP-IJCNLP), pages 4463–               Narasimhan. 2023. Tree of thoughts: Deliberate
+ 4473, Hong Kong, China. Association for Computa-           problem solving with large language models. arXiv
+ tional Linguistics.                                        preprint arXiv:2305.10601.
+
+Melanie Sclar, Sachin Kumar, Peter West, Alane Suhr,      Wayne Xin Zhao, Kun Zhou, Junyi Li, Tianyi Tang,
+ Yejin Choi, and Yulia Tsvetkov. 2023. Minding lan-        Xiaolei Wang, Yupeng Hou, Yingqian Min, Beichen
+ guage models’ (lack of) theory of mind: A plug-and-       Zhang, Junjie Zhang, Zican Dong, et al. 2023. A
+ play multi-character belief tracker. In Proceedings       survey of large language models. arXiv preprint
+ of the 61st Annual Meeting of the Association for         arXiv:2303.18223.
+
+                                                      8302
+A    A Further Discussion of Cognitive                    result in the model saying that there is not enough
+     Science Perspectives on Simulation                   information in the question, and thus cannot re-
+     Theory                                               spond with a non-factual answer. Hence, we add
+                                                          lines such as "Do not say there is not enough in-
+ST is both philosophically and empirically sup-
+                                                          formation. Answer with a single word, do not
+ported, presenting a viable theory for ToM capa-
+                                                          output anything else" in order to mitigate this phe-
+bilities in humans. Philosophical support for ST
+                                                          nomenon. However, we maintain that the core con-
+comes from (Gordon, 2007), who argue that the
+                                                          tent and instructions of the prompts are essentially
+process of reporting others’ beliefs can be achieved
+                                                          the same.
+by reporting what is observed from their perspec-
+tive. This relies on work by (Evans, 1982), who ar-
+gue that the process of performing ToM on oneself
+is not introspective but is achieved by observing         B.1     ToMI Prompts
+external circumstances – e.g., to answer the ques-
+tion “Do I believe that p”, the question asked is,        B.1.1       Perspective Taking
+"is it the case that p?". Consequently, to perform
+ToM on others, one needs to simulate being them,
+looking externally from their perspective (Gordon,              GPT/Llama-2-chat
+1986, 1995). There is also evidence from the neu-            The following is a sequence of events
+roscience community, particularly from the dis-              about some characters, that takes place in
+                                                             multiple locations.
+covery of mirror neurons, that simulation theory             Your job is to output only the events that
+may be be grounded in a measurable physical phe-             the specified character, {character},
+nomenon (Gallese and Goldman, 1998; Gallese                  knows about.
+                                                             Here are a few rules:
+et al., 2004; Hurley, 2008).                                 1. A character knows about all events that
+    According to Heal (1994), the implementation of          they do.
+these cognitive mechanisms is irrelevant as long as          2. If a character is in a certain
+                                                             room/location, that character knows about
+it results in similar mental states. This suggests that      all other events that happens in the room.
+ST capabilities may be possible to achieve using             This includes other characters leaving or
+artificial cognitive processes such as those found           exiting the location, the locations of
+                                                             objects in that location, and whether
+in LLMs, motivating our approach.                            somebody moves an object to another place.
+    ST’s main alternative within the ToM literature          3. If a character leaves a location, and
+                                                             is NOT in that location, they no longer
+is “Theory-Theory” (TT) (Gopnik and Wellman,                 know about any events that happen within
+1994): the idea that humans perform ToM by infer-            that location. However, they can re-enter
+ring from a large body of commonsense rules and              the location.
+knowledge for how the world works: e.g. the “Law             Story: {story}
+of Sight”: if a person has no visual impairments or          What events does {character} know about?
+                                                             Only output the events according to the
+occlusions and something is in front of them, they           above rules, do not provide an
+will see it (Barlassina and Gordon, 2017). The               explanation.
+debate between ST and TT has raged for decades;
+in this work, we do not weigh in on whether one
+works over another. Instead, we implement to the
+best of our abilities an explicitly simulation-based      B.1.2       Simulation
+ToM approach and report our results on well estab-
+lished ToM tasks.                                               GPT
+
+B    S IM T O M Prompts                                      {perspective}
+                                                             You are {name}.
+Our S IM T O M prompts are reproduced here in their          Based on the above information, answer the
+entirety. Our prompts slightly differ based on               following question:
+model architecture due to the need to accommo-               {question}
+date to the differing nature and format of the model         Keep your answer concise, one sentence is
+                                                             enough. You must choose one of the above
+outputs.                                                     choices.
+  For example, Llama-2’s safety guardrails often
+                                                      8303
+      Llama-2-chat                                B.2.2     Simulation
+  {perspective}
+  You are {name}.
+  Based on the above information, answer the
+  following question:
+  {question}
+  You must choose one of the above choices,
+  do not say there is not enough
+  information. Answer with a single word, do
+  not output anything else.
+
+
+
+
+B.2    BigTOM Prompts
+
+
+                                                      GPT
+B.2.1 Perspective Taking
+                                                      {perspective}
+                                                      You are {name}.
+                                                      Based on the above information, answer the
+      GPT                                             following question:
+  Imagine you are {name}, and consider this           {question}
+  story that has an unexpected event.                 Answer the questions based on the context.
+  {story}                                             Keep your answer concise, few words are
+                                                      enough, maximum one sentence. Answer as
+  If the last sentence of the story says
+                                                      ’Answer:<option>)<answer>’.
+  {name} notices, sees or realizes the
+  unexpected event in this story, simply
+  output the original story with nothing
+  changed.
+  However, if the sentence says you are not
+  aware of the changes in this story, output
+  only the events you know, i.e., the
+  sentences before the unexpected event
+  happens.
+  Output either the original story or the
+  edited story, nothing else.
+  Format your answer as follows:
+  Sees/Notices/Realizes: (Yes/No)
+  Story:
+
+
+
+
+      Llama-2-chat
+  Consider this story with an unexpected
+  event.
+  {story}
+                                                      Llama-2-chat
+  Does the story say that {name}                      Answer the questions based on the context.
+  notices/sees/realizes the unexpected                Keep your answer concise, few words are
+  event?                                              enough, maximum one sentence. Answer as
+  If so, simply output the original story             ’Answer:<option>)<answer>’.
+  with nothing changed. However, if {name}            {perspective}
+  is not aware of the changes in this story,          You are {name}.
+  output only the events that {name} knows,
+  i.e., the events before the unexpected              {question}
+  event happens.                                      Choose the most straightforward answer.
+
+
+                                               8304
+C    Single Prompts                                     BigTOM
+                                                        I will give you a short story, and a
+                                                        question that asks about the story. Your
+                                                        task is in two steps.
+                                                        Step 1: Imagine you are {name}, and
+                                                        consider this story that has an unexpected
+                                                        event.
+                                                        {story}
+                                                        If the last sentence of the story says
+                                                        {name} notices, sees or realizes the
+                                                        unexpected event in this story, simply
+                                                        output the original story with nothing
+                                                        changed.
+                                                        However, if the sentence says you are not
+                                                        aware of the changes in this story, output
+                                                        only the events you know, i.e., the
+                                                        sentences before the unexpected event
+                                                        happens.
+                                                        Output either the original story or the
+                                                        edited story, nothing else.
+                                                        Format your answer for step 1 as follows:
+                                                        Sees/Notices/Realizes: (Yes/No)
+                                                        Story:
+                                                        2. You will then imagine you are the main
+                                                        character, {name}, then answer the
+                                                        question given to you based on the story
+                                                        you have rewritten. Ignore the previous
+    ToMI                                                story – your rewritten story is now the
+                                                        new story. Do not output a blank answer or
+    I will give you a sequence of events about          say you do not have enough information –
+    some characters, that takes place in                you must choose either choice a) or choice
+    multiple locations. and a question that             b). Answer as ’<option>) <answer>’.
+    asks about the sequence of events. Your             Here is the story and question.
+    task is in two steps.                               Story: {story}
+    Step 1. You will first output only the              Question: {question}
+    events that the specified character,                Format your answer as follows:
+    {character}, knows about.                           Step 1:
+    Here are a few rules:                               Step 2:
+    1. A character knows about all events that          <answer>
+    they do.
+    2. If a character is in a certain
+    room/location, that character knows about
+    all other events that happens in the room.
+    This includes other characters leaving or
+    exiting the location, the locations of
+    objects in that location, and whether
+    somebody moves an object to another place.
+    3. If a character leaves a location, and
+    is NOT in that location, they no longer
+    know about any events that happen within
+    that location. However, they can re-enter
+    the location.
+    Step 2. You will then imagine you are the
+    main character, {character}, then answer
+    the question given to you based on the
+    story you have rewritten. Ignore the
+    previous sequence of events – your
+    rewritten sequence of events are now the
+    new events. Do not output a blank answer
+    or say you do not have enough information.
+    Do Step 1 and Step 2 combined.
+    Story: {story}
+    Output the sentences that only {character}
+    knows about.
+    Question: {question}
+    Format your answer as follows:
+    Step 1: (list of events)
+    Step 2: Answer: (answer to question)
+
+
+                                                 8305
+D    Domain Specific (Few-Shot) Prompts                 BigTOM
+                                                        I will give you an excerpt. Your task is
+                                                        three steps:
+                                                        1. There is a sentence that describes how
+                                                        the situation unexpectedly changed.
+                                                        Identify this sentence.
+                                                        2. Identify if the main character comes to
+                                                        know about, or notices, this change at the
+                                                        end.
+                                                        3. If the main character does not know
+                                                        about this change, edit the excerpt and
+                                                        output the part of the excerpt BEFORE the
+                                                        sentence that describes the change. If the
+                                                        main character does know about the change,
+                                                        do not edit the excerpt, and output the
+                                                        original story.
+                                                        Here are some examples.
+                                                        Story: Olumide, a skilled woodcarver in a
+                                                        Nigerian village, is preparing to carve a
+                                                        beautiful sculpture for the village chief.
+                                                        Olumide wants to use a sharp chisel to
+    ToMI                                                create intricate details on the sculpture.
+                                                        Olumide observes his set of chisels and
+    The following is a sequence of events               sees one that appears to be sharp and in
+    about some characters, that takes place in          perfect condition. However, while Olumide
+    multiple locations.                                 is talking to a fellow artisan, a child
+    A character does not know about any events          from the village accidentally drops the
+    before they enter a location.                       chisel, causing it to become blunt and
+    If a character is in a certain location,            damaged. Olumide does not notice the
+    the character knows about the location of           damaged chisel on the ground.
+    all objects within that location. The               Sentence: However, while Olumide is
+    character also knows if other agents enter          talking to a fellow artisan, a child from
+    or leave that location. They also know if           the village accidentally drops the chisel,
+    other agents move objects around.                   causing it to become blunt and damaged.
+    If a character leaves that location, they           Knows about or notices change: No
+    no longer know about anything that occurs           Edit: Olumide, a skilled woodcarver in a
+    within that location, or changes in                 Nigerian village, is preparing to carve a
+    locations of objects.                               beautiful sculpture for the village chief.
+    However, note that a character can                  Olumide wants to use a sharp chisel to
+    re-enter a location.                                create intricate details on the sculpture.
+    Here are a few examples.                            Olumide observes his set of chisels and
+    Story:                                              sees one that appears to be sharp and in
+    1 Lily entered the dining room.                     perfect condition.
+    2 William entered the dining room.                  Story:
+    3 The underpants is in the box.                     {story}
+    4 The box is in the dining room.
+    5 William exited the dining room.
+    6 Abigail entered the cellar.
+    7 William dislikes the eggplant
+    8 Abigail exited the cellar.
+    9 William entered the dining room.
+    10 Lily moved the underpants to the
+    suitcase.
+    11 The suitcase is in the dining room.
+    What events does William know about?
+    William knows about the following events:       E    Baseline Prompts
+    2 William entered the dining room.
+    3 The underpants is in the box.
+    4 The box is in the dining room.
+    5 William exited the dining room.
+    9 William entered the dining room.
+    10 Lily moved the underpants to the
+    suitcase.                                           0-shot
+    11 The suitcase is in the dining room.
+    ... (3x)                                            Answer the questions based on the context.
+    Story:                                              Keep your answer concise, few words are
+    {story}                                             enough, maximum one sentence. Answer as
+    What events does {character} know about?            ’Answer:<option>)<answer>’.
+
+
+                                                 8306
+    0-shot CoT
+    Answer the questions based on the context.
+    Reason step by step before answering in
+    ’Thought: Let’s think step by step’. Write
+    your final answer as
+    ’Answer:<option>)<answer>’. Always pick an
+    option, do not say none of the above or
+    that there is not enough information.
+    {question}
+    {answer choices}
+
+
+F    Non-Instruction Tuned Models
+Non-instruction tuned models, such as Llama-2-7b
+or Llama-2-13b, cannot be prompted with the same
+instructional prompts. These models are usually
+evaluated by 1) setting up a prompt such that a natu-
+ral continuation of the prompt will illicit the desired
+response, or 2) giving several few-shot examples
+in the desired format.
+   However, in investigations done with Llama-2-
+13b and Llama-2-7b, the former method resulted
+not in perspective taking, but instead a continua-
+tion of the question that the prompt poses, while
+the latter method would no longer be a zero-shot
+method of evaluating theory of mind.
+   Thus, we limit our investigation to fine-tuned
+instruction-following models.
+
+G Breakdown of Results Across Question
+  Types
+
+
+
+
+                                                      8307
+Table 3: Results on BigTOM dataset. sim* methods are ablations of S IM T O M, -dom is the domain-specific
+perspective-taking, -1prompt is the single prompt ablation. SC-CoT is Self-Consistency Chain of Thought (Wang
+et al., 2022) and ToT is Tree-of-Thoughts (Yao et al., 2023).
+
+ model                  method                 fb       all       tb    action-fb    action-tb       belief-fb    belief-tb
+ Llama2-7b-chat         0-shot            47.50     53.62     59.75        41.50           68.00        53.50        51.50
+ Llama2-7b-chat         0-shot CoT        31.50     48.62     65.75        23.50           70.00        39.50        61.50
+ Llama2-7b-chat         S IM T O M        70.50     57.25     44.00        66.00           50.50        75.00        37.50
+ Llama2-13b-chat        0-shot            41.25     51.38     61.50        36.00           59.00        46.50        64.00
+ Llama2-13b-chat        0-shot CoT        52.25     56.00     59.75        52.00           57.50        52.50        62.00
+ Llama2-13b-chat        S IM T O M        61.75     58.00     54.25        61.00           55.50        62.50        53.00
+ gpt-3.5-turbo          0-shot            41.00     66.38     91.75        12.50           96.00        69.50        87.50
+ gpt-3.5-turbo          0-shot CoT        56.25     75.88     95.50        41.00           96.00        71.50        95.00
+ gpt-3.5-turbo          S IM T O M        70.50     81.62     92.75        63.00           95.50        78.00        90.00
+ gpt-3.5-turbo          sim-1prompt       50.75     54.75     58.75        46.00           69.50        55.50        48.00
+ gpt-3.5-turbo          SC-CoT            54.75     75.63     96.50        30.50           98.00        79.00        95.00
+ gpt-3.5-turbo          ToT               15.75     53.88     92.00         8.50           94.50        23.00        89.50
+ gpt-3.5-turbo          sim-dom           90.50     91.50     92.50        86.00           91.00        95.00        94.00
+ gpt-4                  0-shot            89.00     92.50     96.00        79.00           96.00        99.00        96.00
+ gpt-4                  0-shot CoT        93.25     95.50     97.75        87.50           98.00        99.00        97.50
+ gpt-4                  S IM T O M        92.00     95.00     98.00        90.00           98.00        94.00        98.00
+ gpt-4                  sim-dom           96.25     95.38     94.50        98.00           95.00        94.50        94.00
+
+Table 4: Results on ToMI dataset. sim* methods are ablations of S IM T O M, -dom is the domain-specific perspective-
+taking, -1prompt is the single prompt ablation. *-rules is the 0-shot versions with the same rules as added during
+S IM T O M prompting to describe ToMI’s quirks. We find that this does not perform differently than without adding
+these rules, verifying that the rules, while helpful for our perspective-taking approach, do not artificially inflate our
+method’s performance relative to the baselines. The columns are the different question types: nt means “no-tom”,
+a control question type asking about a person that has not witnessed a change. Mem-real are the average of the
+memory and reality question type scores.
+
+ model                  method                 fb       all       tb    fo-nt       fo-t     so-nt      so-t     mem-real
+ Llama2-7b-chat         0-shot            28.25     44.50     50.75     49.00    29.00      52.50     27.50         64.50
+ Llama2-7b-chat         0-shot CoT        24.00     43.70     58.75     66.50    23.50      51.00     24.50         53.00
+ Llama2-7b-chat         S IM T O M        40.00     48.10     46.50     49.50    45.00      43.50     35.00         67.50
+ Llama2-13b-chat        0-shot            39.25     51.00     50.25     66.00    43.50      34.50     35.00         76.00
+ Llama2-13b-chat        0-shot CoT        16.50     45.00     63.50     70.50    15.50      56.50     17.50         65.00
+ Llama2-13b-chat        S IM T O M        35.50     61.10     72.00     70.50    37.00      73.50     34.00         90.50
+ gpt-3.5-turbo          0-shot            67.25     68.60     54.25     73.50    64.00      35.00     70.50        100.00
+ gpt-3.5-turbo          0-shot CoT        34.00     64.10     77.50     85.50    31.50      69.50     36.50         97.50
+ gpt-3.5-turbo          0-shot-rules      71.50     66.80     48.25     58.00    69.50      38.50     73.50         94.50
+ gpt-3.5-turbo          S IM T O M        81.00     72.80     51.00     64.50    85.00      37.50     77.00        100.00
+ gpt-3.5-turbo          CoT-rules         78.75     66.60     48.00     65.50    82.00      30.50     75.50         79.50
+ gpt-3.5-turbo          sim-1prompt       58.75     67.50     60.00     66.00    71.50      54.00     46.00        100.00
+ gpt-3.5-turbo          sim-dom           85.50     79.30     62.75     78.50    89.00      47.00     82.00        100.00
+ gpt-3.5-turbo          SC-CoT            33.50     66.30     80.50     87.00    29.00      74.00     38.00         88.50
+ gpt-3.5-turbo          ToT               25.75     59.20     80.00     77.00    33.00      83.00     18.50         84.50
+ gpt-4                  0-shot            25.50     66.50     90.75     99.50     2.00      82.00     49.00        100.00
+ gpt-4                  0-shot CoT        74.25     74.40     61.75     84.50    63.00      39.00     85.50        100.00
+ gpt-4                  S IM T O M        87.75     87.80     81.75     92.50    95.00      71.00     80.50        100.00
+ gpt-4                  sim-dom           91.50     90.70     85.25     96.00    98.00      74.50     85.00        100.00
+
+
+                                                         8308
+

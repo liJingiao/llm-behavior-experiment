@@ -1,0 +1,1580 @@
+     Stochastic Chameleons                                : Irrelevant Context Hallucinations Reveal
+                                 Class-Based (Mis)Generalization in LLMs
+                               Ziling Cheng1,2 * Meng Cao1,2 *
+                     Marc-Antoine Rondeau1 Jackie Chi Kit Cheung1,2,3
+                        1
+                          Mila – Quebec Artificial Intelligence Institute
+                       2
+                          McGill University 3 Canada CIFAR AI Chair
+     {ziling.cheng, meng.cao}@mail.mcgill.ca, {ma.rondeau, cheungja}@mila.quebec
+
+                                Abstract
+            The widespread success of large language mod-
+            els (LLMs) on NLP benchmarks has been ac-
+            companied by concerns that LLMs function pri-
+            marily as stochastic parrots that reproduce texts
+            similar to what they saw during pre-training,
+            often erroneously. But what is the nature of
+            their errors, and do these errors exhibit any
+            regularities? In this work, we examine irrele-
+            vant context hallucinations, in which models
+            integrate misleading contextual cues into their
+            predictions. Through behavioral analysis, we
+            show that these errors result from a structured
+            yet flawed mechanism that we term class-based
+            (mis)generalization, in which models combine
+            abstract class cues with features extracted from
+            the query or context to derive answers. Fur-
+                                                                    Figure 1: Examples demonstrating class-based
+            thermore, mechanistic interpretability experi-
+                                                                    (mis)generalization with Llama-3 (8B).
+            ments on Llama-3, Mistral, and Pythia across
+            39 factual recall relation types reveal that this
+            behavior is reflected in the model’s internal
+            computations: (i) abstract class representations        occurrences in pre-training data (Bender et al.,
+            are constructed in lower layers before being re-        2021). This view is supported by evidence that
+            fined into specific answers in higher layers, (ii)      LLMs can reproduce training artifacts, exploit spu-
+            feature selection is governed by two competing          rious correlations, and fail when faced with dis-
+            circuits — one prioritizing direct query-based          tribution shifts, among other issues (Carlini et al.,
+            reasoning, the other incorporating contextual           2021; Zhou et al., 2024; Dziri et al., 2023; Wu et al.,
+            cues — whose relative influences determine the          2024c; Mirzadeh et al., 2024).
+            final output. Our findings provide a more nu-
+            anced perspective on the stochastic parrot argu-
+                                                                       In this work, we argue that more deeply exam-
+            ment: through form-based training, LLMs can             ining model errors can reveal insights into LLM
+            exhibit generalization leveraging abstractions,         behaviors and generalization capabilities. In par-
+            albeit in unreliable ways based on contextual           ticular, we examine a specific and underexplored
+            cues — what we term stochastic chameleons.1             type of error — irrelevant context hallucinations
+                                                                    — to investigate the mechanisms through which
+    1       Introduction                                            LLMs integrate contextual information into their
+    The remarkable success of LLMs on various NLP                   predictions. We introduce a controlled experimen-
+    benchmarks has been accompanied by concerns                     tal setting where LLMs receive irrelevant contex-
+    that they function primarily as “stochastic parrots”            tual information alongside a query (Figure 1).
+    that operate by “haphazardly stitching together se-                By artificially controlling the context and query
+    quences of linguistic forms” using statistical co-              pairing, this setup allows us to explore how LLMs
+        * Equal contribution.
+                                                                    behave in situations they were unlikely to have
+        1
+        Code   available  at:     https://github.com/               encountered in pre-training. Additionally, by fo-
+    ziling-cheng/Irrelevant-Context-Hallucination.                  cusing on incorrect answers, we sidestep the data
+                                                                 30187
+Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pages 30187–30214
+                             July 27 - August 1, 2025 ©2025 Association for Computational Linguistics
+leakage issue, which is primarily concerned with           can flip model predictions (e.g., flipping “Japanese”
+memorization of correct answers (Balloccu et al.,          to “French”), further confirming this competitive
+2024; Xu et al., 2024b). Thus, these controls re-          interaction. These findings support the class com-
+duce the possibility that answers stem purely from         ponent of our hypothesis and illustrate how models
+pattern matching from pre-training data, allowing          select features to combine with the abstract class.
+us to better isolate prediction shifts driven by added        Crucially, our findings suggest that LLMs go
+context.                                                   beyond mere parroting: they exhibit a form of gen-
+   Through qualitative analysis of irrelevant con-         eralization that leverages abstract class structures
+text hallucinations, as demonstrated in Figure 1,          based on contextual cues in ways that are system-
+we hypothesize that these errors exhibit struc-            atic, though not necessarily reliable. These ab-
+tured regularities. We posit that LLMs exhibit a           stractions result from next-token prediction during
+structured but flawed mechanism, which we term             pre-training and extend beyond simple ontologi-
+the class-based (mis)generalization hypothesis.            cal hierarchies (e.g., superset-subset relationships),
+Specifically, LLMs can leverage abstract class cues        shaping the model’s internal feature selection pro-
+(e.g., “language”), use them to select features in         cess. To capture this behavior, we propose the
+the prompt (e.g., selecting the country feature of         metaphor of stochastic chameleons — models that,
+“Honda”, instead of the year feature), and combine         like a chameleon changing colors in response to
+these abstract classes with the selected features to       environmental and internal signals, dynamically
+produce an answer (e.g., “Language” + “Japan” →            shift their outputs based on contextual cues. How-
+“Japanese”). This hypothesis suggests that LLMs            ever, this does not contradict the central claim of
+can generalize in a systematic and structured man-         the stochastic parrot argument: that LLMs lack
+ner in this setting, but as we will show, their re-        true language understanding when trained solely
+liance on these abstractions is often flawed. In           on linguistic form (Bender and Koller, 2020).
+some cases, it leads to correct answers via an in-            In summary, our main contributions are:
+correct computation (e.g., “Portuguese” in Figure              • We introduce a novel setting that isolates how
+1), while in others, it results in hallucinations (e.g.,         LLMs integrate irrelevant contexts, distin-
+“Japanese”, “Norwegian” in Figure 1).                            guishing generalization from memorization.
+   To validate our hypothesis, we conduct a behav-             • We provide empirical evidence that LLMs ex-
+ioral analysis of how irrelevant context influences              hibit class-based (mis)generalization, demon-
+model predictions on Llama-3, Mistral and Pythia.                strating sensitivity to abstract class structures
+Specifically, we perform annotations on 500 data                 beyond statistical co-occurrences.
+points and show that 70% of observed shifts pat-               • We uncover the internal computational mecha-
+tern with our class-based generalization hypothesis.             nisms of class-based generalization, revealing
+Moreover, statistical analyses confirm that this phe-            competing circuits and hierarchical class rep-
+nomenon is systematic rather than due to chance or               resentations.
+being query-dependent.                                         • We propose a behavioral analysis framework
+   We provide further evidence of this generaliza-               that moves beyond accuracy-based evaluation,
+tion mechanism via mechanistic interpretability ex-              emphasizing the importance of understanding
+periments which probe the model’s internal compu-                LLMs’ internal mechanisms.
+tations across Transformer layers (Vaswani et al.,
+2017). Our findings reveal two key mechanisms              2   Related Work
+that further support our hypothesis: (i) LLMs make
+hierarchical class-to-instance predictions; i.e., they     LLM Evaluation Traditional NLP evaluation
+construct abstract class representations (e.g., “lan-      prioritizes test set performance but often overlooks
+guages”) before refining them to more specific an-         how models arrive at their final answers. For LLMs
+swers (e.g., “Japanese”). (ii) Feature selection is        trained on Internet-scale data, distinguishing gen-
+governed by competing circuits: we identify one            uine generalization from memorization or spuri-
+pathway that prioritizes direct query-based reason-        ous correlations is challenging, especially with po-
+ing and another that incorporates contextual cues.         tential data leakage (Dziri et al., 2023; Wu et al.,
+Their relative strength determines the final output.       2024c; Zhou et al., 2024; Balloccu et al., 2024; Xu
+Attention knockout experiments show that ablating          et al., 2024b). Prior work addresses this through
+key heads involved in the context-based pathway            data extraction (Carlini et al., 2021), statistical
+                                                      30188
+                                                            Class-Based (Mis)Generalization
+    Class + Context Feature -->   Ctx-Based                                                                   Class   +    Query Feature --> Query-Based
+                                  Candidates                                                                                                  Candidates
+                                                       Context       + Query -→ Answer
+    Language                       Japanese                                                                   Language                          French
+                                                        Feature      +   Class      = Answer
+
+           Context-Based Pathway                    Example Feature Selection and Combination                             Query-Based Pathway
+                                                        C                                     Q
+
+                                       Honda Civic, produced by Honda. The original language of A Secret was _____
+
+
+
+
+                                               Context Features                            Query Features
+
+
+                 Figure 2: Class-based generalization framework: feature selection and combination.
+
+
+control (Min et al., 2022), adversarial perturba-                              Mechanistic Interpretability Mechanistic inter-
+tions (Mirzadeh et al., 2024), and error analysis                              pretability methods (Olah, 2022; Nanda, 2023)
+(Dziri et al., 2023). In contrast, we take a behavior-                         reverse-engineer LLMs via vocabulary projection
+focused approach in a controlled setting, reduc-                               (Belrose et al., 2023; Geva et al., 2022; nostal-
+ing the likelihood of pure pattern matching. Addi-                             gebraist, 2020) and computational interventions
+tionally, by analyzing errors — often ignored by                               (Ghandeharioun et al., 2024; Stolfo et al., 2023;
+accuracy-based metrics — we gain deeper insights                               Finlayson et al., 2021; Hong et al., 2025; Cheng
+into model mechanisms.                                                         et al., 2025). Extending prior work (Merullo et al.,
+                                                                               2024; Wu et al., 2024b; Lv et al., 2024; Yu et al.,
+Irrelevant Context Hallucinations Hallucina-                                   2023, 2024; Geva et al., 2022), we use these tech-
+tions in text generation have been studied in the                              niques to uncover how LLMs are influenced by
+absence of context (McKenna et al., 2023; Kang                                 irrelevant contexts. By linking behavioral analysis
+et al., 2024; Meng et al., 2022) and in cases with                             with internal mechanisms, we provide a mechanis-
+relevant context (Cao et al., 2020, 2022a; Maynez                              tic perspective on irrelevant context hallucinations.
+et al., 2020; Lee et al., 2018; Adlakha et al., 2024;
+Chuang et al., 2024; Petroni et al., 2020; Li et al.,                           3     Framework and Hypothesis
+2023). We focus on irrelevant context hallucina-
+tions, where extraneous context influences predic-                             In this section, we describe the abstract framework
+tions. Unlike prior work on evaluating or miti-                                illustrated in Figure 2 and present our class-based
+gating such errors (Yoran et al., 2024; Cuconasu                               (mis)generalization hypothesis.
+et al., 2024; Wu et al., 2024a; Petroni et al., 2020;                          Setting Consider a query Q representing the
+Cao et al., 2022b; Li et al., 2023; Shi et al., 2023;                          question of interest and an irrelevant context C
+Mirzadeh et al., 2024), we explain their underly-                              prepended to it. Let AQ denote the model’s an-
+ing class-based (mis)generalization mechanisms,                                swer to Q alone and AC+Q denote the answer
+conceptually and mechanistically.                                              with the added context (contextual answer). We
+                                                                               define context features and query features as sets
+Interplay Between Contextual and Parametric
+                                                                               of properties or attributes of the entities in C and
+Knowledge Prior work primarily focuses on re-
+                                                                               Q, respectively. For example, for context features
+solving conflicts between relevant contexts and
+                                                                               in Figure 2, the feature names are {Type, Coun-
+parametric knowledge – determining when models
+                                                                               try, Year, etc.}, with corresponding feature values
+should rely on one over the other (Jin et al., 2024;
+                                                                               {Model, Japan, 1972, etc.}. The class of AC+Q de-
+Xu et al., 2024a; Su et al., 2024; Yuan et al., 2024;
+                                                                               rived from Q (e.g., “languages”) determines which
+Marjanovic et al., 2024; Neeman et al., 2023; Chen
+                                                                               features the model should prioritize (e.g., derive
+et al., 2022; Longpre et al., 2021). In contrast, we
+                                                                               “Japanese” based on the “Country: Japan” feature).
+study irrelevant context hallucinations, where un-
+related and non-contradicting context still shapes                              Class-Based (Mis)Generalization Hypothesis
+predictions, competing with parametric knowledge                                Given the setup C +Q, when the context influences
+related to the query.                                                           the model predictions, instead of relying solely on
+                                                                         30189
+C +Q                                               AQ        Ccand.           Qcand.          AC+Q            Case
+C: Honda Civic, produced by Honda.                                            French,                         Context-
+                                                   French    Japanese                         Japanese
+Q: The original language of A Secret was                                      English                         dominant
+C: City of Boroondara is in Melbourne.                                        Malaysia,                       Query-
+                                                   Malaysia Australia                         Malaysia
+Q: Prime Minister of Malaysia is a legal term in                              Malaysian                       dominant
+
+    Table 1: Examples of context- and query-dominant categorizations with context- and query-based candidates.
+
+
+the query, we hypothesize a structured mechanism                textual variation. We randomly sample 100 ex-
+by which the model integrates contextual informa-               amples per subdatasets2 , generating 3,900 context
+tion into its predictions. Specifically, we propose             variations per query, totaling 106M examples. The
+class-based generalization, where language mod-                 model’s top-1 prediction is AC+Q .
+els process context in two steps: they first derive
+an abstract class (e.g., “languages”) and then select           Context- and Query-Based Candidates To
+and combine relevant features from C or Q (e.g.,                make the definitions from Sec. 3 precise, we de-
+“Japan” or “France”) to generate an answer (e.g.,               fine a context-based candidate x ∈ Ccand. to be
+“Japanese’ or “French”).                                        a candidate among the top three3 predictions un-
+   Let query-based candidates be answers de-                    der C + Q but not among the top ten4 predictions
+rived from query features combined with the class               under Q. A query-based candidate x ∈ Qcand. ap-
+(e.g., “French”) and context-based candidates                   pears in the top predictions under both conditions.
+                                                                            top3
+be answers derived from context features (e.g.,                 Note that AC+Q = Ccand. ∪ Qcand. . See Table 1 for
+“Japanese”). If AC+Q is the query-based candidate,              examples.
+we define the case as query-dominant; otherwise,                      Atop3
+                                                                       C+Q := {x | x ∈ top 3 candidates under C + Q}        (1)
+it is context-dominant. These terms emphasize                         Atop10 := {x | x ∈ top 10 candidates under Q}         (2)
+                                                                       Q
+the final outcome rather than the intermediate steps.
+                                                                       Ccand. := {x | x ∈ Atop3      / Atop10
+                                                                                           C+Q and x ∈  Q }                 (3)
+See Table 1 for examples.
+   A special case arises when a token of the ex-                      Qcand. := {x | x ∈ Atop3         top10
+                                                                                          C+Q and x ∈ AQ }                  (4)
+pected class is already present in the prompt (Ap-
+pendix B), making the model more likely to copy                 5         Behavioral Analysis of Contextual
+it directly (Jiang et al., 2024).                                         Answers
+                                                                We now investigate how irrelevant context influ-
+4     Dataset and Experimental Design
+                                                                ences model predictions, verifying our class-based
+Models & Datasets We evaluate three pretrained                  (mis)generalization hypothesis through textual-
+LM families — Llama-3 (8B, 70B) (AI@Meta,                       level behavioral analysis. Specifically, we examine:
+2024), Mistral v0.3 (7B) (Jiang et al., 2023), and              (1) whether irrelevant context causes behavioral
+Pythia (6.9B-deduped, 12B-deduped) (Biderman                    changes (Sec. 5.1), (2) whether the influence of
+et al., 2023) — using their base versions to assess             irrelevant context aligns with our hypothesis (Sec.
+raw model behavior. We use the ParaRel dataset                  5.2). (3) whether the observed correlation between
+(Elazar et al., 2021), which consists of 39 factual             irrelevant context and context-based candidates is
+QA subdatasets. Dataset statistics are provided in              statistically significant (Sec. 5.3).
+Table 15 in the Appendix A. Both Q and C are
+sourced from these datasets. Experiments are run                5.1        Behavioral Changes Induced by
+on two RTX8000 GPUs.                                                       Irrelevant Context
+                                                                In this section, we investigate whether adding irrel-
+Experimental Setup We compare two condi-
+                                                                evant context leads to behavioral changes in model
+tions: 1) Q-only, where each Q is formatted using
+                                                                predictions. From an accuracy perspective, we
+a predefined template and a subject-relation-object
+                                                                observe a slight decrease: across 39 subdatasets,
+(s, r, o) triplet from ParaRel, resulting in 27.6K
+                                                                      2
+queries. The model’s top-1 prediction is AQ . 2)                     P264 has only 53 examples, so we include all of them.
+                                                                      3
+C+Q, where each Q is prepended with context                          A threshold of three ensures that classified context-based
+                                                                candidates are strongly influenced by context.
+demonstrations from other subdatasets spanning                     4
+                                                                     A threshold of 10 ensures that classified context-based
+various relation types, introducing controlled con-             candidates are not plausible answers under Q alone.
+
+                                                            30190
+Case       Top-3 Candidates             Llama Mistral Pythia       examples are provided in Appendix D.
+No in-     1.     All query-based       47.9% 48.0% 39.3%              We perform this annotation on a randomly sam-
+fluence    (Ccand. = ∅)                                            pled set of 500 context-based candidates across
+Query-   2. Mix, top-1 is query-        27.9% 25.7% 27.2%          different subdatasets. Our results reveal that 81.6%
+dominant based                                                     of the responses incorporate features from the pro-
+         3. Mix, top-1 is context-      15.1% 17.0% 19.2%          vided context, 84.4% belong to the correct class,
+Context- based                                                     and 71.0% satisfy both criteria – combining iden-
+dominant
+         4. All context-based           10.1% 10.3% 14.3%          tifiable context features with the correct abstract
+         (Qcand. = ∅)
+                                                                   class. This finding provides strong evidence for our
+Table 2: Breakdown of samples according to the com-                hypothesis as a majority of these samples can be
+position of Atop-3                                                 explained by the hypothesis. Table 3 provides illus-
+              C+Q , based on 106M datapoints. Detailed
+results can be found in Table 9 in the Appendix.                   trative examples of the model’s output adapting to
+                                                                   contextual cues.
+
+the accuracy for Llama-3 drops from 47.2% to                       5.3   Statistical Validation of Contextual
+43.1%, and for Mistral, from 38.2% to 35.3% (Ta-                         Influence
+ble 8 in Appendix). While these changes are mod-                   Next, we investigate whether the correlation be-
+est, accuracy alone does not provide a complete                    tween irrelevant context and context-based candi-
+picture of changes in model predictions. To ad-                    dates is statistically significant. To quantify the
+dress this gap, we measure the answer change                       dependence between a context C (e.g., Honda) and
+rate (∆ Rate) after adding the irrelevant context:                 its associated context-based candidate Ccand. (e.g.,
+           |A     ̸=AQ |
+∆Rate = #C+Q  datapoints . For Llama-3, 38.3% of re-               Japanese), we compute the pointwise mutual infor-
+sponses changed after adding irrelevant context,                   mation (PMI) between them. Specifically, we sam-
+while for Mistral, nearly half of the datapoints                   ple 100 distinct contexts from various subdatasets.
+(48.0%) experience a shift in predictions (Table                   Each context is paired with 100 different queries
+8 in Appendix).                                                    belonging to the same expected class (e.g., lan-
+   We further examine the cases under the C +                      guages, places, etc.), resulting in 10,000 instances
+                                                top-3
+Q condition based on the composition of (AC+Q )                    per class. Since context-based candidates are de-
+(Table 2). Roughly 48%5 of samples are unaffected                  termined independently of the queries, each con-
+by the irrelevant context for Llama and Mistral                    text Ci is paired with its corresponding candidate
+(case 1), meaning all top-3 candidates are query-                  Ccand.,i , regardless of the 100 queries. This yields
+based). However, when predictions are influenced                   100 pairs of (Ci , Ccand., i ) per class, such as (Honda,
+by the added context (cases 2, 3 and 4), about half                Japanese) for languages, and (Honda, Japan) for
+of these instances (49.5% for Llama, 52.5% for                     places. The mean PMI across the 100 pairs of each
+Mistral) become context-dominant. These results                    class is computed as:
+demonstrate the influence of irrelevant contexts,                                             100
+even if the overall accuracy is little changed.                                         1 X
+                                                                           µobserved =      PMI(Ci , Ccand., i ) (5)
+                                                                                       100
+                                                                                              i=1
+5.2 Human Annotation of Context-Based
+                                                                                                    P (Ci , Ccand., i )
+    Candidates                                                        PMI(Ci , Ccand., i ) = log                         . (6)
+                                                                                                   P (Ci )P (Ccand., i )
+Next, we examine whether these behavioral
+changes pattern with our class-based generalization                In this formula, P (Ci ) = 1/100, since we have
+hypothesis. To do so, we annotate context-based                    100 distinct contexts. P (Ccand., i ) is estimated
+candidates, which capture the shifts induced by ir-                based on its frequency among all 10,000 gener-
+relevant context. We assess whether each answer                    ated answers AC+Q for the given expected class.
+explicitly integrates identifiable features from the               Similarly, P (Ci , Ccand., i ) is computed from its co-
+context and combines them with the expected class                  occurrence within these samples. Across all mod-
+indicated by the query. Annotation procedure and                   els and expected classes, the mean PMI is ap-
+                                                                   proximately 4, suggesting a strong association be-
+   5
+     Due to the conservative choice of 10 for Atop-10
+                                                Q     , some an-   tween contexts and their corresponding candidates.
+swers in case 1 might also be context-based but already appear
+in the top-10 predictions under the Q condition. Therefore,        To formally assess statistical dependence, we per-
+we exclude these cases from further analyses.                      form a one-sample t-test against the null hypothesis
+                                                              30191
+Query      Ctx.       Context Demonstration + Query and Answer
+Type       Type
+           Person/    Prompt: Amilcare Ponchielli plays opera. The original language of A Hunting Accident was ______
+           Music      Answer: AC+Q = Italian, AQ = English
+Language
+           Make/      Prompt: Toyota Alphard, produced by Toyota. The original language of A Hunting Accident was
+           Model      ______ Answer: AC+Q = Japanese, AQ = English
+           Person/    Prompt: Indo-Greek Kingdom is follower of Buddhism. Alpha Island is a part of the continent of
+           Religion   ______ Answer: AC+Q = Asia, AQ = Alpha
+Place
+           Place      Prompt: Council of States of Switzerland is a legal term in Switzerland. Alpha Island is a part of the
+                      continent of ______ Answer: AC+Q = Europe, AQ = Alpha
+
+            Table 3: Examples of context-based candidates across different query and context types.
+
+
+E[PMI(Ci , Ccand., i )] = 0) (which would indicate            Models maintain a residual stream for each to-
+independence). With a p-value of 0.001, we reject             ken i, which accumulates information as it passes
+the null hypothesis, concluding that C and Ccand.             through each layer. At each layer, two key trans-
+exhibit significant dependence. (See Table 10 in              formations occur: attention update (Ai,l ) and MLP
+the Appendix for full results.)                               update (Mi,l ). Mathematically, the updates follow:
+                                                                                              0
+6   Mechanistic Analysis of Contextual                                           Ai,l = ATTN(Ri,l )                    (7)
+    Answers                                                                       1
+                                                                                 Ri,l           0
+                                                                                      = Ai,l + Ri,l                    (8)
+                                                                                               1
+We next investigate whether the models’ internal                                 Mi,l = MLP(Ri,l  )                    (9)
+computations reflect the class-based generalization                               2
+                                                                                 Ri,l            1
+                                                                                      = Mi,l + Ri,l                   (10)
+that we observed above. In Sec. 6.1, we use logit
+attribution to show that models construct abstract            where Ri,l1 is the residual stream after attention at
+class representations, supporting the class compo-                           2 is the final residual stream at layer
+                                                              layer l, and Ri,l
+nent of our hypothesis. In Sec. 6.2 and Sec. 6.3, we          l after the MLP update. (See Appendix F.)
+apply activation patching and attention knockout to
+reveal that feature selection in our hypothesis arise         Findings To understand how different tokens
+from competition between circuits, where dis-                 evolve across layers, we project the last token resid-
+                                                              ual stream RT,l1 (after attention) and R2 (after
+tinct query-based pathways (computing Qcand. ) and                                                        T,l
+context-based pathways (computing Ccand. ) com-               the MLP) onto the vocabulary space at each layer.
+pete to determine the final answer. These findings            Figure 3 tracks the logits for Ccand. , Qcand. , and
+provide mechanistic evidence for our hypothesis.              class tokens under the C + Q condition. Addi-
+                                                              tional results are provided in Appendix F. Figure 3
+Data We randomly draw 1,000 context-dominant                  reveals a hierarchical class-to-instance process in
+and 1,000 query-dominant datapoints from case                 answer generation. Early layers prioritize class to-
+2 and case 3 in Table 2 as these cases have both              ken logits (solid) like “languages”, suggesting that
+query- and context-based candidates.                          the model first constructs abstract class representa-
+                                                              tions. Around the middle layers, candidate answer
+6.1 Logit Attribution                                         logits (dashed/dotted) begin to rise, refining these
+Method To explore how models build answers                    abstract representations into concrete answers. In
+across layers, we apply logit attribution (nostalge-          Table 4, a concrete example of logit lens top-1 pre-
+braist, 2020) to trace predictions across layers by           dictions reveals how Llama-3 shifts from abstract
+projecting hidden states onto the vocabulary space.           class to concrete instances. This pattern supports
+Given a prompt with T tokens and a model with                 our hypothesis that models leverage class-based
+L layers, we extract hidden states at the last token          information in shaping their predictions.
+position hT,j ∈ Rd , where j ∈ {1, ..., L} and d is              Moreover, the figures highlight a competition
+the hidden size. These are projected onto the vocab-          between Ccand. (dashed) and Qcand. (dotted), par-
+ulary space using Unembed(LayerNorm(hT,j )) ∈                 ticularly in context-dominant cases (pink). In early
+R|V | , where the Unembed matrix corresponds to               layers, logits for Ccand. and Qcand. form two dis-
+the transpose of the input embedding weights.                 tinct groups, regardless of dominance. Around
+                                                         30192
+                                                                                             12
+               Ctx-Dominant Ctx Cand. (e.g., "Japanese")                                            Ctx-Dominant Ctx Cand. (e.g., "Japanese")                                               Ctx-Dominant Ctx Cand. (e.g., "Japanese")
+          14
+               Ctx-Dominant Query Cand. (e.g., "French")                                            Ctx-Dominant Query Cand. (e.g., "French")                                               Ctx-Dominant Query Cand. (e.g., "French")
+                                                                                                                                                                                      10
+               Ctx-Dominant Class (e.g., "Languages")                                        10     Ctx-Dominant Class (e.g., "Languages")                                                  Ctx-Dominant Class (e.g., "Languages")
+          12
+               Query-Dominant Ctx Cand. (e.g., "Australia")                                         Query-Dominant Ctx Cand. (e.g., "Australia")                                            Query-Dominant Ctx Cand. (e.g., "Australia")
+               Query-Dominant Query Cand. (e.g., "Malaysia")                                        Query-Dominant Query Cand. (e.g., "Malaysia")                                      8    Query-Dominant Query Cand. (e.g., "Malaysia")
+          10   Query-Dominant Class (e.g., "Languages")
+                                                                                              8     Query-Dominant Class (e.g., "Languages")                                                Query-Dominant Class (e.g., "Languages")
+
+
+
+  Logit                                                                              Logit                                                                                    Logit
+           8                                                                                                                                                                           6
+                                                                                              6
+           6                                                                                                                                                                           4
+                                                                                              4
+           4
+                                                                                                                                                                                       2
+                                                                                              2
+           2
+                                                                                                                                                                                       0
+           0                                                                                  0
+           0         5           10            15             20     25    30                 0           5           10            15             20         25    30                 0          5           10            15             20   25         30
+                            Layer (Residual Stream)                                                              Layer (Residual Stream)                                                                 Layer (Residual Stream)
+
+
+               (a) C+Q Token Logit (Llama)                                                        (b) C+Q Token Logit (Mistral)                                                            (c) C+Q Token Logit (Pythia)
+                                                                     1      2
+Figure 3: Logit attribution (C+Q condition) along residual stream (RT,l , RT,l ) reveals the construction of abstract
+class representation in the lower layers, with competition between Qcand. (dashed) and Ccand. (dotted) in the mid to
+higher layers. The example token in parenthesis correspond to Table 1. Additional results are in Appendix F.
+
+   L16                   L17                     L18                 L19          L20                L21                      L22                       L23         L24        L25              L27                L28                  L29          L30          L31
+languages         languages                    /is                 languages    languages         languages             languages                  languages       English    English        English            English            English      English          English
+    /is               /is                  languages                   /is        English           English               English                    English       English    English        English            English            English      English         Japanese
+
+
+Table 4: Logit lens on Llama-3 showing top-1 predictions shifting from abstract concepts (e.g., ‘languages’) to
+                                                                                                          1
+concrete instances (e.g., ‘English’ or ‘Japanese’) across layers. The first and second row correspond to RT,l , and the
+                2
+second row is RT,l , respectively. See Appendix F.2 for the corresponding prompt and associated probabilities.
+
+
+layer 14, Qcand. (dotted) in both cases begin to                                                                                             ϵ ∼ N (0, σ 6 )) injected into context or query topic
+split, followed by Ccand. (dashed) in layer 17. By                                                                                           S 1 embeddings, yielding perturbed activations
+                                                                                                                                             token
+layer 24, Ccand. (dark pink) surpass Qcand. (light                                                                                              hi,l , and the final log-probabilities of candidates
+                                                                                                                                                        S
+pink) logits in context-dominant settings, mark-                                                                                             log p(t| h1i,l ). (3) Restoration run: Same as the
+ing a decisive shift in the competition. After this,                                                                                         corrupted run, but iterating over all i and l, restor-
+the early two-group pattern reemerges but with                                                                                               ing each h0i∗ ,l∗ , while keeping the rest corrupted.
+reversed dominance — context-based candidates                                                                                                By injecting noise at context subject and ob-
+prevail in context-dominant cases, and query-based                                                                                           ject (context patching) or query subject position
+candidates in query-dominant cases. By layer 29,                                                                                             (query patching) and measuring the recovery of
+the final prediction is fully formed, with the top                                                                                           predictions, we differentiate context and query
+logits corresponding to the final output. These                                                                                              circuits, tracing how features from these tokens
+observations reveal key insights: (i) existence of                                                                                           propagate through the model and how they con-
+competition: even when the final prediction is                                                                                               tribute to context-based or query-based candidates.
+query-dominant, context-based candidates remain                                                                                                 The restoration effect for each i∗ and l∗ is cal-
+actively computed across layers. (ii) critical tran-                                                                                         culated as in Eq. 11, where t ∈ {Ccand. , Qcand. },
+sition (Layers 17–24): the decisive competition                                                                                              with higher values indicate stronger contributions.
+between query- and context-based candidates oc-
+curs primarily in this range, determining which                                                                                                                RE(i∗ , l∗ , t) = log p(t|h0i∗ ,l∗ ∪ h1−i∗ ,−l∗ )
+                                                                                                                                                                                             [
+candidate is promoted.                                                                                                                                                           − log p(t| h1i,l )             (11)
+6.2 Activation Patching                                                                                                                                      ∆query (i∗ , l∗ ) = RE(i∗ , l∗ , Qcand. )−
+Method To understand the competition between                                                                                                                                                RE(i∗ , l∗ , Ccand. )                                               (12)
+                                                                                                                                                                          ∗     ∗                             ∗        ∗
+Ccand. and Qcand. , we investigate whether dis-                                                                                                             ∆context (i , l ) = RE(i , l , Ccand. )−
+tinct context and query circuits exist within the                                                                                                                                           RE(i∗ , l∗ , Qcand. )                                               (13)
+model’s internal activations. We apply activation
+patching (Ghandeharioun et al., 2024; Meng et al.,                                                                                              In context and query circuits, we compute Eq. 13
+2022), a technique for causal intervention that se-                                                                                          (Figures 4a, 4c) and Eq. 12 (Figures 4b, 4d), re-
+lectively perturbs and restores activations to assess                                                                                        spectively. Comparing restoration effects maps
+their contribution. We conduct three model runs:                                                                                             circuits responsible for context- and query-based
+(1) Clean run: Standard forward passSwith the                                                                                                candidates and identifies where their competition
+original prompt, recording activations h0i,l . (2)                                                                                                      6
+                                                                                                                                                  We follow Meng et al. (2022) to set σ = 0.3 as three times
+Corrupted run: Forward pass with Gaussian noise                                                                                              of the empirical standard deviation of the input embeddings.
+
+                                                                                                                              30193
+  C_REL 0 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00        C_REL 0 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00
+*C_SUBJ 1 0.60 0.76 0.85 0.93 1.00 1.08 1.13 1.10 1.12 1.13 1.15 1.18 1.11 1.09 1.03 0.98 0.96 0.82 0.77 0.73 0.76 0.78 0.81 0.78 0.49 0.44 0.47 0.25 0.25 0.21 0.06 0.00 0.00 0.00       C_SUBJ 1 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00
+  C_REL 2 0.01 0.03 0.03 0.04 0.07 0.07 0.10 0.11 0.15 0.17 0.17 0.19 0.20 0.16 0.21 0.19 0.27 0.25 0.24 0.22 0.23 0.23 0.23 0.24 0.13 0.13 0.13 0.12 0.11 0.07 0.02 0.00 0.00 0.00        C_REL 2 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00
+ *C_OBJ 3 2.28 2.27 2.29 2.24 2.22 2.20 2.18 2.20 2.20 2.06 1.95 1.94 1.79 1.72 1.60 1.40 1.32 1.08 1.02 0.95 0.95 0.98 1.02 0.97 0.57 0.50 0.53 0.24 0.26 0.21 0.10 0.00 0.00 0.00        C_OBJ 3 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00
+  Q_REL 4 0.01 0.01 -0.01 0.00 0.03 0.03 0.04 0.03 0.05 0.10 0.10 0.10 0.14 0.16 0.18 0.17 0.23 0.25 0.24 0.25 0.25 0.26 0.27 0.31 0.28 0.30 0.30 0.35 0.32 0.19 0.11 0.00 0.00 0.00       Q_REL 4 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00
+ Q_SUBJ 5 -0.01-0.05-0.13-0.11-0.09-0.08-0.06-0.04-0.03-0.03-0.02-0.02-0.02-0.02-0.01 0.01 0.06 0.09 0.08 0.09 0.09 0.09 0.09 0.10 0.05 0.05 0.05 0.07 0.06 0.04 0.03 0.00 0.00 0.00     *Q_SUBJ 5 0.81 0.99 1.05 1.07 1.05 1.07 1.07 1.03 0.99 0.97 0.96 0.98 0.80 0.79 0.75 0.67 0.63 0.52 0.50 0.48 0.46 0.43 0.43 0.40 0.23 0.21 0.19 0.14 0.13 0.09 0.05 0.00 0.00 0.00
+  Q_REL 6 0.01 0.00 -0.01-0.02-0.01-0.01-0.00-0.00 0.02 0.03 0.05 0.04 0.06 0.09 0.11 0.15 0.28 0.49 0.54 0.67 0.67 0.71 0.74 0.84 1.15 1.24 1.32 1.53 1.50 1.55 1.66 1.75 1.75 1.75       Q_REL 6 0.00 0.01 0.03 0.04 0.05 0.04 0.05 0.06 0.11 0.14 0.15 0.16 0.22 0.25 0.35 0.45 0.66 0.80 0.81 0.86 0.86 0.89 0.89 0.91 1.02 1.03 1.05 1.06 1.05 1.05 1.06 1.10 1.10 1.10
+                L0
+                L1
+                L2
+                L3
+                L4
+                L5
+                L6
+                L7
+                L8
+                L9
+               L10
+               L11                                                                                                                                                                                       L0
+                                                                                                                                                                                                         L1
+                                                                                                                                                                                                         L2
+                                                                                                                                                                                                         L3
+                                                                                                                                                                                                         L4
+                                                                                                                                                                                                         L5
+                                                                                                                                                                                                         L6
+                                                                                                                                                                                                         L7
+                                                                                                                                                                                                         L8
+                                                                                                                                                                                                         L9
+                                                                                                                                                                                                        L10
+                                                                                                                                                                                                        L11
+               L12
+               L13
+               L14
+               L15
+               L16
+               L17
+               L18
+               L19
+               L20
+               L21
+               L22
+               L23                                                                                                                                                                                      L12
+                                                                                                                                                                                                        L13
+                                                                                                                                                                                                        L14
+                                                                                                                                                                                                        L15
+                                                                                                                                                                                                        L16
+                                                                                                                                                                                                        L17
+                                                                                                                                                                                                        L18
+                                                                                                                                                                                                        L19
+                                                                                                                                                                                                        L20
+                                                                                                                                                                                                        L21
+                                                                                                                                                                                                        L22
+                                                                                                                                                                                                        L23
+               L24
+               L25
+               L26
+               L27
+               L28
+               L29
+               L30
+               L31
+              FLN
+             E_o ut                                                                                                                                                                                     L24
+                                                                                                                                                                                                        L25
+                                                                                                                                                                                                        L26
+                                                                                                                                                                                                        L27
+                                                                                                                                                                                                        L28
+                                                                                                                                                                                                        L29
+                                                                                                                                                                                                        L30
+                                                                                                                                                                                                        L31
+                                                                                                                                                                                                       FLN
+                                                                                                                                                                                                      E_o ut
+
+
+                      (a) Context circuit in context-dominant case.                                                                                                                                              (b) Query circuit in context-dominant case.
+  C_REL 0 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00        C_REL 0 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00
+*C_SUBJ 1 0.30 0.42 0.48 0.50 0.54 0.60 0.64 0.63 0.65 0.67 0.69 0.72 0.69 0.68 0.63 0.60 0.59 0.50 0.47 0.44 0.45 0.47 0.48 0.46 0.28 0.26 0.27 0.17 0.16 0.14 0.04 0.00 0.00 0.00       C_SUBJ 1 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00
+  C_REL 2 0.01 0.02 0.02 0.02 0.04 0.05 0.05 0.06 0.07 0.08 0.08 0.10 0.11 0.10 0.13 0.12 0.15 0.14 0.14 0.13 0.13 0.13 0.13 0.13 0.06 0.06 0.06 0.06 0.06 0.04 0.02 0.00 0.00 0.00        C_REL 2 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00
+ *C_OBJ 3 1.18 1.22 1.25 1.21 1.18 1.15 1.13 1.15 1.16 1.12 1.07 1.06 0.98 0.95 0.89 0.79 0.75 0.62 0.59 0.56 0.57 0.58 0.59 0.57 0.31 0.27 0.30 0.13 0.15 0.12 0.06 0.00 0.00 0.00        C_OBJ 3 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00
+  Q_REL 4 0.00 0.02 -0.01-0.01 0.02 0.01 0.01 -0.02-0.01 0.02 0.02 0.02 0.05 0.09 0.10 0.10 0.13 0.14 0.14 0.14 0.15 0.15 0.16 0.18 0.17 0.18 0.18 0.21 0.19 0.11 0.06 0.00 0.00 0.00      Q_REL 4 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00
+ Q_SUBJ 5 -0.01-0.05-0.15-0.16-0.17-0.16-0.14-0.10-0.10-0.10-0.09-0.10-0.09-0.09-0.07-0.04-0.00 0.02 0.02 0.02 0.02 0.02 0.02 0.02 0.02 0.02 0.02 0.04 0.03 0.03 0.02 0.00 0.00 0.00     *Q_SUBJ 5 0.87 1.12 1.19 1.24 1.23 1.26 1.27 1.20 1.15 1.09 1.08 1.07 0.84 0.83 0.78 0.68 0.64 0.53 0.52 0.49 0.48 0.45 0.45 0.43 0.21 0.19 0.18 0.12 0.11 0.08 0.05 0.00 0.00 0.00
+  Q_REL 6 0.01 0.00 -0.01-0.01-0.01-0.02-0.02-0.02-0.01-0.01 0.02 0.02 0.03 0.03 0.00 -0.01-0.05 0.01 0.03 0.06 0.04 0.06 0.07 0.10 0.30 0.36 0.41 0.54 0.54 0.58 0.69 0.74 0.74 0.74      Q_REL 6 0.00 0.02 0.03 0.05 0.09 0.09 0.11 0.14 0.21 0.24 0.25 0.26 0.32 0.38 0.54 0.68 1.03 1.18 1.20 1.25 1.26 1.28 1.27 1.28 1.34 1.35 1.35 1.35 1.33 1.34 1.33 1.37 1.37 1.37
+                L0
+                L1
+                L2
+                L3
+                L4
+                L5
+                L6
+                L7
+                L8
+                L9
+               L10
+               L11                                                                                                                                                                                       L0
+                                                                                                                                                                                                         L1
+                                                                                                                                                                                                         L2
+                                                                                                                                                                                                         L3
+                                                                                                                                                                                                         L4
+                                                                                                                                                                                                         L5
+                                                                                                                                                                                                         L6
+                                                                                                                                                                                                         L7
+                                                                                                                                                                                                         L8
+                                                                                                                                                                                                         L9
+                                                                                                                                                                                                        L10
+                                                                                                                                                                                                        L11
+               L12
+               L13
+               L14
+               L15
+               L16
+               L17
+               L18
+               L19
+               L20
+               L21
+               L22
+               L23                                                                                                                                                                                      L12
+                                                                                                                                                                                                        L13
+                                                                                                                                                                                                        L14
+                                                                                                                                                                                                        L15
+                                                                                                                                                                                                        L16
+                                                                                                                                                                                                        L17
+                                                                                                                                                                                                        L18
+                                                                                                                                                                                                        L19
+                                                                                                                                                                                                        L20
+                                                                                                                                                                                                        L21
+                                                                                                                                                                                                        L22
+                                                                                                                                                                                                        L23
+               L24
+               L25
+               L26
+               L27
+               L28
+               L29
+               L30
+               L31
+              FLN
+             E_o ut                                                                                                                                                                                     L24
+                                                                                                                                                                                                        L25
+                                                                                                                                                                                                        L26
+                                                                                                                                                                                                        L27
+                                                                                                                                                                                                        L28
+                                                                                                                                                                                                        L29
+                                                                                                                                                                                                        L30
+                                                                                                                                                                                                        L31
+                                                                                                                                                                                                       FLN
+                                                                                                                                                                                                      E_o ut
+
+
+                         (c) Context circuit in query-dominant case.                                                                                                                                                (d) Query circuit in query-dominant case.
+
+Figure 4: Left-hand plots demonstrate the context circuit, which extracts features from context and computes
+context-based candidates, while right-hand plots illustrate the query circuit. These circuits are the same in both
+context- and query-dominant cases; the difference lies in their strength, revealing the competition between context-
+and query-based candidates. An example is C_REL0 = [BOS], C_SUBJ1=‘ Honda Civic’, C_REL2=‘, produced
+by’,C_OBJ3=‘ Honda’, Q_REL4=‘. The original language of ’,Q_SUBJ5=‘ A Secret’, Q_REL6=‘ was’.
+
+
+occurs. (See Appendix G for implementation de-                                                                                                                                          influence (max 1.37 vs. 1.25). Notably, between
+tails and additional results.)                                                                                                                                                          layers 17 and 24, the query-dominant case shows
+                                                                                                                                                                                        minimal context information transfer (Figure 4c),
+                                                  Orig.                       L17+L24                                        2 Rand.
+                                                                                                                                                                                        aligning with slower logit attribution growth (Fig-
+                                                  Prob. Prob. ∆                                                        Prob.                     ∆
+                                                                                                                                                                                        ure 3). This confirms that both pathways exist for
+                                                            Context-Dominant                                                                                                            both cases with final predictions depending on their
+                          Ccand.                    25.5                  13.1                  -12.4                   21.0                  -4.5                                      relative activation strength, and layers 17 to 24 are
+                          Qcand.                     8.6                  14.8                  + 6.2                   10.8                  +2.2
+                                                                                                                                                                                        the key to promoting context-based candidates.
+                                                               Query-Dominant
+                          Qcand.                    35.2                  26.8                  -8.4                    29.6                  -5.7                                      6.3                Flipping Model Predictions via Attention
+                          Ccand.                     6.6                  11.3                  +4.7                     7.4                  +0.8
+                                                                                                                                                                                                           Knockout
+Table 5: Effect of attention knockout on context- (Ccand. )                                                                                                                             To examine the causal role of internal competition
+and query-based (Qcand. ) candidate probabilities on                                                                                                                                    in shaping the final output AC+Q , we intervene
+Llama-3. “Orig.” = No intervention, “2 Rand.” = Av-
+                                                                                                                                                                                        in two key layers of the context circuit: layer 17
+erage of interventions on two random layers over three
+runs. ∆ denotes the change from the original setting.                                                                                                                                   (where context first transfers to the last token) and
+                                                                                                                                                                                        layer 24 (where it is most integrated). By restrict-
+                                                                                                                                                                                        ing attention to the query in the context-dominant
+Findings The results reveal distinct circuits for                                                                                                                                       case and to the context in the query-dominant case,
+context- and query-based pathways. Figures 4a                                                                                                                                           we test whether predictions can be flipped (e.g.,
+and 4c show the same context circuit aggregating                                                                                                                                        “Japanese” to “French”). See Appendix H for de-
+information from the context subject and object in                                                                                                                                      tails and additional results. Table 5 (Llama) shows
+both cases, transferring it to the final token posi-                                                                                                                                    that in the context-dominant case, blocking context
+tion from layer 17 onward. In contrast, Figures                                                                                                                                         flow causes Qcand. probabilities to surpass Ccand.
+4b and 4d indicate that the same query circuit for                                                                                                                                      on average, flipping 465/1000 datapoints to query-
+both cases integrating query subject information                                                                                                                                        based candidates. In the query-dominant case, inter-
+earlier than in the context circuit, from layer 8. The                                                                                                                                  vention increases Ccand. probability by 4.7 and de-
+log-probability increases after layer 24 in context                                                                                                                                     creases Qcand. probability by 8.4, flipping 225/1000
+circuit and after layer 16 in query circuit.                                                                                                                                            datapoints. These results confirm the competition
+   Both circuits exist across context- and query-                                                                                                                                       between Ccand. and Qcand. , and that these two layers
+dominant cases, but their relative strength deter-                                                                                                                                      are the key to promoting context-based candidates.
+mines the final prediction. In context-dominant
+cases, the context circuit wins, with a larger log-                                                                                                                                     Summary These findings support the class-based
+probability difference (max 2.28) compared to the                                                                                                                                       (mis)generalization hypothesis. Logit attribution
+query circuit (max 1.10). Conversely, in query-                                                                                                                                         confirms that models first construct abstract class
+dominant cases, the query circuit exerts a stronger                                                                                                                                     representations before refining them into specific
+                                                                                                                                                                                    30194
+Model Family       Context Demonstration + Query and Answer
+                   Prompt: Davie Fulton found employment in Ottawa. Valiant Lady premiered on _____
+                   Answer: AC+Q = CBC, AQ = September
+Pythia 12B         Prompt: 1 fille & 4 types was written in French. Cool & Dre, founded in _____
+                   Answer: AC+Q = Paris, AQ = Compton
+                   Prompt: Cologne Cathedral, which is named after Peter. Montana borders with _____
+                   Answer: AC+Q = Germany, AQ = Wyoming
+                   Prompt: Ilm al-Kalam is a part of Islam. The Man-Machine was written in _____
+                   Answer: AC+Q = Arabic, AQ = English
+LLama-3 70B        Prompt: Diarmuid Martin, who holds the position of bishop. Riga is a twin city of _____
+                   Answer: AC+Q = Dublin, AQ = Cal
+                   Prompt: David Hatch, who is employed by BBC. Rudolf Lothar passed away at _____
+                   Answer: AC+Q = London, AQ = New
+
+      Table 6: Examples of context-based candidates on larger model sizes (Pythia 12B and Llama-3 70B).
+
+
+answers. Activation patching reveals competing              validation (Appendix Table 14) again confirms sta-
+circuits for feature selection: one favoring direct         tistically significant context influence, consistent
+query-based pathway and the other integrating con-          with our earlier findings (Sec. 5.3).
+textual cues, with their strength shaping the final
+output. Notably, context circuit strengthens be-            Case       Top-3 Candidates      Llama- Pythia- Llama-
+                                                                                             70B    12B     8B-
+tween layers 17 and 24, validated by the flipped                                                            Prompt
+predictions from attention knockout.                        No in-    1. All query-based     49.0%    39.6%   48.7%
+                                                            fluence   (Ccand. = ∅)
+7   Discussion                                              Query-   2. Mix, top-1 is        27.2%    28.0%   27.7%
+                                                            dominant query-based
+7.1 Does scale alone alleviate irrelevant
+                                                                     3. Mix, top-1 is        14.5%    19.0%   13.8%
+    context hallucinations?                                 Context- context-based
+                                                            dominant
+To test whether scaling up model size naturally                      4. All context-based    9.3%     13.4%   9.8%
+mitigates irrelevant context hallucinations — and                    (Qcand. = ∅)
+thereby reduces class-based generalization — we
+                                                            Table 7: Breakdown of samples according to the compo-
+evaluate the largest models available within our            sition of Atop-3
+                                                                       C+Q for Llama-70B, Pythia 12B and Llama-
+resource budget: Pythia 12B and LLaMA-3 70B.                8B with prompt template variations.
+Experimental details are provided in Appendix I.1.
+Contrary to the hypothesis that scale might resolve
+this issue, results in Table 7 show that class-based        8    Conclusion
+generalization persists with similar frequency as in        By analyzing the mechanism behind irrelevant con-
+7B/8B models (Sec. 5.1). Table 6 provides quali-            text hallucinations, our study demonstrates that
+tative examples. The statistical test (Appendix Ta-         LLMs exhibit class-based (mis)generalization, re-
+ble 14)—analogous to Sec. 5.3—confirms that cor-            lying on abstract class structures in a systematic yet
+relations between context and context-based candi-          flawed manner. Through mechanistic analysis, we
+dates remain significant even at larger scales.             show that this phenomenon arises from hierarchi-
+                                                            cal class-to-instance predictions and competing cir-
+7.2 Is the class-based generalization
+                                                            cuits that mediate feature selection. These findings
+    phenomenon sensitive to the prompt
+                                                            challenge a potential misconstrual of the stochas-
+    templates?
+                                                            tic parrot hypothesis that LLMs can only regurgi-
+To test for prompt sensitivity, we conduct the              tate surface-level patterns. Rather, we argue that
+Llama-3 8B experiments using alternate templates            LLMs are “stochastic chameleons” – they exhibit
+sampled from the ParaRel dataset (See Appendix              generalization by leveraging class structures and
+Table 16). As shown in Table 7, the phenomenon              dynamically adapting their responses to contextual
+persists with similar frequencies, indicating that          cues, in ways that are neither purely memorized
+prompt wording has no major impact. Statistical             nor necessarily reliable.
+                                                      30195
+9   Limitations                                           Nora Belrose, Zach Furman, Logan Smith, Danny Ha-
+                                                            lawi, Igor Ostrovsky, Lev McKinney, Stella Bider-
+Our work has several limitations. First, our experi-        man, and Jacob Steinhardt. 2023. Eliciting latent
+ments are conducted in a controlled setting, which          predictions from transformers with the tuned lens.
+helps isolate generalization from memorization and          arXiv preprint arXiv:2303.08112.
+enables analysis at both behavioral and mechanistic       Emily M Bender, Timnit Gebru, Angelina McMillan-
+levels. However, future work could improve upon             Major, and Shmargaret Shmitchell. 2021. On the
+this by designing setups that disentangle memoriza-         dangers of stochastic parrots: Can language models
+                                                            be too big? In Proceedings of the 2021 ACM confer-
+tion and generalization in naturally occurring text.        ence on fairness, accountability, and transparency,
+Second, our study is limited to English-language            pages 610–623.
+datasets, and we only evaluate models of certain
+                                                          Emily M Bender and Alexander Koller. 2020. Climbing
+sizes (around 7–8B, 12B and 70B). Do smaller                towards NLU: On meaning, form, and understanding
+models also display class-based generalization, and         in the age of data. In Proceedings of the 58th An-
+if so, what is the minimum size required? Third,            nual Meeting of the Association for Computational
+in the mechanistic interpretability section, we fo-         Linguistics, pages 5185–5198.
+cus primarily on layer-wise analysis to support our       Stella Biderman, Hailey Schoelkopf, Quentin Gregory
+main hypothesis, while attention head analysis is           Anthony, Herbie Bradley, Kyle O’Brien, Eric Hal-
+left for future work. Finally, while we conduct              lahan, Mohammad Aflah Khan, Shivanshu Purohit,
+                                                             USVSN Sai Prashanth, Edward Raff, et al. 2023.
+interventions, our primary goal is not to mitigate
+                                                             Pythia: A suite for analyzing large language mod-
+contextual hallucinations. Developing mitigation             els across training and scaling. In International
+methods informed by our findings and evaluating             Conference on Machine Learning, pages 2397–2430.
+their effectiveness is an important direction for fu-        PMLR.
+ture research.                                            Meng Cao, Yue Dong, and Jackie Cheung. 2022a. Hal-
+                                                           lucinated but factual! inspecting the factuality of
+Acknowledgments                                            hallucinations in abstractive summarization. In Pro-
+                                                           ceedings of the 60th Annual Meeting of the Associa-
+We thank Cesare Spinoso-Di Piano and Zichao                tion for Computational Linguistics (Volume 1: Long
+Li for helpful discussions. We are also grateful           Papers), pages 3340–3354, Dublin, Ireland. Associa-
+to the reviewers for their valuable comments and           tion for Computational Linguistics.
+suggestions. Ziling Cheng is supported by a Fonds         Meng Cao, Yue Dong, Jingyi He, and Jackie Chi Kit
+de Recherche du Québec Nature et Technologies              Cheung. 2022b. Learning with rejection for abstrac-
+master research scholarship (File # 365574). Jackie        tive text summarization. In Proceedings of the 2022
+                                                           Conference on Empirical Methods in Natural Lan-
+Chi Kit Cheung is supported by the Canada CIFAR            guage Processing, pages 9768–9780, Abu Dhabi,
+AI Chair program. We acknowledge the material              United Arab Emirates. Association for Computa-
+support of NVIDIA for providing computational              tional Linguistics.
+resources.                                                Meng Cao, Yue Dong, Jiapeng Wu, and Jackie Chi Kit
+                                                           Cheung. 2020. Factual error correction for abstrac-
+                                                           tive summarization models. In Proceedings of the
+References                                                 2020 Conference on Empirical Methods in Natural
+                                                           Language Processing (EMNLP), pages 6251–6258,
+Vaibhav Adlakha, Parishad BehnamGhader, Xing Han           Online. Association for Computational Linguistics.
+  Lu, Nicholas Meade, and Siva Reddy. 2024. Eval-
+  uating correctness and faithfulness of instruction-     Nicholas Carlini, Florian Tramer, Eric Wallace,
+  following models for question answering. Trans-           Matthew Jagielski, Ariel Herbert-Voss, Katherine
+  actions of the Association for Computational Linguis-     Lee, Adam Roberts, Tom Brown, Dawn Song, Ulfar
+  tics, 12:681–699.                                         Erlingsson, et al. 2021. Extracting training data from
+                                                            large language models. In 30th USENIX Security
+AI@Meta. 2024. Llama 3 model card.                          Symposium (USENIX Security 21), pages 2633–2650.
+Simone Balloccu, Patrícia Schmidtová, Mateusz Lango,      Hung-Ting Chen, Michael Zhang, and Eunsol Choi.
+  and Ondrej Dusek. 2024. Leak, cheat, repeat: Data         2022. Rich knowledge sources bring complex knowl-
+  contamination and evaluation malpractices in closed-      edge conflicts: Recalibrating models to reflect con-
+  source LLMs. In Proceedings of the 18th Confer-           flicting evidence. In Proceedings of the 2022 Con-
+  ence of the European Chapter of the Association           ference on Empirical Methods in Natural Language
+  for Computational Linguistics (Volume 1: Long Pa-         Processing, pages 2292–2307, Abu Dhabi, United
+  pers), pages 67–93, St. Julian’s, Malta. Association      Arab Emirates. Association for Computational Lin-
+  for Computational Linguistics.                            guistics.
+                                                     30196
+Ziling Cheng, Meng Cao, Leila Pishdad, Yanshuai Cao,       Yihuai Hong, Dian Zhou, Meng Cao, Lei Yu, and Zhi-
+   and Jackie Chi Kit Cheung. 2025. Can llms reason          jing Jin. 2025. The reasoning-memorization interplay
+   abstractly over math word problems without cot?           in language models is mediated by a single direction.
+   disentangling abstract formulation from arithmetic        arXiv preprint arXiv:2503.23084.
+   computation. Preprint, arXiv:2505.23701.
+                                                           Albert Q Jiang, Alexandre Sablayrolles, Arthur Men-
+Yung-Sung Chuang, Linlu Qiu, Cheng-Yu Hsieh, Ran-            sch, Chris Bamford, Devendra Singh Chaplot, Diego
+  jay Krishna, Yoon Kim, and James R. Glass. 2024.           de las Casas, Florian Bressand, Gianna Lengyel, Guil-
+  Lookback lens: Detecting and mitigating contextual         laume Lample, Lucile Saulnier, et al. 2023. Mistral
+  hallucinations in large language models using only         7b. arXiv preprint arXiv:2310.06825.
+  attention maps. In Proceedings of the 2024 Con-
+  ference on Empirical Methods in Natural Language         Yibo Jiang, Goutham Rajendran, Pradeep Ravikumar,
+  Processing, pages 1419–1436, Miami, Florida, USA.          and Bryon Aragam. 2024. Do llms dream of ele-
+  Association for Computational Linguistics.                 phants (when told not to)? latent concept associa-
+                                                             tion and associative memory in transformers. arXiv
+Florin Cuconasu, Giovanni Trappolini, Federico Sicil-        preprint arXiv:2406.18400.
+  iano, Simone Filice, Cesare Campagnano, Yoelle
+  Maarek, Nicola Tonellotto, and Fabrizio Silvestri.       Zhuoran Jin, Pengfei Cao, Hongbang Yuan, Yubo Chen,
+  2024. The power of noise: Redefining retrieval for         Jiexin Xu, Huaijun Li, Xiaojian Jiang, Kang Liu, and
+  rag systems. In Proceedings of the 47th International      Jun Zhao. 2024. Cutting off the head ends the con-
+  ACM SIGIR Conference on Research and Develop-              flict: A mechanism for interpreting and mitigating
+  ment in Information Retrieval, volume 17 of SIGIR          knowledge conflicts in language models. In Findings
+  2024, page 719–729. ACM.                                   of the Association for Computational Linguistics:
+                                                             ACL 2024, pages 1193–1215, Bangkok, Thailand.
+Nouha Dziri, Ximing Lu, Melanie Sclar, Xiang Lorraine        Association for Computational Linguistics.
+  Li, Liwei Jiang, Bill Yuchen Lin, Sean Welleck, Peter
+  West, Chandra Bhagavatula, Ronan Le Bras, Jena D.        Katie Kang, Eric Wallace, Claire Tomlin, Aviral Ku-
+  Hwang, Soumya Sanyal, Xiang Ren, Allyson Et-               mar, and Sergey Levine. 2024. Unfamiliar finetuning
+  tinger, Zaid Harchaoui, and Yejin Choi. 2023. Faith        examples control how language models hallucinate.
+  and fate: Limits of transformers on compositionality.      arXiv preprint arXiv:2403.05612.
+  In Thirty-seventh Conference on Neural Information       Katherine Lee, Orhan Firat, Ashish Agarwal, Clara Fan-
+  Processing Systems.                                        njiang, and David Sussillo. 2018. Hallucinations in
+                                                             neural machine translation.
+Yanai Elazar, Nora Kassner, Shauli Ravfogel, Abhi-
+  lasha Ravichander, Eduard Hovy, Hinrich Schütze,         Daliang Li, Ankit Singh Rawat, Manzil Zaheer, Xin
+  and Yoav Goldberg. 2021. Measuring and improving           Wang, Michal Lukasik, Andreas Veit, Felix Yu, and
+  consistency in pretrained language models. Transac-        Sanjiv Kumar. 2023. Large language models with
+  tions of the Association for Computational Linguis-        controllable working memory. In Findings of the As-
+  tics, 9:1012–1031.                                         sociation for Computational Linguistics: ACL 2023,
+                                                             pages 1774–1793, Toronto, Canada. Association for
+Matthew Finlayson, Aaron Mueller, Sebastian                  Computational Linguistics.
+ Gehrmann, Stuart Shieber, Tal Linzen, and Yonatan
+ Belinkov. 2021.    Causal analysis of syntactic           Shayne Longpre, Kartik Perisetla, Anthony Chen,
+ agreement mechanisms in neural language models.             Nikhil Ramesh, Chris DuBois, and Sameer Singh.
+ In Proceedings of the 59th Annual Meeting of                2021. Entity-based knowledge conflicts in question
+ the Association for Computational Linguistics               answering. In Proceedings of the 2021 Conference
+ and the 11th International Joint Conference on              on Empirical Methods in Natural Language Process-
+ Natural Language Processing (Volume 1: Long                 ing, pages 7052–7063, Online and Punta Cana, Do-
+ Papers), pages 1828–1843, Online. Association for           minican Republic. Association for Computational
+ Computational Linguistics.                                  Linguistics.
+Mor Geva, Avi Caciularu, Kevin Wang, and Yoav Gold-        Ang Lv, Yuhan Chen, Kaiyi Zhang, Yulong Wang,
+ berg. 2022. Transformer feed-forward layers build           Lifeng Liu, Ji-Rong Wen, Jian Xie, and Rui Yan.
+ predictions by promoting concepts in the vocabulary         2024. Interpreting key mechanisms of factual re-
+ space. In Proceedings of the 2022 Conference on             call in transformer-based language models. arXiv
+ Empirical Methods in Natural Language Process-              preprint arXiv:2403.19521.
+ ing, pages 30–45, Abu Dhabi, United Arab Emirates.
+ Association for Computational Linguistics.                Sara Vera Marjanovic, Haeun Yu, Pepa Atanasova,
+                                                             Maria Maistro, Christina Lioma, and Isabelle Augen-
+Asma Ghandeharioun, Avi Caciularu, Adam Pearce, Lu-          stein. 2024. DYNAMICQA: Tracing internal knowl-
+  cas Dixon, and Mor Geva. 2024. Patchscopes: A              edge conflicts in language models. In Findings of the
+  unifying framework for inspecting hidden representa-       Association for Computational Linguistics: EMNLP
+  tions of language models. In Forty-first International     2024, pages 14346–14360, Miami, Florida, USA.
+  Conference on Machine Learning.                            Association for Computational Linguistics.
+                                                      30197
+Joshua Maynez, Shashi Narayan, Bernd Bohnet, and             Freda Shi, Xinyun Chen, Kanishka Misra, Nathan
+  Ryan McDonald. 2020. On faithfulness and factu-              Scales, David Dohan, Ed H Chi, Nathanael Schärli,
+  ality in abstractive summarization. In Proceedings           and Denny Zhou. 2023. Large language models can
+  of the 58th Annual Meeting of the Association for            be easily distracted by irrelevant context. In Inter-
+  Computational Linguistics, pages 1906–1919, On-              national Conference on Machine Learning, pages
+  line. Association for Computational Linguistics.             31210–31227. PMLR.
+
+Nick McKenna, Tianyi Li, Liang Cheng, Moham-                 Alessandro Stolfo, Yonatan Belinkov, and Mrinmaya
+  mad Javad Hosseini, Mark Johnson, and Mark Steed-            Sachan. 2023. A mechanistic interpretation of arith-
+  man. 2023. Sources of hallucination by large lan-            metic reasoning in language models using causal
+  guage models on inference tasks. In The 2023 Con-            mediation analysis. In Proceedings of the 2023 Con-
+  ference on Empirical Methods in Natural Language             ference on Empirical Methods in Natural Language
+  Processing.                                                  Processing, pages 7035–7052, Singapore. Associa-
+                                                               tion for Computational Linguistics.
+Kevin Meng, David Bau, Alex J Andonian, and Yonatan
+                                                             Zhaochen Su, Jun Zhang, Xiaoye Qu, Tong Zhu, Yanshu
+  Belinkov. 2022. Locating and editing factual associ-
+                                                               Li, Jiashuo Sun, Juntao Li, Min Zhang, and Yu Cheng.
+  ations in GPT. In Advances in Neural Information
+                                                               2024. $\texttt{ConflictBank}$: A benchmark for
+  Processing Systems.
+                                                               evaluating the influence of knowledge conflicts in
+Jack Merullo, Carsten Eickhoff, and Ellie Pavlick. 2024.       LLMs. In The Thirty-eight Conference on Neural
+   Language models implement simple Word2Vec-style             Information Processing Systems Datasets and Bench-
+   vector arithmetic. In Proceedings of the 2024 Con-          marks Track.
+   ference of the North American Chapter of the Asso-        Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob
+   ciation for Computational Linguistics: Human Lan-           Uszkoreit, Llion Jones, Aidan N Gomez, Ł ukasz
+   guage Technologies (Volume 1: Long Papers), pages           Kaiser, and Illia Polosukhin. 2017. Attention is all
+   5030–5047, Mexico City, Mexico. Association for             you need. In Advances in Neural Information Pro-
+   Computational Linguistics.                                  cessing Systems, volume 30. Curran Associates, Inc.
+Sewon Min, Xinxi Lyu, Ari Holtzman, Mikel Artetxe,           Siye Wu, Jian Xie, Jiangjie Chen, Tinghui Zhu, Kai
+  Mike Lewis, Hannaneh Hajishirzi, and Luke Zettle-            Zhang, and Yanghua Xiao. 2024a. How easily do
+  moyer. 2022. Rethinking the role of demonstrations:          irrelevant inputs skew the responses of large language
+  What makes in-context learning work? In Proceed-             models? In First Conference on Language Modeling.
+  ings of the 2022 Conference on Empirical Methods in
+  Natural Language Processing, pages 11048–11064,            Wenhao Wu, Yizhong Wang, Guangxuan Xiao, Hao
+  Abu Dhabi, United Arab Emirates. Association for            Peng, and Yao Fu. 2024b. Retrieval head mechanisti-
+  Computational Linguistics.                                  cally explains long-context factuality. arXiv preprint
+                                                              arXiv:2404.15574.
+Iman Mirzadeh, Keivan Alizadeh, Hooman Shahrokhi,
+                                                             Zhaofeng Wu, Linlu Qiu, Alexis Ross, Ekin Akyürek,
+  Oncel Tuzel, Samy Bengio, and Mehrdad Farajtabar.
+                                                               Boyuan Chen, Bailin Wang, Najoung Kim, Jacob An-
+  2024. Gsm-symbolic: Understanding the limitations
+                                                               dreas, and Yoon Kim. 2024c. Reasoning or reciting?
+  of mathematical reasoning in large language models.
+                                                               exploring the capabilities and limitations of language
+  arXiv preprint arXiv:2410.05229.
+                                                               models through counterfactual tasks. In Proceed-
+Neel Nanda. 2023. Mechanistic interpretability quick-          ings of the 2024 Conference of the North American
+  start guide.                                                 Chapter of the Association for Computational Lin-
+                                                               guistics: Human Language Technologies (Volume
+Ella Neeman, Roee Aharoni, Or Honovich, Leshem                 1: Long Papers), pages 1819–1862, Mexico City,
+   Choshen, Idan Szpektor, and Omri Abend. 2023.               Mexico. Association for Computational Linguistics.
+   DisentQA: Disentangling parametric and contextual         Rongwu Xu, Zehan Qi, Zhijiang Guo, Cunxiang Wang,
+   knowledge with counterfactual question answering.           Hongru Wang, Yue Zhang, and Wei Xu. 2024a.
+   In Proceedings of the 61st Annual Meeting of the            Knowledge conflicts for LLMs: A survey. In Pro-
+  Association for Computational Linguistics (Volume 1:         ceedings of the 2024 Conference on Empirical Meth-
+   Long Papers), pages 10056–10070, Toronto, Canada.           ods in Natural Language Processing, pages 8541–
+   Association for Computational Linguistics.                  8565, Miami, Florida, USA. Association for Compu-
+                                                               tational Linguistics.
+nostalgebraist. 2020. interpreting gpt: the logit lens.
+                                                             Ruijie Xu, Zengzhi Wang, Run-Ze Fan, and Pengfei Liu.
+Chris Olah. 2022. Mechanistic interpretability, vari-          2024b. Benchmarking benchmark leakage in large
+  ables, and the importance of interpretable bases.            language models. arXiv preprint arXiv:2404.18824.
+Fabio Petroni, Patrick Lewis, Aleksandra Piktus, Tim         Ori Yoran, Tomer Wolfson, Ori Ram, and Jonathan Be-
+  Rocktäschel, Yuxiang Wu, Alexander H. Miller, and            rant. 2024. Making retrieval-augmented language
+  Sebastian Riedel. 2020. How context affects lan-             models robust to irrelevant context. In The Twelfth
+  guage models’ factual predictions. In Automated              International Conference on Learning Representa-
+  Knowledge Base Construction.                                 tions.
+                                                          30198
+Lei Yu, Meng Cao, Jackie CK Cheung, and Yue Dong.
+  2024. Mechanistic understanding and mitigation of
+  language model non-factual hallucinations. In Find-
+  ings of the Association for Computational Linguistics:
+  EMNLP 2024, pages 7943–7956, Miami, Florida,
+  USA. Association for Computational Linguistics.
+Qinan Yu, Jack Merullo, and Ellie Pavlick. 2023. Char-
+  acterizing mechanisms for factual recall in language
+  models. In Proceedings of the 2023 Conference on
+  Empirical Methods in Natural Language Processing,
+  pages 9924–9959, Singapore. Association for Com-
+  putational Linguistics.
+Xiaowei Yuan, Zhao Yang, Yequan Wang, Shengping
+  Liu, Jun Zhao, and Kang Liu. 2024. Discerning
+  and resolving knowledge conflicts through adaptive
+  decoding with contextual information-entropy con-
+  straint. In Findings of the Association for Compu-
+  tational Linguistics: ACL 2024, pages 3903–3922,
+  Bangkok, Thailand. Association for Computational
+  Linguistics.
+Yuhang Zhou, Paiheng Xu, Xiaoyu Liu, Bang An, Wei
+  Ai, and Furong Huang. 2024. Explore spurious cor-
+  relations at the concept level in language models for
+  text classification. In Proceedings of the 62nd An-
+  nual Meeting of the Association for Computational
+  Linguistics (Volume 1: Long Papers), pages 478–492,
+  Bangkok, Thailand. Association for Computational
+  Linguistics.
+
+
+
+
+                                                      30199
+A    Dataset                                            C     Behavioral Changes Induced by
+                                                              Irrelevant Context
+The detailed breakdown of ParaRel dataset (Elazar
+et al., 2021) based on relation type is presented       C.1    Irrelevant Context Hallucination
+in Table 15. We categorize the sub-datasets into               Evaluation
+5 knowledge types based on the expected class
+or type of the answer (column ‘Ctx Type’): ‘lan-        In Table 8, we provide detailed statistics of the
+guage’, ‘place’, ‘company’, ‘job’, and if a sub-        accuracy/wrong rate for each model under each
+dataset doesn’t fit into the above types then it is     case for all three models.
+categorized as ‘others’. This is the dataset that we
+use for Q-only experiments, and we construct the          M ODEL
+                                                                        Q- ONLY                   C+Q
+dataset for C + Q experiments by generating 3900                    C ASE    P ROP.    C ASE    P ROP.    ∆ R ATE
+context variations spanning all knowledge types per                                    T→T      35.7%     0%
+                                                                    T        47.2%
+query, resulting in a dataset of 106.2M data points.     Llama
+                                                                                       T→F      11.5%     100%
+For each generation, we restrict the vocabulary to                                     F→T      7.4%      100%
+                                                                    F        52.8%
+the set of tokens that begins with a capitalized En-                                   F→F      45.4%     42.7%
+glish letter (Yu et al., 2024). When evaluating, we                 Total    47.2%     Total    43.1%     38.3%
+lowercase generated and gold answers and perform                                       T→T      29.4%     0%
+                                                                    T        38.2%
+string matching: if the top-1 generated answer is                                      T→F      8.8%      100%
+                                                         Mistral
+a substring of the gold answer, then this is correct.               F        61.8%
+                                                                                       F→T      5.9%      100%
+                                                                                       F→F      55.9%     59.5%
+For evaluation, we set the temperature to zero for
+all models to reduce output randomness.                             Total    38.2%     Total    35.3%     48.0%
+                                                                                       T→T      22.4%     0%
+                                                                    T        30.9%
+                                                                                       T→F      8.4%      100%
+                                                         Pythia
+B    Class-based Generalization                                     F        69.1%
+                                                                                       F→T      5.6%      100%
+                                                                                       F→F      63.6%     67.8%
+                                                                    Total    30.9%     Total    28.0%     57.1%
+We further categorize class-based generalization
+into two distinct cases:                                Table 8: Comparison of proportions (Prop.) of correct
+                                                         and incorrect answers in Q-only and C+Q cases, along
+                                                        with answer change rates (∆ Rate) for different mod-
+    • Copying: When a token belonging to the ex-         els. Average across 39 datasets are reported. In the
+      pected class appears in the context, the model    ‘Total’ row, under ‘Prop.’ column, it indicates the global
+      is more likely to directly copy it as the an-      accuracy across different cases, while under ‘∆ Rate’
+      swer. From a dataset statistics perspective,       column, it underlies the global answer change rate.
+      we observe a high copy rate when the context
+      contains tokens belonging to the same class
+                                                           Table 8 shows that models are not robust against
+      as the query.
+                                                        irrelevant context. Even when a single irrelevant
+                                                        demonstration is prepended, models exhibit no-
+      Example: The mother tongue of Dominique
+                                                        table shifts in performance. For instance, in Llama,
+      Sanda is French. The original language of
+                                                        11.5% of previously correct answers become incor-
+      Puss in Boots was → French.
+                                                        rect, while 7.4% of incorrect answers are corrected
+                                                        after adding context. However, accuracy alone does
+    • Non-copying: When tokens of the expected          not capture all behavioral shifts — predictions can
+      query class are not explicitly present in the     still change even if they remain incorrect.
+      input, the model combines the expected class
+      with relevant features inferred from context or   C.2    Composition of Atop-3
+                                                                               C+Q
+      query to generate an answer.
+                                                        Table 9 provides counts and proportions of the
+      Example: Honda Civic (fifth generation), pro-     breakdown of samples according to the compo-
+                                                                    top-3
+      duced by Honda. The original language of          sition of AC+Q for three models based on 106M
+      Tow Truck Pluck was → Japanese.                   datapoints.
+                                                    30200
+     Case       Top-3 Candidates                                   Llama               Mistral          Pythia
+     No        1. All query-based                                  50,874,341          51,013,564       41,833,760
+     influence                                                     (47.9 %)            (48.0%)          (39.3%)
+     Query-   2. Mix: Query + Context, top-1 is query-based        27,940,495          27,342,287       28,885,252
+     dominant                                                      (27.9 %)            (25.7%)          (27.2%)
+                3. Mix: Query + Context, top-1 is context-based    16,069,253          17,013,397       20,412,292
+     Context-                                                      (15.1 %)            (16.0%)          (19.2%)
+     dominant
+                4. All context-based                               11,353,892          10,963,675       15,250,026
+                                                                   (10.1 %)            (10.3%)          (14.3%)
+
+       Table 9: Breakdown of samples according to the composition of Atop-3
+                                                                      C+Q , based on 106M datapoints.
+
+
+
+D    Annotation                                                    based candidate is classified according to the ab-
+                                                                   stract class suggested by the query. The candidate
+D.1 Annotation Procedure
+                                                                   is compared to the expected class, and we verify
+To systematically evaluate the impact of irrelevant               whether the response falls within the correct cate-
+ context on model predictions, we perform an an-                   gory. For example, the context-based candidates
+ notation procedure for context-based candidates                  ‘Vietnamese’ and ‘Thai’ for Example 1 in Table 17
+— those predictions that were influenced by the                    have the correct class ‘language’, but ‘South’, ‘Ko-
+ inclusion of extraneous context. The aim was to                   rea’ in Example 5 in Table 17 do not have the
+ rigorously assess whether (i) these predictions in-               correct class because the query is asking about con-
+ corporated identifiable features from the context,                tinent, not country.
+ and (ii) appropriately combined them with the ex-                    Step 4: Hypothesis Verification Finally, a
+ pected class as indicated by the query.                           context-based candidate is considered to satisfy
+    Step 1: Candidate Selection We first randomly                  the hypothesis if it meets the criteria from both
+ sample a set of 500 context-based candidates from                 Step 2 (context feature identification) and Step 3
+ different sub-datasets, ensuring a diverse set of                (class verification). Only candidates that success-
+ instances. Context-based candidates were selected                 fully integrate context features and align with the
+ for both context- and query-dominant cases.                       expected class are retained as valid instances.
+    Step 2: Context Feature Identification For
+ each context-based candidate, we analyzed the con-
+                                                                  D.2    Annotation Examples
+ text —specifically the subject and object — to iden-
+ tify any features that could have been leveraged by              Details of examples and non-examples are shown
+ the model in generating the response. (‘context-                 in Table 17.
+ influenced?’ row in Table 17).
+    Each feature is categorized as identifiable if it             E     Statistical Validation of Contextual
+ can be explicitly extracted from the context. For ex-                  Influence
+ ample, the country of origin of a figure (e.g., candi-
+ dates ‘South’ ‘Korea’ for context subject ‘Lee Jong-             Mean PMI values for each model are presented
+ hyun’ in Example 5 in Table 17), country/continent               in Table 10. A mean PMI of around 70 across
+ of a district (‘India’, ‘Asia’ for context object ‘Bi-           all models and expected classes confirms strong
+ har’ in Example 4 in Table 17) are classified as                 statistical dependence (Table 10).
+ identifiable. In contrast, context-based candidates
+                                                                     Full results on three models in Table 10.
+‘Bee’, ‘Beach’ are categorized as non-context influ-
+ enced for context subject ‘Grant Green’ and object
+                                                                         Value          Llama-3     Mistral   Pythia
+‘jazz’ as shown in Example 6 in Table 17.
+                                                                         Mean PMI          3.9        3.7      3.8
+    We ensure transparency by documenting the ra-                        T-statistic       8.1        7.3      6.6
+ tionale. For example, in Example 2 of Table 17, we                      p-value         0.0006     0.0009    0.001
+ provide the justification that ‘Svend Asmussen’ is a
+ Danish violinist and jazz musician, which supports               Table 10: Mean PMI values and T-test results for all
+ that ‘Danmark’ is a context-influenced candidate.                three models.
+    Step 3: Class Verification Next, each context-
+                                                          30201
+F    Logit Attribution                                      for the Q-only case. In Figure 6a, we observe a
+                                                            similar pattern as the C+Q case presented in Figure
+F.1 Implementation Details
+                                                            3a – models build abstract class representation in
+When the target candidates or class have multiple           the lower layers, before refining their answers to
+tokens, we take the maximum logit, and average              concrete ones. In fact, when we plot the logit differ-
+this maximum logit across all data points in the            ence of the abstract class tokens under C+Q and Q-
+dataset.                                                    only case in Figure 6b, as shown as orange and yel-
+   To obtain the class logits from the model, we            low lines for context-dominant and query-dominant
+predefine a list of tokens according to the relation        case, the lines center around 0 – suggesting that
+type.                                                       the computation of abstract class representations
+    • Languages: languages, language, tongue,               exists for zero-shot case, and is not influenced by
+      tongues, lingua, dialect, dialects                    the added irrelevant context.
+                                                              Logit attribution results for Mistral 7B are pre-
+    • Places: country, countries, place, places, lo-        sented in Figure 7, and for Pythia 6.9B in Figure 8.
+      cation, locations, territory, city, cities, town,     We remark that these plots follow a similar pattern.
+      towns, village, villages, state, states, province,
+      provinces, district, districts, continent, conti-     G     Activation Patching
+      nents
+                                                            G.1    Implementation Details
+    • Companies: company, companies, manufac-
+      turer, manufacturers, make, firm, firms, busi-        In the corrupted run, we corrupt the embeddings of
+      ness, corporation, corporations, enterprise, en-      all tokens for context subject and object in context
+      terprises, organization, organizations, channel,      patching, and all tokens for query subject in query
+      channels, broadcaster, broadcasters, industry,        patching by adding a Gaussian noise where σ is
+      industries                                            3 times of the empirical standard deviation of the
+                                                            input embeddings over a body of text (sigma ≈
+    • Jobs: position, positions, job, jobs, career,         0.3) (Meng et al., 2022).
+      careers, profession, professions, occupation,
+      occupations, role, roles, assignment, assign-         G.2    Additional Activation Patching Results
+      ments, employment, employments                        Activation patching results under the C+Q condtion
+    • Others: expertise, area, areas, field, fields, sub-   for Mistral and Pythia are in Figure 10 and 13,
+      ject, subjects, instrument, instruments, genre,       respectively.
+      music, religion, religions, concept, concepts,           Additionally, we also visualize the query circuit
+      framework, frameworks, artifact, artifacts,           under the Q-only condition in Figure 9, 11, and
+      type, types, part, parts, class, classes, eponym,     12, for Llama, Mistral, and Pythia, respectively.
+      eponyms, entity, entities, person, persons,           We remark on two important observations: (i) The
+      place, places                                         query circuit is the same for context-dominant and
+                                                            query-dominant data, without irrelevant context.
+F.2 Logit Lens Example                                      (ii) The query circuit remains as is after adding the
+We provide an example of how the model’s top-1              irrelevant context, as compared to Figures 4b and
+predictions shift along the residual stream from ab-        4d.
+stract concepts to concrete instances across layers
+in Table 4 and Figure 5. The prompt used is Honda           H     Attention Knockout
+Civic (fifth generation), produced by Honda. The
+                                                            H.1    Implementation Details
+original language of Tow Truck Pluck was. Red
+indicates probability around 80%. We show predic-           In the attention knockout experiments, our goal is
+tions above layer 15 because lower than this, the           to see if we can intervene in the internal computa-
+predictions are not interpretable.                          tion to change the output behavior. Specifically, in
+                                                            context-dominant case, we would like to flip the
+F.3 Additional Logit Attribution Results                    prediction AC+Q from Ccand. (e.g., ‘Japanese’ to
+Additional results for Llama 8B are presented in            Qcand. ‘French’; And in query-dominant case, we
+Figure 6. Importantly, we point out that the class-         would like to flip the prediction AC+Q from Qcand.
+based generalization might have existed already             ‘Malaysia’ to Ccand. ‘Australia’.
+                                                       30202
+Figure 5: Logit lens on Llama-3 shows how model’s top-1 predictions shift along the residual stream from abstract
+concepts (e.g., ’languages’) to concrete instances (e.g., ’English’ or ’Japanese’) across layers. Red indicates high
+probability.
+
+
+
+
+ (a) Q-only: Token logit from accumulated residual stream. (b) Token logit difference (Logit in C+Q - Logit in Q-only)
+    1     2                                                                                      1    2
+ (RT,l , RT,l ) are visualized per layer.                  from accumulated residual stream (RT,l  , RT,l ).
+
+
+
+
+ (c) C+Q: Token logit from accumulated residual stream. (d) C+Q: candidate logit difference from attention and MLP
+    1     2
+ (RT,l , RT,l ) are visualized per layer.               output. AT,l and MT,l are visualized per layer.
+
+                          Figure 6: Additional logit attribution results for Llama-3 8B.
+
+
+   To do this, we intervene in two layers: the first         −∞, therefore, attention weight (which sums up
+attention layer where the context information is             to 1) is only a distribution over the query tokens.
+transferred to the last token residual stream, and the       We perform this intervention to block information
+attention layer where the most context information           flow from the context to the last token position,
+is written into the last token residual stream. These        and we only allow models to attend to the query
+two layers correspond to the first blue spike and            part. Similarly, in the query-dominant case, we set
+the highest blue spike in Figures 6d, 7d and 8d.             the attention scores corresponding to all tokens in
+For Llama-3, it is layers 17 and 24, respectively.           the query to be −∞, allowing the models to only
+For Mistral, it is layers 18 and 24, respectively. For       retrieve information from the context.
+Pythia, it is layers 19 and 24, respectively.
+                                                               To compare the knockout effect of the two criti-
+  Specifically, in the context-dominant case, at             cal layers with other layers, we select two random
+the last token position, we set the attention scores         lower layers and two random higher layers. We re-
+corresponding to all tokens in the context to be             port the average intervention results for three runs.
+                                                        30203
+ (a) Q-only: Token logit from accumulated residual stream. (b) Token logit difference (Logit in C+Q - Logit in Q-only)
+    1     2                                                                                      1    2
+ (RT,l , RT,l ) are visualized per layer.                  from accumulated residual stream (RT,l  , RT,l ).
+
+
+
+
+ (c) C+Q: Token logit from accumulated residual stream. (d) C+Q: candidate logit difference from attention and MLP
+    1     2
+ (RT,l , RT,l ) are visualized per layer.               output. AT,l and MT,l are visualized per layer.
+
+                               Figure 7: Logit Attribution Results For Mistral 7B.
+
+
+H.2 Additional Results                                             context-based candidates, while 648/1000 re-
+Results for Llama and Mistral are presented in Ta-                 main query-based.
+ble 12 and Table 11, respectively.
+  With the targeted two-critical-layer intervention:         Across all models, approximately 950 datapoints
+                                                             remain context- or query-based candidates, instead
+   • Llama: 465/1000 context-dominant data-                  of random non-identifiable answers, indicating that
+     points flip to query-based candidates, while            our intervention preserves model capabilities.
+     407/1000 remain context-based. Conversely,
+     225/1000 query-dominant datapoints shift to                        Orig.   L17+L24         2 Low          2 High
+     context-based candidates, while 704/1000 re-                       Prob. Prob. ∆         Prob.    ∆     Prob.    ∆
+     main query-based.                                                           Context-Dominant
+                                                                Ctx     22.6    14.6   -8.0   19.9    -2.7   19.0    -3.6
+   • Mistral: 437/1000 context-dominant data-                   Query   8.2     12.4   +4.2    8.2    +0.0    9.2    +1.0
+     points flip to query-based candidates, while                                 Query-Dominant
+     514/1000 remain context-based. Similarly,                  Query   33.0    25.0   -8.0   25.5    -7.5   31.7    -1.3
+                                                                Ctx     6.5     10.7   +4.2    7.7    +1.2    6.4    -0.1
+     232/1000 query-dominant datapoints shift to
+     context-based candidates, while 713/1000 re-            Table 11: Effect of attention knockout on context- (Ctx)
+     main query-based.                                       and query-based (Query) candidate probabilities on
+                                                             Llama-3. “Orig.” = No intervention, “2 Low” = Two
+   • Pythia: 470/1000 context-dominant data-                 lower layers (<17), “2 High” = Two higher layers (>24).
+     points flip to query-based candidates, while            “Diff.” represents the probability difference, and ∆ de-
+     486/1000 remain context-based. Conversely,              notes the change from the original setting. (Mistral 7B)
+     294/1000 query-dominant datapoints shift to
+                                                        30204
+    (a) Q-only: Token logit from accumulated residual stream. (b) Token logit difference (Logit in C+Q - Logit in Q-only)
+       1     2                                                                                      1    2
+    (RT,l , RT,l ) are visualized per layer.                  from accumulated residual stream (RT,l  , RT,l ).
+
+
+
+
+    (c) C+Q: Token logit from accumulated residual stream. (d) C+Q: candidate logit difference from attention and MLP
+       1     2
+    (RT,l , RT,l ) are visualized per layer.               output. AT,l and MT,l are visualized per layer.
+
+                                    Figure 8: Logit Attribution Results For Pythia 6.9B.
+
+
+            Orig.    L17+L24         2 Low          2 High                       Orig.   L17+L24         2 Low          2 High
+            Prob. Prob. ∆          Prob.    ∆     Prob.    ∆                     Prob. Prob. ∆         Prob.    ∆     Prob.    ∆
+                     Context-Dominant                                                     Context-Dominant
+    Ctx     25.5    13.1   -12.4   20.9    -4.6   21.1    -4.4           Ctx     22.3    13.6   -8.7   18.3    -4.0   20.5    -1.8
+    Query    8.6    14.8   +6.2     8.9    +0.3   12.6    +4.0           Query   7.4     11.5   +4.1    8.4    +1.0    7.8    +0.4
+                      Query-Dominant                                                       Query-Dominant
+    Query   35.2    26.8   -8.4    25.7    -9.5   33.4    -1.8           Query   26.6    20.8   -5.8   20.5    -6.1   25.6    -1.0
+    Ctx      6.6    11.3   +4.7     7.7    +1.1   7.1     +0.5           Ctx     6.3     9.6    +3.3    6.9    +0.6    6.2    -0.1
+
+Table 12: Effect of attention knockout on context- (Ctx)            Table 13: Effect of attention knockout on context- (Ctx)
+and query-based (Query) candidate probabilities on                  and query-based (Query) candidate probabilities on
+Llama-3. “Orig.” = No intervention, “2 Low” = Two                   Llama-3. “Orig.” = No intervention, “2 Low” = Two
+lower layers (<17), “2 High” = Two higher layers (>24).             lower layers (<17), “2 High” = Two higher layers (>24).
+“Diff.” represents the probability difference, and ∆ de-            “Diff.” represents the probability difference, and ∆ de-
+notes the change from the original setting. (Llama-3)               notes the change from the original setting. (Pythia)
+
+
+I     Ablation Studies
+                                                                    randomly sample 100 datapoints per relation for the
+I.1     Experimental Details                                        context demonstrations, resulting in around 3.9M
+Due to computational constraints, we cannot in-                     datapoints. For Llama-70B, we first randomly sam-
+ference on the full C + Q dataset with 102M for                     ple 500 datapoints from the ParaRel dataset, then
+larger-sized model, we therefore conduct sampling                   randomly sample 50 datapoints per relation for the
+as follows: For Pythia-12B, we first randomly sam-                  context demonstrations, resulting in around 975K
+ple 1,000 datapoints from the ParaRel dataset, then                 datapoints.
+                                                                 30205
+                                  (a) Q-only: Query circuit in context-dominant case.
+
+
+
+
+                                   (b) Q-only: Query circuit in query-dominant case.
+
+Figure 9: Activation patching under Q-Only condition reveals that query circuit is the same before and after adding
+the irrelevant context for Llama-3 8B.
+
+
+I.2     Statistical Validation of Contextual
+        Influence
+
+Value          Pythia 12B   Llama-3 70B   Llama-3 8B Prompt
+Mean PMI          4.19         4.22               4.2756
+T-statistics      11.74        11.89             13.0924
+p-value          0.0002       0.0001             0.0001
+
+Table 14: Statistical analysis of PMI between context
+terms and generated context-based candidates.
+
+
+
+
+                                                        30206
+           (a) C+Q: Context circuit in context-dominant case.
+
+
+
+
+           (b) C+Q: Context circuit in query-dominant case.
+
+
+
+
+            (c) C+Q: Query circuit in context-dominant case.
+
+
+
+
+            (d) C+Q: Query circuit in query-dominant case.
+
+Figure 10: Activation patching under C+Q condition for Mistral 7B.
+
+
+
+
+                                30207
+                                  (a) Q-only: Query circuit in context-dominant case.
+
+
+
+
+                                   (b) Q-only: Query circuit in query-dominant case.
+
+Figure 11: Activation patching under Q-Only condition reveals that query circuit is the same before and after adding
+the irrelevant context for Mistral 7B.
+
+
+
+
+                                  (a) Q-only: Query Circuit in context-dominant case.
+
+
+
+
+                                  (b) Q-only: Query Circuit in query-dominant case.
+
+Figure 12: Activation patching under Q-Only condition reveals that query circuit is the same before and after adding
+the irrelevant context for Pythia 6.9B.
+
+
+
+
+                                                        30208
+              (a) Context circuit in context-dominant case.
+
+
+
+
+              (b) Context circuit in query-dominant case.
+
+
+
+
+              (c) Query circuit in context-dominant case.
+
+
+
+
+               (d) Query circuit in query-dominant case.
+
+Figure 13: Activation patching under C+Q condition for Pythia 6.9B.
+
+
+
+
+                                 30209
+              Relation    Template                                     Ctx Type     Total Rows
+               P1001      [X] is a legal term in [Y]                     Place         664
+               P101       The expertise of [X] is [Y].                  Others         571
+               P103       The mother tongue of [X] is [Y].             Language        919
+               P106       [X] works as [Y].                               Job          821
+               P108       [X], who is employed by [Y].                 Company         378
+               P127       [X] owner [Y].                               Company         616
+               P1303      [X] plays the [Y].                            Others         513
+               P131       [X] is in [Y].                                 Place         775
+               P136       [X] plays [Y].                                Others         859
+               P1376      [X], the capital city of [Y].                  Place         179
+               P138       [X], which is named after [Y].                Others         461
+               P140       [X] is follower of [Y].                       Others         432
+               P1412      [X] communicated in [Y].                     Language        924
+               P159       [X] is headquartered in [Y].                   Place         801
+                P17       [X], located in [Y].                           Place         912
+               P176       [X], produced by [Y].                        Company         925
+               P178       [X], a product developed by [Y].             Company         588
+                P19       [X] is native to [Y].                          Place         779
+               P190       [X] is a twin city of [Y].                     Place         671
+                P20       [X] passed away at [Y].                        Place         817
+               P264       [X]’s label is [Y].                          Company          53
+                P27       [X], a citizen of [Y].                         Place         958
+               P276       [X] is located in [Y].                         Place         764
+               P279       [X], a type of [Y].                           Others         900
+                P30       [X] is a part of the continent of [Y].         Place         959
+                P36       The capital city of [X] is [Y].                Place         471
+               P361       [X] is a part of [Y].                         Others         746
+               P364       The original language of [X] was [Y].        Language        756
+                P37       The official language of [X] is [Y].         Language        900
+                P39       [X], who holds the position of [Y].             Job          485
+               P407       [X] was written in [Y].                      Language        857
+               P413       [X] plays in the position of [Y].               Job          952
+               P449       [X] premiered on [Y].                        Company         801
+               P463       [X] belongs to the organization of [Y].      Company         203
+                P47       [X] borders with [Y].                          Place         649
+               P495       [X] was formed in [Y].                         Place         905
+               P530       [X] ties diplomatic relations with [Y].        Place         950
+               P740       [X], founded in [Y].                           Place         843
+               P937       [X] found employment in [Y].                   Place         853
+
+Table 15: Overview of Relations, Templates, Types, and Total Rows in the original Pararel Dataset. We take this
+dataset and construct the C + Q dataset, which has around 106.6M rows.
+
+
+
+
+                                                    30210
+              Relation      Template                                      Ctx Type       Total Rows
+               P1001        [X] is a legal term in [Y].                     Place           664
+               P101         [X]’s expertise is [Y].                        Others           571
+               P103         The mother tongue of [X] is [Y].              Language          919
+               P106         The occupation of [X] is [Y].                    Job            821
+               P108         [X] works for [Y].                            Company           378
+               P127         [X] is owned by [Y].                          Company           616
+               P1303        [X] plays [Y].                                 Others           513
+               P131         [X] is in [Y].                                  Place           775
+               P136         [X], who plays [Y].                            Others           859
+               P1376        [X], the capital city of [Y].                   Place           179
+               P138         [X] is called after [Y].                       Others           461
+               P140         [X] is follower of [Y].                        Others           432
+               P1412        [X] communicated in [Y].                      Language          924
+               P159         The headquarters of [X] is in [Y].              Place           801
+                P17         [X], which is located in [Y].                   Place           912
+               P176         [X], developed by [Y].                        Company           925
+               P178         [X], created by [Y].                          Company           588
+                P19         [X] originates from [Y].                        Place           779
+               P190         [X] is a twin city of [Y].                      Place           671
+                P20         [X] died in [Y].                                Place           817
+               P264         [X], which is represented by [Y].             Company            53
+                P27         [X] has a citizenship of [Y].                   Place           958
+               P276         [X] is in [Y].                                  Place           764
+               P279         [X], a type of [Y].                            Others           900
+                P30         [X] belongs to the continent of [Y].            Place           959
+                P36         The capital of [X] is [Y].                      Place           471
+               P361         [X] is part of [Y].                            Others           746
+               P364         The original language of [X] was [Y].         Language          756
+                P37         The official language of [X] is [Y].          Language          900
+                P39         [X], whose position is that of [Y].              Job            485
+               P407         The language of [X] is [Y].                   Language          857
+               P413         [X] plays in the position of [Y].                Job            952
+               P449         [X] debuted on [Y].                           Company           801
+               P463         [X] is a member of [Y].                       Company           203
+                P47         [X] borders with [Y].                           Place           649
+               P495         [X] formed in [Y].                              Place           905
+               P530         [X] maintains diplomatic relations with         Place           950
+                            [Y].
+                 P740       [X], founded in [Y].                             Place           843
+                 P937       [X] was employed in [Y].                         Place           853
+
+Table 16: Overview of relations, alternative prompt templates, types, and total rows in the original ParaRel dataset.
+We use these randomly sampled alternative templates to test sensitivity to prompt phrasing.
+
+
+
+
+                                                       30211
+Category                             Details
+
+Example 1
+
+Context                              Hanoi is a twin city of Bangkok.
+Query                                The mother tongue of Louis Legendre is
+Class                                Languages
+
+Context Subject Possible Answers     Vietnamese, Tay, Hmong, Khmer, English, French,
+                                     Chinese
+Context Object Possible Answers      Thai, Lao, Chinese, Malay, Khmer
+Context-Based Candidates             Vietnamese, Thai
+
+Context-Influenced?                  True
+Correct Class?                       True
+Exists Answer that Satisfies Both?   True
+
+Example 2
+
+Context                              Svend Asmussen plays the violin.
+Query                                Social-Economic Council is a legal term in
+Class                                Places (Countries, Cities, States, etc.)/Languages
+
+Context Subject Possible Answers     Danmark, Danish (Svend Asmussen is a Violinist
+                                     and jazz musician)
+Context Object Possible Answers      Italy, Italian (Violin was originated in Italy)
+Context-Based Candidates             Denmark
+
+Context-Influenced?                  True
+Correct Class?                       True
+Exists Answer that Satisfies Both?   True
+
+Example 3
+
+Context                              Manchester Business School is headquartered in
+                                     Manchester.
+Query                                Antipope Paschal III, who holds the position of
+Class                                Jobs/Positions/Roles
+
+Context Subject Possible Answers     Professor, Lecturer, Instructor, Researcher, Depart-
+                                     ment Chair, Provost, Dean, Academic Advisor,
+                                     Teaching Assistant, Student, etc.
+Context Object Possible Answers      N/A
+Context-Based Candidates             Dean, Professor
+
+Context-Influenced?                  True
+Correct Class?                       True
+Exists Answer that Satisfies Both?   True
+
+
+                                       30212
+Category                             Details
+
+Example 4
+
+Context                              Saharsa district is in Bihar.
+Query                                Colbert Mountains is a part of the continent of
+Class                                Continents/Places
+
+Context Subject Possible Answers     Asia
+Context Object Possible Answers      Asia
+Context-Based Candidates             Asia, India
+
+Context-Influenced?                  True
+Correct Class?                       True
+Exists Answer that Satisfies Both?   True
+
+Example 5
+
+Context                              Lee Jong-hyun plays the guitar.
+Query                                Northern Foothills is a part of the continent of
+Class                                Continents
+
+Context Subject Possible Answers     Asia
+Context Object Possible Answers      Europe (Guitar originated in Spain)
+Context-Based Candidates             South, Korea
+
+Context-Influenced?                  True
+Correct Class?                       False
+Exists Answer that Satisfies Both?   False
+
+Example 6
+
+Context                              Grant Green plays jazz.
+Query                                David Gates plays the
+Class                                Role/Genre/Style/Position/Musical Instrument
+
+Context Subject Possible Answers     guitarist, composer, musician, songwriter etc. (role of
+                                     Grant Green), guitar (Musical Instrument that Grant
+                                     Green plays), jazz, R&B, etc. (music genre of Grant
+                                     Green)
+Context Object Possible Answers      Jazz.
+Context-Based Candidates             Bee, Beach
+
+Context-Influenced?                  False
+Correct Class?                       False
+Exists Answer that Satisfies Both?   False
+
+Example 7
+
+
+                                       30213
+Category                             Details
+
+Context                              Samuil Marshak passed away at Moscow.
+Query                                Jean Metcalfe, who is employed by
+Class                                Company/Person
+
+Context Subject Possible Answers     Russia-1, Channel One Russia, RT, TV Rain, etc.
+Context Object Possible Answers      Russia-1, Channel One Russia, RT, TV Rain, etc.
+Context-Based Candidates             BBC, Radio
+
+Context-Influenced?                  False
+Correct Class?                       True
+Exists Answer that Satisfies Both?   False
+
+
+
+
+                                       30214
+

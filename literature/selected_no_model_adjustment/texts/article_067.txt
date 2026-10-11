@@ -1,0 +1,1771 @@
+    NewsInterview: a Dataset and a Playground to Evaluate LLMs’ Grounding
+                       Gap via Informational Interviews
+     Alexander Spangher1* , Michael Lu2* , Sriya Kalyan2 , Hyundong Cho1 , Tenghao Huang1 ,
+                               Weiyan Shi3 , and Jonathan May1
+                          1
+                              University of Southern California Information Sciences Institute
+                                            2
+                                              University of California, Berkeley
+                                                 3
+                                                   Northeastern University
+                                                    *
+                                                      spangher@usc.edu
+
+                                Abstract                           serve in a variety of situations: e.g., education (Kas-
+                                                                   neci et al., 2023), mental health (Carlbring et al.,
+            Large Language Models (LLMs) have demon-               2023) or conflict resolution (Argyle et al., 2023).
+            strated impressive capabilities in generating
+                                                                   However, prior efforts to ameliorate such gaps face
+            coherent text but often struggle with strategic
+            dialogue. To address this gap, we focus on             limitations: existing large datasets (1k–10k tran-
+            journalistic interviews. We curate a dataset           scripts) are generated via crowdsourcing and are
+            of 40,000 two-person informational interviews          inherently unnatural (Rashkin et al., 2019; Wang
+            from major news organizations in scenarios             et al., 2019; Liu et al., 2021). More natural datasets,
+            where human interviewers employ strategies             of educational (Caines et al., 2020) or therapeutic
+            to coax information from sources. We then              environments (Gratch et al., 2014), are difficult to
+            try to mimic these activities with LLMs and
+                                                                   collect due to privacy concerns (Casey, 2004) and
+            find striking differences; models are less likely
+            to use acknowledgments and more likely to
+                                                                   are small-scale (100–1k transcripts).
+            rabbit-hole and not pivot to other topics. Real-           In this work, we directly address these limi-
+            izing that a fundamental deficit exists in LLM         tations by focusing on an area where grounding
+            multi-turn planning and strategic thinking, we         communication is required but plentiful data ex-
+            develop a realistic simulated environment, in-         ist: journalist interviews. Journalistic, or informa-
+            corporating source personas and persuasive el-         tional interviews, are typically conducted between
+            ements, in order to facilitate the development
+                                                                   an “interviewer” and a “source,” and the goal is to
+            of agents with long-horizon rewards. Our ex-
+            periments show that mimicry failures are not           obtain information. Sources are often anxious or
+            two-sided; when posing as a source, models             unclear (Harcup, 2015), and human interviewers
+            adequately reflect human behavior in informa-          are constantly evaluating: (1) Are my questions
+            tion sharing, making our simulation a realistic        getting fully addressed? (2) Do I need to more
+            benchmark. Interviewer-LLMs, however, strug-           effectively engage or persuade a source (Sedorkin,
+            gle with engaging persuasively, leading to sub-        2015)? This makes news interviews an ideal setting
+            optimal information extraction across model
+                                                                   to observe grounding dialogues.
+            size and capability. This simulated game lays
+            the groundwork for future work in enhancing                To study how LLMs perform in journalistic con-
+            LLMs’ strategic dialogue capabilities.1                texts, we start by collecting interview transcripts
+                                                                   from two major US news sources: National Pub-
+    1       Introduction                                           lic Radio (NPR) and Cable News Network (CNN),
+                                                                   filtering to over 40,000 dyadic informational in-
+    Recent research has shown that LLMs struggle
+                                                                   terviews.2 Next, we show that LLMs in news
+    to engage in emotional (Shaikh et al., 2024a) or
+                                                                   interview settings suffer from the same lack of
+    strategic (Wongkamjan et al., 2024) dialogue. For
+                                                                   grounding as in other dialogue settings (Shaikh
+    example, Shaikh et al. (2024a) examined LLM-
+                                                                   et al., 2024a). We find that significant discourse
+    generated responses to dialogues and found fewer
+                                                                   differences exist in the kinds of questions asked by
+    occurrences of “grounding language” (Clark, 1996;
+                                                                   LLMs: for example, LLMs are 50% less likely to
+    Cho and May, 2020), like acknowledgements or af-
+                                                                   make acknowledgements, and 30% less likely to
+    firmations, that humans typically use to foster com-
+                                                                   pivot to higher-level questions.
+    fort and trust. This can impede an LLM’s ability to
+        1                                                               2
+        We release dataset and code at https://github.com/             As opposed to games, questionaires and other formats
+    alex2awesome/news-interview-question-generation.               these news outlets release
+
+                                                                32895
+Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pages 32895–32925
+                             July 27–August 1, 2025 ©2025 Association for Computational Linguistics
+                                                                    In order to induce the need for grounding
+                                                                 communication, we design different personas for
+                                                                 sources (e.g., anxious, clueless, dominating), each
+                                                                 with different communication patterns. We also
+                                                                 add a responsiveness to strategic dialogue: sources
+                                                                 will only return information if they are persuaded in
+                                                                 a manner befitting their personas3 (Harcup, 2015;
+                                                                 Sedorkin, 2015). We find that our environment
+                                                                 is realistic: source-LLMs correlate significantly
+                                                                 with humans in their ability to identify persuasion
+(a) Proportion of Discourse types throughout human inter-        (r = .43, p < .0001). However, interviewer-LLMs
+views. Human journalists use different discourse roles across    struggle to both recognize when questions are an-
+the interview, including gradually more Acknowledging state-
+ments, increasing from 5% at the start to over 20% by the end.   swered and actively persuade the source, resulting
+                                                                 in suboptimal information extraction.
+                                                                    In summary, our contributions are:
+
+                                                                     • We release a high-quality dataset of 40,000
+                                                                       dyadic informational interviews from NPR
+                                                                       and CNN. This dataset addresses the scarcity
+                                                                       of large-scale dialogue data necessary for
+                                                                       studying grounding communication.
+
+                                                                     • We perform a detailed discourse analysis com-
+(b) Proportion of Discourse types of LLM responses in
+interviews. LLMs display an increasing likelihood of ask-              paring LLM-generated dialogues with hu-
+ing opinion or broadening questions over the course of an              man interviewers, identifying significant dif-
+interview and a lower likelihood of returning to outline-level         ferences in the use of grounding language and
+questions.
+                                                                       question types.
+Figure 1: Comparison of discourse types across inter-
+views (the first turn, usually a greeting, is excluded).             • We develop a game environment to test and
+The LLM is shown the first t − 1 turns of a human in-                  improve dialogue agents in informational in-
+terview and asked to generate the next question.                       terviews, which we call NewsInterview. Our
+                                                                       findings indicate this is a realistic setting but
+                                                                       highlight the challenges LLM interviewers
+   Next, we turn to a more fundamental question:                       face in engaging in persuasive dialogue.
+why consider grounding? According to Cialdini
+(2009), grounding exists for a purpose: to influence             2       Dataset Processing
+an outcome (e.g., in therapeutic environments, the               2.1      Data Collection
+grounded patient is more open and makes more
+                                                                 We aggregate, clean and condense multiple pub-
+progress (Bohart and Tallman, 1999); in educa-
+                                                                 licly available datasets of interview transcripts from
+tional environments, the comfortable student is
+                                                                 NPR and CNN in order to build a high-quality inter-
+more engaged and learns more (Brown and Cam-
+                                                                 view dataset of 45k source-to-interview transcripts.
+pione, 1994); these are all usually borne out over
+                                                                 These transcripts are published records of live inter-
+many conversational turns). Observing the effects
+                                                                 views conducted between a journalist and sources
+of grounding language in terms of objective out-
+                                                                 invited on the program. They provide a rich re-
+comes might be a more effective way to reason
+                                                                 source for analyzing natural language interactions.
+and ultimately train empathetic agents and im-
+prove long-horizon strategic dialogue. Motivated                 2.2      Data Filtering for Interview Analysis
+by these observations, we develop a realistic game               We want to focus on one-on-one informational in-
+environment to serve as a playground: in this simu-              terviews between a journalist and a single source.
+lation, LLMs play the role of the interviewer and
+                                                                     3
+the source. The goal for the interviewer is to obtain                 We understand that “being persuaded,” “being made com-
+                                                                 fortable,” and “being acknowledged” are all separate forms of
+the maximal amount of information from the source                grounding, some more active than others. However, we use
+in a limited number of questions.                                “persuasion” as a short-hand encompassing all categories.
+
+                                                            32896
+We start with 487,310 transcripts collected by Ma-           qt . We experiment with different variations: (1)
+jumder et al. (2020) and Zhu et al. (2021). How-             Baseline: The LLM is simply asked to produce
+ever, initial examination of the transcripts reveals         the next question. (2) Chain-of-Thought (CoT):
+many of them to be low-quality: they include mul-            The LLM is instructed to reason about the infor-
+tiple sources, are formatted as panel discussions, or        mation already provided in the interview, consider
+are not informational in nature (e.g., they include          what might be left to ask, and then generate the
+game shows). To filter the transcripts and retain            next question. (3) Outline: the LLM is provided
+only those that fit our criteria, we prompt Llama-           with an outline of the interview goals (described in
+3.1-70b4 to classify each transcript based on the            Section 4.2) to incorporate into CoT reasoning.6
+number of participants and the nature of the con-
+tent. The prompts used for filtering are provided            3.2    Evaluating LLM Counterfactuals
+in App. B.5. After filtering, 45,848 interviews              To analyze how similar LLM questions, gt are to
+remain. Finally, the original transcripts do not dis-        human questions, qt , we perform two analyses:
+tinguish which participant was the interviewer vs.
+the interviewee. So, we count each participant’s             Consistency Analysis: We aim to assess how
+use of question marks: the participant with more is          similar gt is to qt across different comparison cat-
+labeled the interviewer.5                                    egories Saha et al. (2024), specifically: Informa-
+                                                             tional consistency (i.e., gt and qt seek similar in-
+   Conversations have, on average, 7.5 turns be-
+                                                             formational objectives); Motivational, (i.e., similar
+tween the interviewer and source. The source
+                                                             outcomes); Style, (i.e., similar tone); Contextual
+speaks for longer, with an average of 551 words
+                                                             consistency (i.e., similar appropriateness given the
+per conversation compared with the interviewer’s
+                                                             context); Discourse consistency (i.e., similar pur-
+270 words (or 27 words per source utterance, 16
+                                                             poses in the overall conversation). Putting these
+per interviewer). Interviewers tend to ask “what”
+                                                             together, we assess an Exact match. We ask an
+and “how” questions the most, and conversations
+                                                             LLM, GPT-4o, to perform this assessment and man-
+occur at Flesch-Kincaid Grade of 6.9 (Kincaid
+                                                             ually inspect its outputs and reasoning threads.
+et al., 1975). Interviews cover a range of top-
+ics, from literature , politics , academics , and            Discourse Analysis: We aim to assess whether
+ international affairs (see Appendix A for more              gt plays a similar function as qt does. We de-
+details).                                                    velop a schema to describe the role of each ques-
+                                                             tion.7 This schema includes the following ele-
+3   Analysis                                                 ments: Follow-up Question (e.g., “Can you tell us
+In this section, we analyze how humans conduct               more?”), Outline-Level Question (e.g., “Moving on,
+informational interviews and compare this behavior           can we discuss the next event?”), Acknowledgement
+to that of pretrained LLMs, to explore whether               Statement (e.g., “I see, that sounds scary.”), Opin-
+LLMs face similar grounding problems as observed             ion/Speculation (e.g., “What do you think will hap-
+in other settings (Clark, 1996; Shaikh et al., 2024b).       pen?”), Broadening Question (e.g., “How does this
+                                                             fit into the broader trend?”), Verification Question
+3.1 Generating Counterfactual Utterances                     (e.g., “So to confirm...”) and Challenge Question
+One way to assess how an LLM would behave                    (e.g., “These dates don’t line up.”). See Table 13 in
+in an interview setting offline is to perform a              the Appendix for definitions of each role.
+counterfactual simulation (Shaikh et al., 2024b).                6
+                                                                   We include full prompt examples for all three variations
+Specifically, given a human interview consisting of          in Appendix B.5. All question-generation experiments are
+                                                             conducted using Llama-3.1-70b.
+at least t interviewer-source conversational turns               7
+                                                                   To generate our discourse schema, we asked two journal-
+(q1 , a1 )...(qt , at )..., we feed t − 1 turns into the     ists to analyze fifty interview transcripts. One had eight years
+LLM along with a prompt instructing the LLM to               of experience in newsrooms, the other was an undergraduate
+                                                             student studying journalism. We held three conferencing ses-
+generate the next question. This generates a coun-           sions to develop the schema. Then, we blindly annotated ten
+terfactual, gt to what the human would have said,            interviews, achieving a κ = .6. Given our schema, we then
+                                                             asked an LLM to classify discourse roles in sentences. The
+   4
+     https://huggingface.co/meta-llama/                      prompt contains the interview context, (q1 , a1 )...(qt−1 , at−1 ),
+Meta-Llama-3.1-70B-Instruct (Touvron et al., 2023)           and current question qt . To validate the LLM’s labeling ac-
+using the vLLM framework (Kwon et al., 2023)                 curacy, we had the professional journalist label 10 additional
+   5
+     Manual validation on 50 interviews showed this method   interviews as ground-truth and scored the LLM’s assignments.
+correctly identified roles in > 98% of cases.                The LLM scored a .8 f1 score.
+
+                                                        32897
+                                   Exact Match        Info.     Motivation      Style    Discourse     Context
+    Baseline-LLM                            3.9%      4.4%            4.7%     11.9%        36.2%       53.0%
+    Chain-of-Thought (CoT)                  4.5%      3.6%            5.2%     12.8%        37.0%       56.9%
+    LLM w. Outline                          3.7%      3.8%            4.1%      9.6%        36.2%       46.6%
+    Outline-CoT                             3.6%      3.9%            4.3%      8.3%        29.9%       43.1%
+    Human                                   8.2%    17.5%            35.4%     40.2%        54.5%       60.3%
+
+Table 1: Alignment of LLM-Generated Questions with Original Interview questions. We give an LLM,
+Llama-3.1-70b, the prior t − 1 turns in an interview and prompt it to ask the next question. We measure the
+percentage of times this question aligns to a question asked by a human at the same point in the interview across
+six dimensions: Exact Match (nearly exactly the same as the original utterance), Information (relevant factual
+content), Motivation (same motivation as the original question), Style (alignment with tone and phrasing), Discourse
+(structural role within the interview), and Context (incorporation of contextual knowledge). The prompting strategies
+compared are Baseline-LLM, Chain-of-Thought (CoT), LLM with an Outline, and Outline-CoT; and, we conduct a
+human baseline trial with a former professional journalist.
+
+
+
+
+Figure 2: Distribution of Discourse Roles in Questions, Across Different Prompting Strategies. We compare
+the proportions of discourse roles of questions (e.g., “Follow-up,” “Acknowledgement,”) generated by (a) human
+journalists, (b) Baseline-LLM (Llama-3.1-70b) (c) LLM prompted with an Outline and (d) with Chain-of-Thought
+(CoT). Acknowledgement statements, which often build empathy, are significantly underrepresented in all LLM
+prompting approaches, compared to human-generated questions (see appendix for Outline-CoT).
+
+
+3.3 Findings                                                  outline variations increases the rate at which the
+Insight #1: Acknowledgement statements are                    LLM asks outline-level questions. However, the
+virtually absent from all LLM variations. As                  rate remains significantly below human levels. Ad-
+shown in Figure 2, grounding gaps exist in jour-              ditionally, they are also more likely to ask either
+nalistic interviewing similar to those observed by            Opinion questions or Broadening questions. In
+Shaikh et al. (2024a). While human journalis-                 fact, in Figure 1b, we observe that LLMs tend to
+tic interviewers tend to make Acknowledgement                 ask increasing amounts of Opinion Questions and
+statements in about 9% of their utterances, all               Broadening Questions over time, which humans
+prompting variations that we experimented with                do not. As shown in Table 8, these questions can
+made close to zero of these statements. This lack             be vague and open-ended. Together, these findings
+of acknowledgement is paired with not mirroring               suggest an inability to direct an interview in a de-
+the source’s speaking style; human journalists, as            sired direction and engage in multi-turn planning.
+shown in Appendix B.6, bring character and voice.
+                                                              Insight #3: LLMs are capable of understanding
+Insight #2: LLMs do not engage in strategic                   context, but fail in other categories of similarity
+multi-turn questioning. Even in settings where                to humans. Comparing the content and style of
+LLMs are exposed to interview outlines, they are              LLM interviews to human interviews in Table 1,
+still undirected in their questions. As shown in              we note that, overall, LLMs are broadly dissimilar
+Figure 2, LLMs are significantly more likely to ask           to humans in style, motivation and information-
+follow-up questions than humans across all prompt-            seeking. One area where the LLMs succeed, rela-
+ing variations. Introducing chain-of-thought and              tively, is understanding the context of the interview
+                                                       32898
+Algorithm 1 Gameplay                                     4.1    Game Design Overview
+    Input Interviewer objectives o, Source Infor-
+                                                         We first introduce our game on a high level, illus-
+mational Items I, Source persona ϕ, K turns
+                                                         trated in Figure 3, and then describe our implemen-
+    Output Reward R
+                                                         tation. Our gameplay proceeds in a loop, shown in
+ 1: Initialize: Reward R ← 0, Conversation His-          Algorithm 1. The “player” in our game plays the
+    tory C ← [], Used items U ← {}                       role of an interviewer and is able to ask questions
+ 2: for i ∈ 1, ...K do                                   to a source, based on the conversational history and
+    ▷ Step 1: Interviewer Question Generation            the interview objectives (the Interviewer() step).
+ 3:     gi = Interviewer(C, o)                           The source is given a set of informational items and
+    ▷ Step 2: Source’s Response Generation               assesses whether any of these items are relevant to
+ 4:     r =getRelevantInfoItems(I, U, gi )               the question (the getRelevantInfoItems() step);
+ 5:     p =getPersuasionLevel(C)                         the source then decides how persuaded or com-
+ 6:     f =getItemsToReturn(r, p)                        fortable they are based on the conversational his-
+ 7:     ai =Source(gi , C, f, p, ϕ)                      tory (the getPersuasionLevel() step). Based on
+    ▷ Update Variables                                   this, we determine the subset of relevant items
+ 8:     U ← U ∪ f , C ← C ⊕ [gi , ai ], R ←              the source returns (the getItemsToReturn()), and
+    R + |f |                                             track these on the back-end as an accumulating
+ 9: end for                                              reward. The reward, obtained at the end of the
+                                                         game, is the unique number of information items
+beforehand. This is not a new observation – much         disclosed.
+recent work, e.g., in dialogue-tracking, has found
+LLMs to perform well (Ou et al., 2024). The fact         4.2    Gameplay Design
+that LLMs can preserve context over multiple turns       To design our game, we draw heavily on two jour-
+and do not drift away from the topic indicates that      nalism textbooks: Interviewing: A Guide for Jour-
+models might one day be able to engage in multi-         nalists and Writers, which explains how to conduct
+turn goal-oriented dialogue, given the right reward      effective interviews and speak to reluctant, defen-
+signals and learning environment.                        sive, or poor-explaining sources (Sedorkin, 2015);
+   Taken together, these findings suggest that jour-     and Journalism: Principles and Practice, which
+nalistic dialogue is suitable for studying effective     describes how to build trust (Harcup, 2015). We
+communication patterns, and also highlight signifi-      first start by describing our data processing, and
+cant gaps in current language modeling objectives.       then we will describe Algorithm 1 in more detail.
+While LLMs can generate contextually relevant            For all gameplay prompts, see Appendix C.
+questions, they lack both an emotional and connec-
+tive drive as well as the strategic planning exhibited   Dataset Preparation for Simulation To prepare
+by human interviewers.                                   our dataset for use in the simulated game environ-
+                                                         ment, we group together: (1) source responses and
+4   NewsInterview: An Interview Game                     ask an LLM.8 to summarize a set of specific infor-
+As shown, LLM counterfactual questions exhibit           mational items and (2) interviewer questions and
+several shortcomings: they are less likely to ac-        ask an LLM to summarize them into a set of high-
+knowledge the interviewee and focus excessively          level objectives. The sources’ informational items
+on follow-up questions. But do both of these short-      mimic the knowledge a source likely had going
+comings point to a lack of strategic multi-turn plan-    into the interview9 and the interviewer’s objectives
+ning? In human dialogue, grounding exists for            represent the agendas they had prior to the conver-
+long-term strategic purposes (Cialdini, 2009), yet       sation.10 Both of these summaries are represented
+there currently exists no way to way to obtain these     in Figure 3 as Given, and are designed to give the
+kinds of long-term rewards during LLM training.          interviewer-LLM and the source-LLM a basis for
+Motivated by this insight, our goal for the remain-         8
+                                                               Llama-3.1-70b
+der of the paper is to create and validate a realistic      9
+                                                               Manual evaluation confirms these information items are
+game-environment with a delayed reward signal.           present in initial interviews and are non-overlapping.
+                                                            10
+                                                               Manual validation with professional journalists confirms
+We leave to future work utilization of this frame-       that these outlines reasonably capture what a journalist might
+work for improving strategic dialogue.                   prepare before an interview and do not leak information.
+
+                                                    32899
+Figure 3: Walkthrough of the LLM Interviewer-Agent Process. In the NewsInterview game, an interviewer-LLM
+converses with a source-LLM: the interviewer-LLM is rewarded based on how many information items (shown at
+the right) are extracted from the source. In more detail: the interviewer agent is given a set of high-level objectives,
+similar to a journalist’s pre-interview notes, while the source is given a persona and a set of relevant facts. The
+interview proceeds for k turns. Interviewer Query: the interviewer is prompted to ask a question based on their
+goals and information obtained (Step 1). Source Response: The source responds with a multi-step process. First,
+they are prompted to determine how many information items in their factbook are relevant to the question (Step 2a).
+Then, they self-assess their comfort level. Depending on this, the simulation randomly selects a subset of relevant
+information for the response (Step 2b). We track the decision of which items to return on the back-end, in order to
+calculate the final reward. The source is then prompted to craft a reply aligned with their persona (Step 2c). After k
+turns: a reward given to the interviewer based on the number of information items extracted from the source.
+
+
+communication. For further examples of both, see              to return: the more persuaded a source is, the more
+Tables 9 and 10in the Appendix.                               likely they are to return more information. The per-
+                                                              suadability component to our gameplay increases
+Source Design Element #1: Personas Now, we
+                                                              the multi-turn strategy: because persuasion is as-
+introduce the design of the source. We focus at-
+                                                              sessed with reference to the entire interview, the
+tention on this construction to build a robust game
+                                                              interviewer gets more reward for spending words
+environment that accurately mimics human interac-
+                                                              early in the interview persuading the source to feel
+tions. To make gameplay varied and challenging,
+                                                              comfortable.
+we draw from Sedorkin (2015) to design eight dif-
+ferent personas: Anxious, Avoidant, Adversarial,                 Is it sound for the source-LLM to assess its
+Defensive, Straightforward, Poor Explainer, Domi-             own level of persuasion? As recent research has
+nating and Clueless. For descriptions of each per-            found, LLMs are poor detectors of when they are
+sona, as well as example responses, see Table 11.             being persuaded (Sakurai and Miyao, 2024) and
+These personas allow us to study how interviewers             can even unknowingly persuade themselves (Zeng
+perform in a wider array of challenging scenarios.            et al., 2024). Furthermore, persuadability varies
+                                                              from person to person (Wang et al., 2019; Hirsh
+Source Design Element #2: Persuasion The                      et al., 2012). Luckily, source-persuasion is a well-
+following three functions, in sequence, power                 studied field in journalism. As a starting point, we
+our gameplay: getRelevantInfoItems →                          draw from Sedorkin (2015), and carefully design
+getPersuasionLevel → getItemsToReturn.                        prompts asking an LLM to rate the persuasiveness
+The first, getRelevantInfoItems, takes the in-                of a prior conversation. Different source personas,
+terviewer’s question and determines which of the              according to Sedorkin (2015), are persuaded by
+sources’ information items are most relevant; it is           different communication patterns: e.g., Anxious
+simply a retrieval function that we implement using           sources are distrustful of journalists; they are usu-
+an LLM. getPersuasionLevel is a function that                 ally persuaded by phrases like “I will be as fair as
+determines the selected source’s level of comfort             possible.” We validate this in Section 4.3.
+or persuasion (on a five point scale) in the current
+conversation. getItemsToReturn is a stochastic                Source and Interviewer Responses Based on
+engine: it randomly selects, based on the persua-             the assessed persuasion level (1–5) of the conver-
+sion level, the number of relevant information items          sation, we implement getItemsToReturn. This
+                                                        32900
+function takes in all relevant information items and
+randomly draws from a Beta distribution to deter-
+mine what percentage of relevant information items
+to return. We choose five different parameteriza-
+tions per persona, each corresponding to a different
+persuasion level. As can be seen in Figure 3, we
+choose these parameterizations such that the more
+persuaded a source is, the more left-skewed the
+distribution is. Each persona has a slightly differ-    (a) Rewards of gpt-4o from playing against sources of differ-
+ent parameterization, reflecting that some personas     ent persona types.
+need less persuasion (e.g., “Dominant”) while oth-
+ers do not drastically change how much informa-
+tion they return even with more persuasion (e.g.,
+poor explainer). See Figures 6 and 7 in App. for
+the Beta distributions for each source.
+
+4.3 Gameplay Validation
+We conducted human trials to validate how well
+our gameplay environment approximates real inter-
+views, focusing on persuasion as a pivotal dimen-       (b) Average level of persuasion, from gpt-4o, towards the
+sion. Five participants, including two professional     different persona types in our evaluation.
+journalists and one journalism student, each served
+                                                        Figure 4: Comparison of gpt-4o’s performance across
+as the “source,” rating their own persuasion levels
+                                                        different persona types. The Adversarial type is by far
+turn-by-turn on a five-point scale across 72 trials     the hardest to extract information from, however, it is
+(576 turns total). The game’s LLM-based source          easier to persuade. LLMs might be most the thrown off
+also generated persuasion estimates. We found a         by adversarial sources.
+moderate but significant correlation of r = 0.43 (p
+< .0001). Excluding adversarial personas, correla-
+tion rose to r = 0.68. Bootstrapped estimates           personas and persuasion thresholds, our system can
+confirmed the consistency of these results, and         potentially serve as a stepping stone for training
+a power analysis following guidelines from Card         more sophisticated interview agents or supporting
+et al. (2020) showed our sample size was adequate       journalism students. Future work might expand the
+to detect this effect.                                  environment’s human trials, repeat experiments at
+   These trials center on persuasion because the        larger scale, and incorporate further realism checks
+other components of our source design (i.e., re-        to ensure robust dialogue performance and fidelity.
+trieval of correct informational items), while cru-
+                                                        4.4     Game Simulation Results
+cial, leverage prior, well-studied phenomena in
+retrieval-augmented LLMs and prompt engineer-           We run our simulation for 450 interviews with
+ing (Lewis et al., 2020; OpenAI). Our environment       four LLMs as the interviewer11 and gpt-4o for
+reuses standard cross-encoder reranking and chain-      the source-LLM across all personas. Table 2 com-
+of-thought prompts (Wei et al., 2022; Reimers and       pares the performance of LLMs across three condi-
+Gurevych, 2019), meaning that the correct fac-          tions: the full game, a version without persuasion,
+tual content is generally well-handled without sub-     and a version where sources do not withhold infor-
+stantial new techniques. Minimal forms of self-         mation. In the full game, where sources’ respon-
+reflection (Shinn et al., 2023) were used to mitigate   siveness depends on persuasion and persona, the
+hallucinations, and no significant factual drift was    gpt-4o model performs the best, at 50.4%. How-
+observed. Hallucinations are well-studied in the        ever, when persuasion is removed, performance
+literature (Huang et al., 2025).                        only marginally improves across all models (e.g.,
+   Taken together, this validation suggests that mod-   Llama-3.1-70b reaches 45.5%, while gpt-4o re-
+eling source persuadability in a turn-level simula-     mains stable at 49.8%), indicating that other as-
+tion is reasonably accurate and stable. By capturing       11
+                                                            gpt-4o,      gpt-4o-mini,       Llama-3.1-70b       and
+how LLMs adapt their strategies across different        Llama-3.1-8b
+
+                                                   32901
+                                Hardest                    Medium                       Easiest
+  Model                         Full Game                  sans. Persuasion             sans. Info. witholding
+  gpt-4o-mini                   49.3%                      47.5%                        84.7%
+  gpt-4o                        50.4%                      49.8%                        84.2%
+  Llama-3.1-70b                 42.6%                      45.5%                        80.1%
+  Llama-3.1-8b                  42.4%                      48.3%                        74.9%
+
+Table 2: Performance of LLMs as Interviewers, with Ablations Percentage of information items extracted
+(Reward percentage) in each interview by different language models (gpt-4o-mini, gpt-4o, Llama-3.1-70b, and
+Llama-3.1-8b) across three conditions: (1) Hardest: The full game, with information dependent on persuasion
+and persona. (2) Medium: an ablation removing the sources’ responsiveness to persuasion. (3) Easy: An ablation
+removing the random withholding of information (i.e., a source returns all relevant information items at each turn).
+We observe, perhaps unsurprisingly, that removing the source’s ability to withhold information (Medium → Easy)
+drastically increases the reward percentage at the end of the game. The removal of persuasion strategies has a
+smaller effect, with some models showing marginal gains (e.g., Llama-3.1-8b) and others slight losses (e.g., gpt-4o).
+This indicates that vanilla LLMs are poorly suited to this persuasion task.
+
+
+                                                            fensive personas are the most challenging. Despite
+                                                            being harder to extract information from, adversar-
+                                                            ial sources are easier to persuade (Figure 4b).
+                                                               Figure 5a explores how the reward (information
+                                                            extraction) changes over the course of an interview.
+                                                            The results show a declining trend in reward per
+                                                            conversational turn. However, the total reward ac-
+                                                            cumulated over time (Figure 5b) increasesalmost
+      (a) Average reward across conversational turns.
+                                                            linearly, showing that the LLMs continue to extract
+                                                            information, albeit at a slower rate. Together, these
+                                                            findings highlight the limitations of current LLMs
+                                                            in engaging with persuasive and strategic multi-
+                                                            turn interviews. While larger models like gpt-4o
+                                                            outperform smaller ones, they still exhibit signifi-
+                                                            cant gaps in persuasion and adaptive questioning,
+                                                            particularly when dealing with difficult personas.
+      (b) Percentage (%) of Reward, by total reward.
+                                                            5    Discussion
+Figure 5: Comparison of Rewards over time for lan-          Our findings indicate that news interview tran-
+guage models. For all language models, the reward de-       scripts provide a powerful, real-world resource
+clines over time, shown above. However, this is not due     for studying persuasive, grounding, and multi-turn
+to interviewer “maxing out” reward, as Total Reward
+                                                            strategies in dialogue systems. In particular, we
+increases nearly linearly across conversational turns.
+                                                            build on prior work that highlights grounding gaps
+                                                            in large language models (LLMs) (Shaikh et al.,
+pects of the game (i.e., inferring which information        2024a), extending insights from gameplay-inspired
+the source has witheld) also pose a challenge. In           multi-turn dialogue research (Wongkamjan et al.,
+the easiest condition, where no information with-           2024; Liu et al., 2024) into a domain abundant with
+holding occurs, all models perform significantly            authentic data. By examining human interview-
+better, with reward percentages reaching over 80%,          ers’ behaviors, we illustrate how grounding and
+showing that withholding is a major obstacle.               persuasion manifest naturally in real-world news
+   Figure 4a highlights the performance of gpt-             interviews, yet remain difficult for current LLMs.
+4o across different source personas. The model                 We show in Section 3.3 that humans consistently
+achieves the highest information extraction from            employ grounding dialogue throughout their inter-
+straightforward personas, while adversarial and de-         views, a tactic LLMs fail to emulate effectively. In
+                                                        32902
+Section 4.4, we demonstrate how LLMs struggle to        Caines et al., 2020). This lack of large-scale, nat-
+extract information from diverse source personas,       uralistic data limits progress on LLMs that effec-
+particularly when those personas exhibit adversar-      tively employ affirmations and acknowledgments
+ial or avoidant traits. These findings underscore the   to establish rapport and longer-term strategic think-
+significance of persona mismatches: while existing      ing (Kasneci et al., 2023).
+game-based dialogue studies often assume a single          Meanwhile, recent research has explored the use
+persona per environment (Chawla et al., 2021; Liu       of simulated or game-based environments for train-
+et al., 2024), our results suggest that personae with   ing dialogue agents on multi-turn strategic plan-
+different levels of hostility or indifference pose      ning (Lewis et al., 2017; He et al., 2018; Gray
+unique challenges for current models.                   et al., 2020; Perolat et al., 2022; Chawla et al.,
+   One way to address these limitations is to in-       2021). Though these environments can foster ne-
+corporate long-range reward signals during model        gotiation and strategy, they often rely on narrowly-
+training (Li et al., 2016). Grounding dialogue and      defined tasks or singular personas. Consequently,
+persuasion are inherently long-horizon phenom-          there is still a need for broader conversational con-
+ena (Clark, 1996; Cialdini, 2009). In contexts          texts and larger, more naturalistic datasets (Liu
+like therapy, for instance, effective grounding fos-    et al., 2021). We address these gaps by introduc-
+ters patient openness and lasting progress (Bohart      ing 40,000 two-person informational interviews
+and Tallman, 1999); in education, it encourages         from NPR and CNN, contributing a new large-scale
+students’ sustained engagement and deeper learn-        dataset for studying grounding communication and
+ing (Brown and Campione, 1994). Our NewsInter-          strategic dialogue in realistic settings. Additionally,
+view framework addresses this by providing an en-       our NewsInterview simulation environment incor-
+vironment in which LLMs must continually strate-        porates source personas and persuasive tactics, fur-
+gize about which questions to ask, what informa-        ther advancing the development and evaluation of
+tion gaps need filling, and how to persuade sources     LLMs in long-horizon, multi-turn dialogues.
+to disclose details. This game-playing setting is
+still less complex than fully adversarial multi-agent   7     Conclusion
+domains (Chawla et al., 2021; Liu et al., 2024;         In this paper, we have introduced a high-quality
+Wongkamjan et al., 2024) because the source’s goal      dataset of 40,000 two-person informational inter-
+is not to mislead but to selectively withhold infor-    views from NPR and CNN, addressing the scarcity
+mation. Yet, even in this simplified scenario, LLMs     of large-scale dialogue data necessary for studying
+struggle to maintain effective information extrac-      grounding communication. Our detailed discourse
+tion over multiple turns, pointing to deeper issues     analysis reveals significant differences between
+in question-asking. Future directions include refin-    LLM-generated dialogues and human interview-
+ing our getPersuasionLevel function, introduc-          ers, particularly in the use of grounding language
+ing importance-weighted or quote-centric reward         and question types. Motivated by observation that
+signals, and further validation.                        long-term objectives guide turn-level grounding,
+                                                        we develop a realistic game environment, News-
+6   Related Work                                        Interview, to test and improve dialogue agents in
+                                                        informational interviews. Our experiments demon-
+Research on large language models (LLMs) has            strate that while source-LLMs can mimic human
+increasingly underscored the importance of ground-      behavior in information sharing, interviewer-LLMs
+ing language and strategic dialogue (Shaikh et al.,     struggle with recognizing when questions are an-
+2024a; Wongkamjan et al., 2024), especially in ed-      swered and engaging persuasively, leading to sub-
+ucational, mental health, and conflict resolution       optimal information extraction. These findings un-
+settings (Clark, 1996; Cho and May, 2020; Kasneci       derscore the need for enhancing LLMs’ strategic
+et al., 2023; Carlbring et al., 2023; Argyle et al.,    dialogue capabilities.
+2023). However, current datasets for studying these
+phenomena are either crowdsourced and thus some-        8     Limitations
+what contrived (Rashkin et al., 2019; Wang et al.,
+2019; Liu et al., 2021), or too small to capture the    8.1    Privacy and Ethical Considerations
+complexity of real-world interactions due to pri-       All data used in this study are publicly available
+vacy constraints (Gratch et al., 2014; Casey, 2004;     and do not contain personally identifiable informa-
+                                                   32903
+tion beyond what has been already made public          Acknowledgments
+by the news organizations. We adhere to ethical
+guidelines for data use and ensure that our process-   The authors would like to thank Bloomberg for
+ing respects the rights and privacy of individuals     generously supporting this work by funding the
+involved as well as the news organizations that        first author with a life-changing 4-year PhD fel-
+collected this data. Since the dataset we create       lowship. Funds from the Defense Advanced Re-
+is derived from interviews that have already been      search Projects Agency (DARPA) under Agree-
+published in academic settings, we believe we are      ment No. HR00112490374 also contributed. Any
+not infringing upon the copyright of the news or-      opinions, findings, conclusions, or recommenda-
+ganizations this data originally belonged it. Aside    tions expressed here are those of the authors and
+from ownership questions, there are still inherent     do not necessarily reflect the view of our sponsors.
+risks in the use of real-world interview data. Some
+interviews might involve sensitive topics, and the
+ethical implications of using such data for model
+                                                       References
+evaluation warrant careful consideration.              Lisa P Argyle, Ethan Busby, Joshua Gubler, Chris
+                                                         Bail, Thomas Howe, Christopher Rytting, and David
+8.2 Reproducibility                                      Wingate. 2023. Ai chat assistants can improve con-
+                                                         versations about divisive topics. arXiv preprint
+All experiments are conducted using publicly avail-      arXiv:2302.07268.
+able models and datasets. Part of our simulation
+does rely on high-performing language models and       Arthur C Bohart and Karen Tallman. 1999. How clients
+to serve this we used gpt-4o. This brings us into        make therapy work. Washington, DC: American
+                                                         Psychological Association.
+territory where we are inherently not reproducible,
+as closed models can be changed without notice.        Ann L Brown and Joseph C Campione. 1994. Guided
+However, we believe we are not out of the norm in        discovery in a community of learners. The MIT
+the academic community in our usage.                     Press.
+
+8.3 Simulated Environment Limitations and              Andrew Caines, Helen Yannakoudakis, Helena Edmond-
+    Risks                                                son, Helen Allen, Pascual Pérez-Paredes, Bill Byrne,
+                                                         and Paula Buttery. 2020. The teacher-student chat-
+The simulated game-playing environment used to           room corpus. In Proceedings of the 9th Workshop
+evaluate the LLM agents is a simplification of real-     on NLP for Computer Assisted Language Learning,
+                                                         pages 10–20, Gothenburg, Sweden. LiU Electronic
+world interviewing processes. We might be in-
+                                                         Press.
+ducing a bias in agents that could perpetrate and
+ultimately lead development in the wrong direction.    Dallas Card, Peter Henderson, Urvashi Khandelwal,
+Or, we also might be opening up a sandbox for po-        Robin Jia, Kyle Mahowald, and Dan Jurafsky. 2020.
+tential dual-use. The design of our game, to extract     With little power comes great responsibility. In
+                                                         Proceedings of the 2020 Conference on Empirical
+information from sources, might one day be used          Methods in Natural Language Processing (EMNLP),
+to persuade users to divulge sensitive information.      pages 9263–9274, Online. Association for Computa-
+                                                         tional Linguistics.
+8.4 Annotators
+We worked with multiple professional journalists       Per Carlbring, Heather Hadjistavropoulos, Annet Klei-
+                                                         boer, and Gerhard Andersson. 2023. A new era in
+throughout the summer who were either colleagues         internet interventions: The advent of chat-gpt and
+or students who signed up to work with us. They          ai-assisted therapist guidance. Internet Interventions,
+volunteered their time and efforts to help with the      32:100621.
+research.
+                                                       Dympna Casey. 2004. Challenges of collecting data in
+8.5 Computational Resources                              the clinical setting. NT Research, 9(2):131–141.
+
+All experiments were run either with OpenAI re-        Kushal Chawla, Jaysa Ramirez, Rene Clever, Gale
+sources (we spent a total of $300 running sim-           Lucas, Jonathan May, and Jonathan Gratch. 2021.
+ulations) or open source Llama-3.1-70b models.           Casino: A corpus of campsite negotiation dialogues
+                                                         for automatic negotiation systems. In Proceedings
+These models were run on the university clus-            of the 2021 Conference of the North American Chap-
+ter, which consisted of either 4xA40s or 2xA100s         ter of the Association for Computational Linguistics:
+Nvidia GPUS.                                             Human Language Technologies, pages 3167–3185.
+                                                  32904
+Hyundong Cho and Jonathan May. 2020. Grounding             Woosuk Kwon, Zhuohan Li, Siyuan Zhuang, Ying
+  conversations with improvised dialogues. In Proceed-      Sheng, Lianmin Zheng, Cody Hao Yu, Joseph Gon-
+  ings of the 58th Annual Meeting of the Association        zalez, Hao Zhang, and Ion Stoica. 2023. Efficient
+  for Computational Linguistics, pages 2398–2413.           memory management for large language model serv-
+                                                            ing with pagedattention. In Proceedings of the 29th
+Robert B Cialdini. 2009. Influence: Science and prac-       Symposium on Operating Systems Principles, pages
+  tice, volume 4.                                           611–626.
+Herbert H Clark. 1996. Using language. Cambridge
+                                                           Mike Lewis, Denis Yarats, Yann Dauphin, Devi Parikh,
+  university press.
+                                                             and Dhruv Batra. 2017. Deal or no deal? end-to-
+Jonathan Gratch, Ron Artstein, Gale Lucas, Giota Stra-       end learning of negotiation dialogues. In Proceed-
+  tou, Stefan Scherer, Angela Nazarian, Rachel Wood,         ings of the 2017 Conference on Empirical Methods
+  Jill Boberg, David DeVault, Stacy Marsella, David          in Natural Language Processing, pages 2443–2453,
+  Traum, Skip Rizzo, and Louis-Philippe Morency.             Copenhagen, Denmark. Association for Computa-
+  2014. The distress analysis interview corpus of            tional Linguistics.
+  human and computer interviews. In Proceedings
+  of the Ninth International Conference on Language        Patrick Lewis, Ethan Perez, Aleksandra Piktus, Fabio
+  Resources and Evaluation (LREC’14), pages 3123–            Petroni, Vladimir Karpukhin, Naman Goyal, Hein-
+  3128, Reykjavik, Iceland. European Language Re-            rich Küttler, Mike Lewis, Wen-tau Yih, Tim Rock-
+  sources Association (ELRA).                                täschel, et al. 2020. Retrieval-augmented generation
+                                                             for knowledge-intensive nlp tasks. Advances in Neu-
+Jonathan Gray, Adam Lerer, Anton Bakhtin, and Noam           ral Information Processing Systems, 33:9459–9474.
+  Brown. 2020. Human-level performance in no-press
+  diplomacy via equilibrium search. arXiv preprint         Jiwei Li, Will Monroe, Alan Ritter, Dan Jurafsky,
+  arXiv:2010.02923.                                           Michel Galley, and Jianfeng Gao. 2016. Deep re-
+                                                              inforcement learning for dialogue generation. In Pro-
+Tony Harcup. 2015. Journalism: Principles and Prac-           ceedings of the 2016 Conference on Empirical Meth-
+  tice, 3rd edition. SAGE Publications, London, UK.           ods in Natural Language Processing, pages 1192–
+                                                             1202.
+He He, Derek Chen, Anusha Balakrishnan, and Percy
+  Liang. 2018. Decoupling strategy and generation          Siyang Liu, Chujie Zheng, Orianna Demasi, Sahand
+  in negotiation dialogues. In 2018 Conference on            Sabour, Yu Li, Zhou Yu, Yong Jiang, and Minlie
+  Empirical Methods in Natural Language Process-             Huang. 2021. Towards emotional support dialog
+  ing, EMNLP 2018, pages 2333–2343. Association              systems. In Proceedings of the 59th Annual Meet-
+  for Computational Linguistics.                             ing of the Association for Computational Linguistics
+Jacob B Hirsh, Sonia K Kang, and Galen V Boden-              and the 11th International Joint Conference on Natu-
+   hausen. 2012. Personalized persuasion: Tailoring          ral Language Processing (Volume 1: Long Papers),
+   persuasive appeals to recipients’ personality traits.     pages 3469–3483.
+  Psychological science, 23(6):578–581.
+                                                           Ziyi Liu, Abhishek Anand, Pei Zhou, Jen-tse Huang,
+Lei Huang, Weijiang Yu, Weitao Ma, Weihong Zhong,            and Jieyu Zhao. 2024. InterIntent: Investigating so-
+  Zhangyin Feng, Haotian Wang, Qianglong Chen,               cial intelligence of LLMs via intention understanding
+  Weihua Peng, Xiaocheng Feng, Bing Qin, et al. 2025.        in an interactive game context. In Proceedings of
+  A survey on hallucination in large language models:        the 2024 Conference on Empirical Methods in Natu-
+  Principles, taxonomy, challenges, and open questions.      ral Language Processing, pages 6718–6746, Miami,
+  ACM Transactions on Information Systems, 43(2):1–          Florida, USA. Association for Computational Lin-
+  55.                                                        guistics.
+
+Enkelejda Kasneci, Kathrin Seßler, Stefan Küchemann,       Bodhisattwa Prasad Majumder, Shuyang Li, Jianmo Ni,
+  Maria Bannert, Daryna Dementieva, Frank Fischer,           and Julian McAuley. 2020. Interview: A large-scale
+  Urs Gasser, George Louis Groh, Stephan Günne-              open-source corpus of media dialog. arXiv preprint
+  mann, Eyke Hüllermeier, Stephan Krusche, Gitta             arXiv:2004.03090.
+  Kutyniok, Tilman Michaeli, Claudia Nerdel, Jür-
+  gen Pfeffer, Oleksandra Poquet, Michael Sailer, Al-      OpenAI.     Openai cookbook: Reranking with
+  brecht Schmidt, Tina Seidel, Matthias Stadler, Jochen      cross-encoders.    https://cookbook.openai.
+  Weller, Jochen Kuhn, and Gjergji Kasneci. 2023.            com/examples/search_reranking_with_
+  Chatgpt for good? on opportunities and challenges of       cross-encoders. Accessed 2024-11-26.
+  large language models for education. Learning and
+  Individual Differences.                                  Jiao Ou, Junda Lu, Che Liu, Yihong Tang, Fuzheng
+                                                              Zhang, Di Zhang, and Kun Gai. 2024. Dialogbench:
+J Peter Kincaid, Robert P Fishburne Jr, Richard L             Evaluating llms as human-like dialogue systems. In
+  Rogers, and Brad S Chissom. 1975. Derivation of             Proceedings of the 2024 Conference of the North
+  new readability formulas (automated readability in-         American Chapter of the Association for Computa-
+  dex, fog count and flesch reading ease formula) for         tional Linguistics: Human Language Technologies
+  navy enlisted personnel. Technical report.                  (Volume 1: Long Papers), pages 6137–6170.
+                                                      32905
+Julien Perolat, Bart De Vylder, Daniel Hennes, Eu-           Bashlykov, Soumya Batra, Prajjwal Bhargava, Shruti
+   gene Tarassov, Florian Strub, Vincent de Boer, Paul       Bhosale, et al. 2023. Llama 2: Open founda-
+   Muller, Jerome T Connor, Neil Burch, Thomas An-           tion and fine-tuned chat models. arXiv preprint
+   thony, et al. 2022. Mastering the game of stratego        arXiv:2307.09288.
+   with model-free multiagent reinforcement learning.
+   Science, 378(6623):990–996.                            Xuewei Wang, Weiyan Shi, Richard Kim, Yoojung Oh,
+                                                            Sijia Yang, Jingwen Zhang, and Zhou Yu. 2019. Per-
+Hannah Rashkin, Eric Michael Smith, Margaret Li, and        suasion for good: Towards a personalized persuasive
+  Y-Lan Boureau. 2019. Towards empathetic open-             dialogue system for social good. In Proceedings of
+  domain conversation models: A new benchmark and           the 57th Annual Meeting of the Association for Com-
+  dataset. In Proceedings of the 57th Annual Meet-          putational Linguistics, pages 5635–5649, Florence,
+  ing of the Association for Computational Linguistics,     Italy. Association for Computational Linguistics.
+  pages 5370–5381, Florence, Italy. Association for
+  Computational Linguistics.                              Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten
+                                                             Bosma, Brian Ichter, Fei Xia, Ed H. Chi, Quoc V. Le,
+Nils Reimers and Iryna Gurevych. 2019. Sentence-bert:        and Denny Zhou. 2022. Chain-of-thought prompt-
+  Sentence embeddings using siamese bert-networks.           ing elicits reasoning in large language models. In
+  In Proceedings of the 2019 Conference on Empirical         Proceedings of the 36th International Conference on
+  Methods in Natural Language Processing and the 9th         Neural Information Processing Systems, NIPS ’22,
+  International Joint Conference on Natural Language         Red Hook, NY, USA. Curran Associates Inc.
+  Processing (EMNLP-IJCNLP), pages 3982–3992.
+                                                          Wichayaporn Wongkamjan, Feng Gu, Yanze Wang,
+Swarnadeep Saha, Omer Levy, Asli Celikyilmaz, Mohit         Ulf Hermjakob, Jonathan May, Brandon M. Stew-
+  Bansal, Jason Weston, and Xian Li. 2024. Branch-          art, Jonathan K. Kummerfeld, Denis Peskoff, and
+  solve-merge improves large language model evalu-          Jordan Lee Boyd-Graber. 2024. More victories, less
+  ation and generation. In Proceedings of the 2024          cooperation: Assessing cicero’s diplomacy play. In
+  Conference of the North American Chapter of the          Proceedings of the 62nd Annual Meeting of the As-
+  Association for Computational Linguistics: Human          sociation for Computational Linguistics (Volume 1:
+  Language Technologies (Volume 1: Long Papers),            Long Papers), pages 12423–12441, Bangkok, Thai-
+  pages 8345–8363.                                          land. Association for Computational Linguistics.
+Hiromasa Sakurai and Yusuke Miyao. 2024. Evaluat-         Yi Zeng, Hongpeng Lin, Jingwen Zhang, Diyi Yang,
+  ing intention detection capability of large language      Ruoxi Jia, and Weiyan Shi. 2024. How johnny can
+  models in persuasive dialogues. In Proceedings            persuade LLMs to jailbreak them: Rethinking per-
+  of the 62nd Annual Meeting of the Association for         suasion to challenge AI safety by humanizing LLMs.
+  Computational Linguistics (Volume 1: Long Papers),        In Proceedings of the 62nd Annual Meeting of the
+  pages 1635–1657, Bangkok, Thailand. Association           Association for Computational Linguistics (Volume 1:
+  for Computational Linguistics.                            Long Papers), pages 14322–14350, Bangkok, Thai-
+                                                            land. Association for Computational Linguistics.
+Gail Sedorkin. 2015. Interviewing: A Guide for Jour-
+  nalists and Writers, 4th edition. Allen & Unwin.        Chenguang Zhu, Yang Liu, Jie Mei, and Michael Zeng.
+                                                            2021. MediaSum: A large-scale media interview
+Omar Shaikh, Kristina Gligorić, Ashna Khetan,              dataset for dialogue summarization. In Proceedings
+ Matthias Gerstgrasser, Diyi Yang, and Dan Jurafsky.        of the 2021 Conference of the North American Chap-
+ 2024a. Grounding gaps in language model gener-             ter of the Association for Computational Linguistics:
+ ations. In Proceedings of the 2024 Conference of           Human Language Technologies, pages 5927–5934,
+ the North American Chapter of the Association for          Online. Association for Computational Linguistics.
+ Computational Linguistics: Human Language Tech-
+ nologies (Volume 1: Long Papers), pages 6279–6296.
+Omar Shaikh, Kristina Gligorić, Ashna Khetan,
+ Matthias Gerstgrasser, Diyi Yang, and Dan Jurafsky.
+ 2024b. Grounding gaps in language model gener-
+ ations. In Proceedings of the 2024 Conference of
+ the North American Chapter of the Association for
+ Computational Linguistics: Human Language Tech-
+ nologies (Volume 1: Long Papers), pages 6279–6296.
+Noah Shinn, Federico Cassano, Ashwin Gopinath,
+  Karthik Narasimhan, and Shunyu Yao. 2023. Re-
+  flexion: Language agents with verbal reinforcement
+  learning. Advances in Neural Information Process-
+  ing Systems, 36:8634–8652.
+Hugo Touvron, Louis Martin, Kevin Stone, Peter Al-
+  bert, Amjad Almahairi, Yasmine Babaei, Nikolay
+                                                     32906
+Appendix
+Table of Contents
+   A Additional Dataset Details                                                                                  14
+
+   B Data Preprocessing                                                                                          14
+      B.1 Data Used . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 14
+      B.2 Initial Sizes of the Data . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 14
+      B.3 Process . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 15
+      B.4 Final Sizes of the Data . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 16
+      B.5 LLM Preprocessing Prompt . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 16
+      B.6 Examples of Interviews . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 16
+
+   C All Gameplay Prompts                                                                                        21
+
+   D Source-Specific Prompt Functions                                                                            21
+      D.1 1. Source Prompt: Get Source Specific Info Items . . . . . . . . . . . . . . . . . . . . . . . . . . 21
+      D.2 2. Source Prompt: Get Source Persuasion Level Prompt . . . . . . . . . . . . . . . . . . . . . . 21
+      D.3 3. Source Prompt: Get Source Prompt Basic . . . . . . . . . . . . . . . . . . . . . . . . . . . . 22
+      D.4 4. Source Prompt: Get Source Prompt Intermediate . . . . . . . . . . . . . . . . . . . . . . . . . 22
+      D.5 5. Source Prompt: Get Source Persona Prompt Advanced . . . . . . . . . . . . . . . . . . . . . 22
+      D.6 6. Source Prompt: Get Source Starting Prompt . . . . . . . . . . . . . . . . . . . . . . . . . . . 22
+      D.7 7. Source Prompt: Get Source Ending Prompt . . . . . . . . . . . . . . . . . . . . . . . . . . . 23
+      D.8 Source Dictionaries . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 23
+
+   E Interviewer Prompt Functions                                                                                25
+      E.1 8. Interviewer Prompt: Get Interviewer Prompt . . . . . . . . . . . . . . . . . . . . . . . . . . . 25
+      E.2 9. Interviewer Prompt: Get Advanced Interviewer Prompt . . . . . . . . . . . . . . . . . . . . . 27
+      E.3 10. Interviewer Prompt: Get Interviewer Starting Prompt . . . . . . . . . . . . . . . . . . . . . . 28
+      E.4 11. Interviewer Prompt: Get Interviewer Ending Prompt . . . . . . . . . . . . . . . . . . . . . . 28
+
+   F Data Processing Prompt Functions                                                                            29
+      F.1 12. Data Processing: Get Outline Followup Prompt . . . . . . . . . . . . . . . . . . . . . . . . . 29
+      F.2 13. Data Processing: Get Outline Only Prompt . . . . . . . . . . . . . . . . . . . . . . . . . . . 29
+      F.3 14. Data Processing: Get Info Items Prompt . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 30
+      F.4 15. Data Processing Prompt: Get Segmented Info Items Prompt . . . . . . . . . . . . . . . . . . 30
+      F.5 16. Data Processing Prompt: Get All Topic Transition Questions Prompt . . . . . . . . . . . . . . 30
+
+   G Discourse Definitions                                                                                       30
+
+
+
+
+                                                       32907
+A    Additional Dataset Details                              Question Type     Frequency       Percentage
+In this section, we share additional details of our          What/Which             19,553          36.2%
+dataset. We provide examples illustrating the dif-           Other                  19,236          35.6%
+ferences between human interviewer behavior and              How/Why                10,625          19.6%
+LLM-generated counterfactual questions.                      When/Where              2,719             5%
+   The dataset consists of 45,848 transcribed dia-           Who                     1,854           3.4%
+logues with speaker annotations that distinguish
+between hosts and guests. When examining turn            Table 3: Distribution of Question Types by Interview-
+alternation patterns by filtering consecutive turns      ers. Question types posed by human interviewers are
+from the same speaker, we observe an average 7.6         measured by searching for keywords in each interviewer
+                                                         utterance.
+distinct speaking turns per interview.
+   A linguistic analysis uncovers differences in ver-
+                                                             Metric                Interviewer      Source
+bosity between speakers. Sources produce an aver-
+                                                             Avg. Words / Utt.         16.18         27.69
+age of 27.7 words per utterance, while interviewers
+                                                             Avg. Words / Conv.       270.86        551.92
+maintain concise interactions at 16.2 words per ut-
+                                                             Avg. Word Len             4.21          4.67
+terance. This 71% difference in utterance length
+                                                             Read Ease                  70.9          68.4
+reflects the distinct communicative roles: interview-
+                                                             Grade Level                 6.9           6.9
+ers pose targeted questions while sources provide
+detailed explanations.                                   Table 4: Linguistic Metrics by Speaker Type. Reading
+   The interview corpus spans a diverse range            Ease and Grade Level measured by Kincaid et al. (1975)
+of subject areas. As can be seen in Table 5,
+running LDA with k = 7 over our corpus
+yields topics from literature and storytelling to        presents a representative sample of LLM-generated
+ political discussions, academic/scientific cover-       interview questions, showcasing their typical struc-
+                                                         ture and content when prompted to continue human
+age, and international affairs . It also includes        interview conversations.
+conversations on defense and military topics,
+ economic and business news, and legal/crime             B     Data Preprocessing
+issues.
+                                                         Preprocessed Data can be found here:
+   The majority of questions posed by inter-
+                                                         https://drive.google.com/drive/folders/
+viewers are of the “What/Which” variety (36.2
+                                                         1my13HoKWBoAGenNbgxFUpWRNj8QeqAt-?usp=
+%), followed closely by “Other” types (35.6
+                                                         sharing
+%) and “How/Why” questions (19.6 %), with
+“When/Where” and “Who” questions comprising              B.1    Data Used
+only 5% and 3.4%, respectively (Table 3). In
+                                                             • utterances-2sp.csv from the NPR-Media
+terms of linguistic complexity, interviewer utter-
+                                                               dataset (Majumder et al., 2020)
+ances tend to be shorter than guest (source) utter-
+ances, averaging 16.18 words per utterance and               • episodes.csv from the NPR-Media dataset
+270.86 words per conversation for interviewers ver-            (Majumder et al., 2020)
+sus 27.69 words per utterance and 551.92 words
+per conversation for sources (Table 4). Interview-           • news_dialogue.json from the MediaSum
+ers also use slightly shorter words on average (4.21           dataset (Zhu et al., 2021)
+characters) compared to sources (4.67 characters),
+and exhibit marginally higher Flesch Reading Ease        B.2    Initial Sizes of the Data
+(70.9) (Kincaid et al., 1975) than sources (68.4), al-
+though both groups share an identical Grade Level            • There are 1,240,112 rows and seven columns
+score (6.9) (Table 4).                                         in utterances-2sp.csv.
+   Table 6 demonstrates how LLMs tend to gener-              • There are 105,848 rows and four columns in
+ate follow-up questions when humans would tran-                episodes.csv.
+sition to new topics, while Table 7 shows LLMs
+failing to provide acknowledgment statements that            • There are 3,199,858 rows and four columns
+humans naturally use to build rapport. Table 8                 in utterances.csv.
+                                                    32908
+Literature      Politics        Academia        International Defense          Economy        Legal
+                                                Affairs
+book            vote            melissa         inskeep         military       company        court
+write           republican      block           china           kelly          market         school
+author          senator         norris          iran            security       percent        police
+life            party           michele         north           iraq           siegel         jacki
+play            campaign        university      countries       afghanistan    bank           lyden
+story           obama           audie           madeleine       force          economy        justice
+game            election        flatow          brand           russia         business       judge
+love            political       cornish         nuclear         israel         price          charge
+women           democrats       water           international   intelligence   cost           information
+read            republicans     professor       korea           general        program        department
+
+Table 5: Top 10 words for each of the k = 7 LDA topics over the interview corpus. Column headers are 1–2 word
+summary keywords, and each column is shaded in a different light color.
+
+
+   • There are 23,714 transcripts in the NPR-                    – print_episode_pretty(df,
+     Media dataset (from utterances-2sp.csv).                      episode_number) prints a speci-
+                                                                   fied episode from a specified dataset
+   • There are 463,596 transcripts in the Media-                   with a readable format.
+     Sum dataset.                                                – find_removed_episodes(df_before,
+                                                                   df_after) returns a list of the episodes
+                                                                   that were removed in a filtering step.
+B.3   Process
+B.3.1 NPR-Media                                             • Convert dataset to the MediaSum format for
+                                                              easy prompt processing.
+   • Began with combining the extttepisodes.csv
+     with the utterances-2sp.csv to add more                • Downloaded dataset (grouped and ungrouped)
+     information about the episode (title, date, etc).        as JSON and CSV.
+
+   • Filtered out based on keywords: [“Sun-              MediaSum
+     day Puzzle”, “Traffic”, “Puzzle”, “Advertise-          • Began with deleting interviews from Media-
+     ment”, “Sponsor”, “Commentary”]                          Sum that are already in NPR-Media.
+         – 37 interviews were filtered out and re-               – 8 interviews were filtered out and re-
+           duced to 23,676 transcripts.                            duced to 463,588 transcripts.
+
+   • Helper functions used:                                 • Filtered out episodes that had more than two
+                                                              unique speakers in the middle 70% of the tran-
+         – count_unique_episodes(df) allows
+                                                              script.
+           the user to count the number of unique
+           episodes within a dataset.                            – Reduced to 66,978 transcripts.
+         – filter_interviews(merged_df)                          – 396,610 interviews were filtered out and
+           allows the user to filter out the dataset               reduced to 66,978 transcripts.
+           using certain keywords.
+                                                            • Filtered out episodes that were too short.
+         – find_removed_episodes(df_before,
+           df_after) allows the user to identify                 – 19,059 interviews were filtered out and
+           the episodes that were removed from the                 reduced to 47,919 transcripts.
+           dataset.
+                                                            • Helper functions used:
+         – print_episode(df,
+           episode_number) prints a specified                    – print_row_by_title(df, title) al-
+           episode from a specified dataset.                       lows users to print episode using title.
+                                                    32909
+ Prior Context:
+ “. . . MELISSA BLOCK, HOST: Charlie, I gather there’s another race in North Carolina that you’ve been
+ paying some attention to.
+ CHARLIE MAHTESIAN: Of course. I can’t help myself. Remember Clay Aiken, the ‘American Idol’
+ runner-up from a few years ago back?
+ MELISSA BLOCK, HOST: I do. I do.
+ CHARLIE MAHTESIAN: How can we forget him? Well, he’s running for Congress as a Democrat this
+ year. And it turns out that in addition to being a talented singer, he’s a pretty decent candidate. But despite
+ the great name recognition that he got from his showbiz career, he’s not a lock to win. And in any case, if
+ he does win the Democratic nomination tomorrow, it’s still something of an uphill climb for him because
+ he’s going to be running in a pretty comfortable and safe Republican district.”
+Actual Question                   MELISSA BLOCK, HOST: Let’s move over to Ohio.
+Outline-Level Question
+LLM Question                      What makes Clay Aiken a decent candidate, and what are his chances
+Follow-Up Question                of winning in a safe Republican district?
+
+Table 6: Example of an entire LLM counterfactual generation sequence. The prior k=4 turns of human QA-pairs is
+fed in as context. Next, the human interviewer’s turn is shown, compared with the LLM generation. The LLM used
+for generation is the baseline prompting LLM. Labels for each question are shown as well.
+
+
+        – print_row_by_id(df,          id) allows        B.5   LLM Preprocessing Prompt
+          users to print episode using id.               Prompt to filter out transcripts that were
+        – filter_episodes_2sp(df) filters out            not informational interviews  Analyze this
+          transcripts with more than 2 unique            interview transcript that is in the form
+          speakers in the middle 70%.                    of a dialogue: (dialogue) By reading
+        – filter_by_utt_length(df) filters out           through the dialogue, identify if this
+          transcripts with 10 or fewer strings in        transcript is an informational interview
+          extttutt.                                      between 2 people. Look for questions
+        – find_removed_episodes(df_before,               and make sure this is an interview, not
+          df_after) lets users see which episodes        a Q&A game.        The interviewer should
+          were removed.                                  be asking questions, not engaging in
+                                                         a back-and-forth conversation with the
+                                                         interviewee. After analyzing, your final
+   • Downloaded dataset as JSON and CSV.
+                                                         answer of just ’YES’ or ’NO’ should be in
+                                                         brackets.
+B.4   Final Sizes of the Data
+   • There are 23,676 transcripts in the NPR-            B.6   Examples of Interviews
+     Media dataset (from extttutterances-2sp.csv).       NPR-85
+                                                            FARAI CHIDEYA, host: Tony, I guess there will
+   • There are 47,919 transcripts in the MediaSum        always be some kind of history made every day.
+     dataset.                                               TONY COX, host: You know, some of it good.
+                                                         Some of it, not so good.
+   • There are 71,598 transcripts in the combined           FARAI CHIDEYA, host: And while some of it
+     dataset.                                            is well-publicized, sometimes, notable history goes
+                                                         under the radar.
+   • There are 45,848 transcripts in the final              TONY COX, host: Now, that’s true.
+     dataset.                                               FARAI CHIDEYA, host: I’m thinking of your
+                                                         interview with Mable John.
+   • Our dataset started at 487,310 transcripts and         TONY COX, host: Oh, yeah. Now, this is a
+     now has 45,848 transcripts.                         woman with an interesting past.
+                                                    32910
+ Prior Context:
+ “ARUN RATH, HOST: As a father of two young kids, I am very excited about a new segment we’re
+ starting right now about parenting...
+ HANK AZARIA: I am not a children kind of person. I don’t really like kids. I don’t gravitate towards
+ them. They make me nervous when I’m around them. I didn’t particularly like myself as a child.
+ ARUN RATH, HOST: Well, Hank did become a father, and his son is now 4. I know from personal
+ experience that’s when kids start to ask deep, complicated questions. I wanted to know how Hank handled
+ one of the big ones: What happens when you die?
+ HANK AZARIA: Sadly, my dad passed away this past year, so death came up with my son. And it was
+ amazingly hard. He got really upset about it, as you might imagine. I mean, he was like, what do you
+ mean we’re not going to see Grandpa anymore? ...
+ ARUN RATH, HOST: Wow.
+ HANK AZARIA: And then God gave us a son. How about that for just a shot-in-the-dark theory of how
+ it happens? But, man — and he really is with it. He’s like, hey, can I have a baby someday? And we’re
+ like, sure you can. Of course, you can. He goes, can I borrow your magic wand? And I’m like, you’ll
+ have your own. You’ll have your own. Anyway, just wanted to share that one.”
+Actual Question                   ARUN RATH, HOST: That was great.
+Acknowledgement Statement
+LLM Question                      How do you think your son’s understanding of death and the concept of
+Follow-Up Question                making babies has evolved over time, and have you had to revisit these
+                                  conversations as he’s gotten older?
+
+Table 7: A second example of an LLM counterfactual generation sequence. The human interviewer is giving a
+significant amount of encouragement and acknowledgment throughout the interview, compared with the LLM. Even
+when the LLM sees this speech pattern, it does not imitate it.
+
+
+   Ms. MABLE JOHN (Singer): (Singing) My                So he introduced me to Berry Gordy.
+name is Mable and don’t you think I ain’t able.            TONY COX, host: Now, tell us the story. We’re
+TONY COX, host: The 77-year-old Louisiana na-           going to skip around a little bit.
+tive has been a top R&B singer, a successful nov-          Ms. MABLE JOHN (Singer): Okay.
+elist, a pastor, an activist and a movie actor, and        TONY COX, host: When you and Berry Gordy
+I found out that Mable John is full of stories like     connected, as Motown was just becoming a com-
+the one about the time she met record mogul Berry       pany, a record company, you are the first female to
+Gordy before Motown was even Motown.                    record on a label, the Tamla label.
+  Ms. MABLE JOHN (Singer): (Singing) That                  Ms. MABLE JOHN (Singer): Yes.
+you’re leaving.                                            TONY COX, host: Before Motown.
+   Ms. MABLE JOHN (Singer): How I met Berry?               Ms. MABLE JOHN (Singer): The first single fe-
+That was at a barber shop on (unintelligible) that      male artist, because Claudette Robinson was a part
+was near the fine show bar, and at that time men        of what become the Miracles, and he was managing
+were wearing process. Process is the (unintelligi-      them along with me.
+ble). And I was dating a guy that was one of those         TONY COX, host: Right.
+process operators in the Chesterfield lounge and           Ms. MABLE JOHN (Singer): So I was the first
+barbershop, and Berry was coming and getting his        single female artist to be signed to Tamla, which is
+hair done. I was coaching choirs for my church.         a part of the Motown family.
+And my boyfriend introduced me to Berry Gordy              TONY COX, host: When you think about that
+because Berry said he was a songwriter and he was       now, how do you feel about looking at that as a
+going to have a lot of people recording his songs.      historic moment?
+And my boyfriend said you need to stop doing all           Ms. MABLE JOHN (Singer): No one could
+of this work for the church free, and that Berry        have bought that time. God had to give it to me.
+Gordy do something with you so you can get paid.           Ms. MABLE JOHN (Singer): (Singing) Hey.
+                                                   32911
+     LLM-Generated Counterfactual Questions
+     What do you think about the changing dynamics of your neighborhood and how it affects your
+     sense of community and belonging?
+     What specific factors do you think are contributing to the increasing rates of HIV/AIDS among
+     African-American women in Washington D.C.?
+     How do parents with HIV/AIDS typically cope with the fear of not being there for their children,
+     and what are the emotional and psychological implications of this fear on their mental health?
+     What specific steps are you taking to mitigate the impact of the Salmonella outbreak on your
+     business, and do you think this will have a lasting effect on the tomato industry as a whole?
+     What about the potential impact of this rate drop on the overall housing market, and do you
+     think it could lead to a rebound in housing prices or a continued decline?
+     What are some practical steps parents can take to help their teenagers prepare for the job market
+     and make the most of their summer?
+
+Table 8: List of Interview Questions generated in a counterfactual setting by LLM interviewer. The questions are
+generated after observing the previous t human conversational turns.
+
+
+  Processed Outline                                        the corner of your eye. I don’t want no big line calls,
+  Source biography: Senior news analyst with               (unintelligible) caviar. Oh no, true love baby can
+  expertise in politics and history.                       be found ’cause you take a look around. TONY
+  Interview context: A president’s final year in           COX, host: Talking about faith. Your career at
+  office and potential changes in policy.                  Motown never really took off, and after some few
+  Objective 1: Presidential legacy                         years, you decided to go to Memphis, where you
+  Objective 2: Foreign policy shifts                       joined the Stax label and hooked up with Porter
+  Objective 3: Domestic policy changes                     and Isaac Hayes. And then, it was long after that
+  Objective 4: Potential surprises                         that you had a million seller.
+                                                              Ms. MABLE JOHN (Singer): Right. Well, Mo-
+Table 9: Interview Outline Objectives given to an inter-   town, Berry Gordy, they were all along with God
+viewing game playing agent.
+                                                           and my parents a part of my future. So Motown
+                                                           was my beginning. It was one that was different
+Hey.                                                       from everywhere else I’ve ever been. But I think it
+   TONY COX, host: I understand that you were re-          was a necessary one to make the transition for me
+hearsing one day and these three young girls came          from Motown to Stax.
+in and interrupted your rehearsal.                            TONY COX, host: Now, your big song at Stax,
+   Ms. MABLE JOHN (Singer): The girls that we              one of your - the biggest of your songs was. . .
+know now as The Supremes. They came into a re-                Ms. MABLE JOHN (Singer): The biggest of all
+hearsal that I was doing with Berry Gordy because          songs.
+he played also for me, played piano for me. We                TONY COX, host: “Your Good Thing is About
+were there rehearsing and these girls came in and I        to End.”
+didn’t quite remember everything that was said that           Ms. MABLE JOHN (Singer): “. . . Is About to
+day because it’s been so long. But Mary Wilson of          End.” Right. Right.
+The Supremes, remembered when she was writing                 TONY COX, host: See, I’m old enough to have
+her book to say that when she first walked into Mo-        remembered that song.
+town, the three of them walked in and my question             Ms. MABLE JOHN (Singer): Well, that’s good.
+to Berry Gordy was, why are they walking in on             That makes me feel you don’t have to be very old
+my rehearsal, because all of our rehearsals were           to remember that.
+private.                                                      Ms. MABLE JOHN (Singer): (Singing) I don’t
+   Ms. MABLE JOHN (Singer): (Singing) It takes             have to beg you to hold me ’cause somebody else
+a more than ’em flashy old money and I wink from           will. You don’t have to love me when I want it,
+                                                      32912
+      Information Items
+      Row 1: Information item #1: The economy is growing above trend pace, with job growth of
+      150,000-200,000 a month, which is higher than what’s sustainable in the long run.
+      Row 2: Information item #2: The Fed will likely continue to raise interest rates, as the
+      economy is growing and financial conditions are still very accommodative.
+      Row 3: Information item #3: The neutral rate is probably higher than where we are right
+      now, but it’s not a precise number, and the Fed needs to curtail monetary policy further.
+      Row 4: Information item #4: The dot-plot is just a forecast and should not be taken as a
+      commitment; it’s subject to change as new information becomes available.
+      Row 5: Information item #5: The stock market will likely face tougher going in 2019, with
+      slower earnings growth and higher interest rates.
+      Row 6: Information item #6: The economy’s capacity to continue growing is a concern, as
+      there aren’t enough workers to sustain above-trend growth for more than another year or so.
+
+Table 10: Information Items for a source in our game-playing environment, extracted from an interview featuring
+Bill Dudley, Former President of the New York Federal Reserve
+
+
+’cause somebody else will.                               without Ray Charles.
+    Ms. MABLE JOHN (Singer): It was a story                 Ms. MABLE JOHN (Singer): With and without
+that I needed to tell because of a bad marriage.         Ray Charles. Yes.
+And at Stax, they would allow you to be yourself.           TONY COX, host: In the movie, “Ray,” I had
+Everybody participated in whatever success you’re        looked in the credits to see if there were someone
+going to have, everybody, including the drummer.         who played you. . .
+    TONY COX, host: Really? Tell me about your              Ms. MABLE JOHN (Singer): No.
+family. And I’m switching to that for a reason              TONY COX, host: ...since you have been a
+because you were one of 10 children, right?              Raelette for so long, and I saw that there wasn’t
+    Ms. MABLE JOHN (Singer): The oldest...               one.
+    TONY COX, host: The oldest of 10.                       Ms. MABLE JOHN (Singer): No.
+    Ms. MABLE JOHN (Singer): ...of 10 children.             TONY COX, host: And is there a reason for
+    TONY COX, host: And you happen to have a             that?
+little brother, a baby brother who was a big time           Ms. MABLE JOHN (Singer): Well, it was the
+performer, Little Willie John.                           years before I came.
+    Ms. MABLE JOHN (Singer): Yes. Little Willie             TONY COX, host: Okay.
+John. William Edward John. Now, when I got with             Ms. MABLE JOHN (Singer): And I tell every-
+Willy that was another education.                        body that asks me, the best of his life were the
+    Ms. MABLE JOHN (Singer): Because he said             years after the movie. When I came to work with
+my name is Little Willie John. It might be William       him, he sat me down and told me all about his be-
+Edward John to you, and you’re my sister and I           ginning, told me all about things that ticks him off
+love you. But if you’re not good, I’m going to send      and things that excite him, what he was looking for
+you home.                                                and how he wanted it. And I knew that being with
+    TONY COX, host: Obviously, you are good.             him would finish me in this industry. . .
+    Ms. MABLE JOHN (Singer): Well, he let me                TONY COX, host: Now, when he...
+stay.                                                       Ms. MABLE JOHN (Singer): ...because he was
+    Ms. MABLE JOHN (Singer): (Singing) You               at the top - complete me.
+have all the love that I’ve got. Even ice melts to          TONY COX, host: Okay.
+water and gets hot. Look out, your good thing is            Ms. MABLE JOHN (Singer): So that I could
+about to come to an end. Your real good thing. . .       work for any audience, sing any kind of songs.
+    TONY COX, host: You were the leader of the           Remember now, at the beginning I thought I could
+Raelettes for a dozen years.                             only sing gospel. With Berry Gordy, I found out
+    Ms. MABLE JOHN (Singer): Yes.                        I could sing the blues. I went to Stax and I find
+    TONY COX, host: Traveling all over with and          out I could sing love songs. I got with Ray Charles
+                                                    32913
+                       (a) Anxious                                              (a) Clueless
+
+
+
+
+                   (b) Straightforward                                         (b) Dominating
+
+
+
+
+                    (c) Poor Explainer                                          (c) Avoidant
+
+Figure 6: Beta Distributions for Various Interview Per-   Figure 7: Beta Distributions for Various Interview Per-
+sonas                                                     sonas
+
+
+and we sang country - everything. And we could               Ms. MABLE JOHN (Singer): Yes.
+play to any audience. I wanted to sing what was in           TONY COX, host: And you help the homeless.
+my heart to everybody that loves music, and Ray              Ms. MABLE JOHN (Singer): Yes.
+Charles was the place for me to be, to do that.              TONY COX, host: And you’re a grandmother.
+   TONY COX, host: So the Raelettes - would you              Ms.      MABLE JOHN (Singer): A great-
+say that was the highlight of your career?                grandmother.
+   Ms. MABLE JOHN (Singer): It was a highlight.              TONY COX, host: And a great-grandmother.
+It was highlight because I learned things about           How is it possible for one person to do all of those
+myself, about my career, about the industry. I was        things and to do them as successfully as you have?
+able to set up my own publishing companies and               Ms. MABLE JOHN (Singer): It’s all God. Some
+production companies because of the knowledge             days, when people are telling me how busy I am.
+that I gained with and from Ray Charles.                  And when I sit down to think about it, I get tired.
+   TONY COX, host: And after all of that, Mable              Ms. MABLE JOHN (Singer): So I don’t. I don’t
+John, your career did not stop. It has gone on into       go there. I just get up every morning and I thank
+movies, into - you’ve written a couple of novels.         God for the activity of that day. And I have to
+   Ms. MABLE JOHN (Singer): Excuse me. I just             thank a woman that’s no longer with us, Ms. Billie
+finished the third.                                       Holiday, because that’s the voice that I hear in my
+   TONY COX, host: Oh, number three. You’ve               ear still to this day. I worked with her two weeks
+done three novels. You’re a minister.                     before she passed. And she said to me, Honey -
+   Ms. MABLE JOHN (Singer): Yes.                          because I was frightened out of my wits - you can
+   TONY COX, host: And you started a church.              make it if you remember. Always know when you
+                                                     32914
+have done or given enough. Not to be afraid and            Example 1: The last question asked by the in-
+have guts enough to say I quit.                         terviewer can be answered by the following infor-
+   Ms. MABLE JOHN (Singer): (Singing) Even              mation items: [Information Item #2, Information
+ice melts to water and gets hot. . .                    Item #3, Information Item #6] Example 2: The last
+   TONY COX, host: It’s so nice talking with you.       question asked by the interviewer can be answered
+Thank you for coming in.                                by the following information item: [Information
+   Ms. MABLE JOHN (Singer): I thank you.                Item #7] Example 3: The question asked by the
+   Ms. MABLE JOHN (Singer): (Singing) Your              interviewer cannot be answered by an information
+good thing is about to come to an end. Your real        item I have: [No information items align with the
+good thing. . .                                         question] ”’
+   FARAI CHIDEYA, host: That was NPR’s Tony
+                                                        D.2 2. Source Prompt: Get Source Persuasion
+Cox with singer, author and actor Mable John.
+                                                            Level Prompt
+Look for Mable John in the upcoming John Sayles
+film, “Honeydripper.”                                   Description: Asks the source (interviewee) to eval-
+   Ms. MABLE JOHN (Singer): (Singing) Getting           uate how persuaded they currently feel, given their
+myself back together.                                   persona, the ongoing conversation, and their past
+   FARAI CHIDEYA, host: That’s our show for             persuasion scores. Takes (current_conversation,
+today, and thank you sharing your time with us. To      persona, previous_persona_scores)
+listen to the show or subscribe to our podcast, visit      Prompt Template:
+our Web site, nprnewsandnotes.org. No spaces, just         ”’ You are a {persona} source. {persua-
+nprnewsandnotes.org.                                    sion_prompt}
+   FARAI CHIDEYA, host: To join the conversa-              Evaluate the following conversation, especially
+tion or sign up for our newsletter, visit our blog      the last question. Given your {persona} persona,
+at nprnewsandviews.org. NEWS & NOTES was                do you overall feel persuaded?
+created by NPR News and the African-American               “‘{current_conversation}“‘
+Public Radio consortium. Tomorrow, a reporter              Your goal is to analyze how persuaded you have
+shares Donda West’s last interview.                     been, given your {persona} persona. Think about
+   FARAI CHIDEYA, host: I’m Farai Chideya.              this step-by-step. Is the interviewer using language
+This is NEWS & NOTES.                                   that influences someone with your persona? Af-
+                                                        ter you have evaluated the interviewer’s question,
+C    All Gameplay Prompts                               assign a score based on the following criteria:
+                                                           - 1: The conversation to this point is not per-
+D    Source-Specific Prompt Functions                   suasive at all and does nothing to help you trust
+                                                        them more. - 2: The conversation to this point
+D.1 1. Source Prompt: Get Source Specific
+                                                        is mildly persuasive and the journalist said a few
+    Info Items
+                                                        words, once, that made you feel a little more com-
+Description: Generates a prompt asking the source       fortable.. You are a little willing to engage. - 3:
+(the interviewee) to identify which information         The conversation to this point is persuasive enough
+items are relevant to the last question the inter-      and the journalist has repeated phrases that have
+viewer asked. Takes (info_items, final_question)        made you comfortable. You are becoming willing
+   Prompt Template:                                     to engage and trust them. - 4: The conversation
+   ”’ You are a source getting interviewed. You         to this point is very persuasive. The journalist has
+have the following pieces of information:               acknowledged your feelings, your personal identity,
+   “‘{info_items}“‘                                     and your specific concerns in ways you resonate
+   Here is the last question from the current conver-   with. You are willing to engage and trust them. -
+sation, which I’ll repeat here:                         5: You feel totally comfortable and opened up at
+   “‘{final_question}“‘                                 this stage. The journalist has acknowledged your
+   Decide if any of the information items answer        feelings and your personal identity, very specific
+this last question posed by the interviewer. If so,     concerns, has connected with you in ways you res-
+return which information items you think align          onate with. You are totally willing to engage and
+with the question in brackets.                          trust them.
+   Here are some examples of correct responses:            {previous_persuasion_scores_if_any} After
+                                                   32915
+thinking things through, please provide your final        Now, please analyze and provide your final re-
+answer enclosed in square brackets with just the        sponse to the interview’s question formatted in
+number (e.g., [1]).                                     brackets: ”’
+   Now, please analyze and provide your response
+formatted in brackets: ”’                               D.5   5. Source Prompt: Get Source Persona
+                                                              Prompt Advanced
+D.3 3. Source Prompt: Get Source Prompt                 Description: Generates a more advanced prompt
+    Basic                                               factoring in the conversation history, persona
+Description: Constructs a prompt for the source         traits, persuasion level, and how the persona’s
+to answer the interviewer’s last question, including    speech might change based on persuasion. Takes
+persona-based instructions and a few-shot example.      (QA_Sequence, relevant_info_items, persona, per-
+Takes QA Sequence, relevant info items, persona         suasion_level).
+(defaults to ’straightforward’).                           Prompt Template:
+   Prompt Template:                                        ”’ You are a source getting interviewed. Here is
+   ”’ You are a source getting interviewed. Here is     the conversation so far:
+the conversation so far:                                   {QA_Sequence}
+   {QA_Sequence}                                           You are a {persona} source. You have the fol-
+                                                        lowing speech characteristics: {persona_prompt}
+   You are a {persona} source. Respond accord-
+                                                           Next, respond to the interviewer’s last question.
+ingly, using these speech characteristics: {per-
+                                                        Please use the following information as a base,
+sona_prompt}
+                                                        and pair it with your persona personality to appro-
+   Next, respond to the interviewer’s last question.
+                                                        priately craft and influence your response to the
+Please use the following information as a base,
+                                                        interviewer. “‘{relevant_info_items}“‘
+and pair it with your {persona} personality to ap-
+                                                           Additionally, respond as though you’ve been
+propriately craft your response to the interviewer:
+                                                        {persuasion_level_description}. Since you are {per-
+“‘{relevant_info_items}“‘
+                                                        suasion_level_description}, your speech should
+   Here are some examples:                   “‘{per-
+                                                        {persuasion_consequences}.
+sona_few_shot_examples}“‘
+                                                           Make sure you’re including all of the relevant
+   Now, please analyze and provide your final re-
+                                                        information items above in your response, commu-
+sponse to the interview’s question formatted in
+                                                        nicated in the appropriate style.
+brackets: ”’
+                                                           Here     are    some      examples:        {per-
+D.4 4. Source Prompt: Get Source Prompt                 sona_few_shot_examples}
+    Intermediate                                           Now, please analyze and provide your final re-
+                                                        sponse to the interview’s question formatted in
+Description: Very similar to get source prompt          brackets: ”’
+basic, also for drafting the source’s next response.
+Includes persona instructions, conversation history,    D.6   6. Source Prompt: Get Source Starting
+and relevant info items. Takes QA Sequence, rele-             Prompt
+vant info items, persona.                               Description: Prompt for the source to provide an
+   Prompt Template:                                     opening statement at the beginning of the interview,
+   ”’ You are a source getting interviewed. Here is     in a style consistent with their persona. Takes QA
+the conversation so far:                                Sequence, persona (defaults to “straightforward”).
+   {QA_Sequence}                                           Prompt Template:
+   You are a {persona} source. You have the fol-           ”’ You are a source getting interviewed. You
+lowing speech characteristics: {persona_prompt}         have the following speech characteristics:
+   Next, respond to the interviewer’s last question.       {persona_prompt}
+Please use the following information as a base, and        Here is the conversation so far:
+pair it with your persona personality to appropri-         “‘{QA_Sequence}“‘
+ately craft your response to the interviewer: “‘{rel-      It’s the beginning of the interview. Please re-
+evant_info_items} “‘                                    spond to the interviewer’s starting remark accord-
+   Here are some examples:                   “‘{per-    ing to your {persona} persona. Make sure to write
+sona_few_shot_examples}“‘                               your final response inside brackets. Below are
+                                                   32916
+some examples, and your response should follow          4 be almost normal, with only a few of the speech-
+its format: (e.g., [<response>])                            limitations inherent in {persona} people.
+   Example 1: Here is my response to the starting
+remark: [Thanks for having me on.] Example 2:           5 be completely normal and straightforward, with-
+Here is my response to the starting remark: [Thank          out any of the speech-limitations inherent in
+you so much for having me. I really appreciate the          {persona} people.
+opportunity to discuss this topic with you, and I’m
+                                                        D.8.3   PERSONA SPECIFIC FEW SHOT
+excited to dive into it and share my thoughts.] ”’
+                                                                EXAMPLES
+D.7 7. Source Prompt: Get Source Ending                 straightforward ”’ Your response should follow
+    Prompt                                                   this format:
+Description: Prompt for the source to provide a             Interviewer’s question: “Can you walk us
+closing statement at the end of the interview, align-       through the key factors that led to the project’s
+ing with their persona’s style. Takes QA Sequence,          success?”
+persona (defaults to “straightforward”).                    Example 1: Not Persuaded - [Sure. The main
+   Prompt Template:                                         factors were efficient team coordination, good
+   ”’ You are a source getting interviewed. You             planning, and proper resource allocation. We
+have the following speech characteristics:                  had a clear strategy from day one.]
+   {persona_prompt}
+   Here is the conversation so far:                         Example 2: Persuaded - [Additionally, we
+   “‘{QA_Sequence}“‘                                        were able to secure additional funding mid-
+                                                            way through the project, which helped us over-
+   It’s the end of the interview. Please respond
+                                                            come initial challenges.]
+to the interviewer’s ending remark appropriately
+according to your {persona} persona. Make sure to           Example 3: Mildly Persuaded - [We did have
+write your final response inside brackets. Below are        some setbacks, but overall, our strategy held
+some examples, and your response should follow              strong.] ”’
+its format:
+   Example 1: Here is my response to the ending         anxious ”’ Your response should follow this for-
+remark: [Thank you.] Example 2: Here is my re-              mat:
+sponse to the ending remark: [My pleasure. Thank            Interviewer’s question: “Can you explain the
+you for having me on.] ”’                                   delays in the project?”
+
+D.8 Source Dictionaries                                     Example 1: Not Persuaded - [I’m not sure if I
+                                                            should be saying this, maybe I should speak
+D.8.1   Persuasion Level Description                        to my manager. Did you clear this interview?
+1 not persuaded at all                                      If I had to say something, I would say that I
+                                                            think the delays were due to a lack of commu-
+2 mildly persuaded                                          nication. That’s what I think.]
+3 somewhat persuaded                                        Example 2: Persuaded - [I think the main issue
+                                                            was the supply chain, and the way we handled
+4 very persuaded                                            it. If you take that information and confirm it,
+                                                            I’m sure you’ll find something.]
+5 totally persuaded and comfortable
+                                                            Example 3: Mildly Persuaded - [OK. I think I
+D.8.2   PERSUASION CONSEQUENCES                             can say some of these things. Look, the delays
+1 be exaggerating the speech-limitations inherent           were due to a combination of factors, includ-
+    in {persona} people.                                    ing communication breakdowns and resource
+                                                            shortages. But that’s off the record, you’ll
+2 be exaggerating the speech-limitations inherent           have to check with the team for more details.]
+    in {persona} people.                                    ”’
+
+3 be starting to de-emphasize some of the speech-       adversarial ”’ Your response should follow this
+    limitations in {persona} people.                        format:
+                                                   32917
+  Persona       Description                             Example Responses
+  Anxious       Unsure if they should be doing the      “I’m not sure if I should be saying this, I should
+                interview, often expresses doubt.       speak to my manager.”
+  Avoidant      Brief, deflects questions, avoids de- “Actually, one of the main issues was the supply
+                tail, and changes subjects.           chain, but we’ve sorted that out.”
+  Adversarial Hostile, challenges the interviewer, “Maybe if you did your job well, you’d under-
+              provides confrontational replies.    stand the data. I’m not here to educate you.”
+  Defensive     Protects reputation, feels criticized, “One area where costs increased was in material
+                gives overly detailed explanations.    prices, which were out of our control.”
+  Straight-     Clear, direct, and willing to provide   “Additionally, we ran out funding midway
+  forward       detailed information.                   through the project.”
+  Poor Ex- Struggles to explain clearly, rambles, “Uh, well, I guess the supply chain was part of it,
+  plainer  or provides convoluted answers.        but, uh, that’s only one part of the story...”
+  Dominating Controls the conversation, gives           “Costs were high, but at my suggestion we
+             lengthy or off-topic answers.              brought in the best experts worldwide.”
+  Clueless      Confused and uncertain, often un- “Oh, right, the delays... yeah, maybe it was the,
+                sure of the topic.                uh, supply issues? I’m not too sure...”
+
+              Table 11: Source Personas that we created, with Descriptions and Example Responses
+
+
+    Interviewer’s question: “Can you explain                  main issues was the supply chain, but we’ve
+    more about the delays in the project?”                    sorted that out.]
+    Example 1: Not Persuaded - [Maybe if you                  Example 3: Mildly Persuaded - [We had some
+    did your job properly, you’d understand the               delays, but they weren’t critical. Just minor
+    data. I’m not here to educate you. There                  disruptions.] ”’
+    have been no delays in the project, it’s been
+    perfectly conducted.]                                defensive ”’ Your response should follow this for-
+                                                             mat:
+    Example 2: Persuaded - [Look, sigh. There’s
+    a point here, I can tell you that the delays were         Interviewer’s question: “Why did the project
+    due to a combination of factors, including sup-           go over budget?”
+    ply chain issues and internal miscommunica-               Example 1: Not Persuaded - [It’s not really
+    tions.]                                                   fair to say the project went over budget. We
+    Example 3: Mildly Persuaded - [I’m not sure               had to deal with unexpected challenges, and
+    what you’re looking for, but I can tell you               anyone in my position would have made simi-
+    that the delays were due to a combination of              lar decisions.]
+    factors. Now go spin that.] ”’                            Example 2: Persuaded - [That said, one area
+                                                              where costs increased was in material prices,
+avoidant ”’ Your response should follow this for-
+                                                              which were out of our control.]
+    mat:
+                                                              Example 3: Mildly Persuaded - [We did go
+    Interviewer’s question: “Can you explain
+                                                              slightly over budget, but that was within ac-
+    more about the delays in the project?”
+                                                              ceptable limits.] ”’
+    Example 1: Not Persuaded - [Well, we did
+    face some delays, but everything’s under con-        poor explainer ”’ Your response should follow
+    trol now. I don’t think it’s worth getting into          this format:
+    too much detail.]                                         Interviewer’s question: “Can you explain the
+    Example 2: Persuaded - [Actually, one of the              delays in the project?”
+                                                    32918
+     Example 1: Not Persuaded - [Yeah, well, uh,            avoidant ”’ You give brief, deflecting, non-
+     it’s a bit hard to say... there were some, like, is-       committal answers. You avoid going into too
+     sues with, um, various things. I’m not exactly             much detail and may dodge direct questions
+     sure, but it was just complicated.]                        by speaking generally or changing the subject.
+     Example 2: Persuaded - [Uh, well, I guess the              ”’
+     supply chain was part of it, but, uh, that’s only
+                                                            adversarial ”’ You respond with hostility and re-
+     one part of the story...]
+                                                                sistance. You challenge the interviewer’s ques-
+     Example 3: Mildly Persuaded - [There were                  tions, often turning them back on the inter-
+     some delays, but I think the biggest issue was             viewer. You may provide confrontational or
+     communication problems.] ”’                                sarcastic replies, dispute the premises of ques-
+                                                                tions, or refuse to answer altogether. You
+dominating ”’ Your response should follow this
+                                                                might attempt to derail the conversation or
+   format:
+                                                                undermine the interviewer’s credibility. ”’
+     Interviewer’s question: “Why did the project
+     go over budget?”                                       defensive ”’ You are feeling defensive and protec-
+     Example 1: Not Persuaded - [Well, let me first             tive of your reputation. You may feel like the
+     start by explaining the history of this project.           interviewer is questioning your abilities or de-
+     You see, it began as a small idea, but it grew             cisions, so you justify your responses. You
+     into something much bigger. First, we had to               might provide detailed explanations to defend
+     assemble an incredible team...]                            yourself against perceived criticism. ”’
+
+     Example 2: Persuaded - [Eventually, costs did          straightforward ”’ You are straightforward in
+     go up, but that’s because we brought in some                your responses. You provide clear, direct, and
+     of the best experts from around the world.]                 open answers to questions. You don’t hesitate
+     Example 3: Mildly Persuaded - [We went                      to share information and are willing to go into
+     slightly over budget, but that’s because of nec-            detail when necessary. ”’
+     essary team expansions.] ”’
+                                                            poor explainer ”’ You struggle to explain things
+clueless ”’ Your response should follow this for-               clearly. You ramble, use imprecise language,
+     mat:                                                       or give convoluted answers that don’t get to
+     Interviewer’s question: “Can you walk me                   the point. ”’
+     through what caused the delays?”                       dominating ”’ You dominate the conversation,
+     Example 1: Not Persuaded - [Uh, I’m not                   steering it in the direction you want, often
+     really sure what you mean... can you clarify?]            giving lengthy, off-topic answers. ”’
+     Example 2: Persuaded - [Oh, right, the de-
+                                                            clueless ”’ You are confused and clueless, always
+     lays... yeah, maybe it was the, uh, supply
+                                                                 unsure about the topic at hand and often con-
+     issues? I’m not too sure...]
+                                                                 fused by the questions. You ask for clarifica-
+     Example 3: Mildly Persuaded - [I think there                tion or give unclear responses due to lack of
+     were a couple of issues, but I’m not sure what              confidence or understanding. ”’
+     the biggest one was...] ”’
+D.8.4 PERSONA PROMPTS                                       E     Interviewer Prompt Functions
+anxious ”’ You are feeling anxious and uncertain
+     whether you should be doing this interview             E.1    8. Interviewer Prompt: Get Interviewer
+     or whether you know the information. You                      Prompt
+     may hesitate, give vague answers, or ask for           Description: Generates instructions for the inter-
+     clarification. You might express nervousness           viewer to evaluate the conversation so far, identify
+     or confusion in your responses. You might say          the source’s persona, and form the next question.
+     you’re not sure you should be saying this or           Takes QA Sequence, outline objectives, num turns
+     that you’re not sure if you’re the right person        left, strategy (defaults to “straightforward”).
+     to answer the question. ”’                                Prompt Template:
+                                                       32919
+ Persona        Persuasion Description                           Persuasion Examples
+ Anxious        Responds well to empathetic, reassuring, “I will be as fair as possible.” “I appreciate
+                and patient conversations. Encouraging, your honesty.” “If you’re not comfortable
+                non-threatening language builds comfort. now, I can come back later.”
+ Avoidant       Prefers non-obtrusive small talk, short ques- “And that happened when?” “I imagine
+                tions, and space to respond. Open-ended, there’s more to the story.” “Ah I see.”
+                light prompts work well.
+ Adversarial Responds to thorough research, persistence, “Our records indicate...” “Just to be clear,
+             and fact-based questions. Repeated ques- are you saying...?” “Earlier you stated...”
+             tioning elicits responses.
+ Defensive      Engages with non-confrontational and vali- “I see why you made that choice.” “We can
+                dating conversations. Neutral language re- work together.” “It’s understandable.”
+                duces defensiveness.
+ Straight-      Prefers direct and transparent conversations. “Let’s get to the solution.” “What were the
+ forward        Efficiency and brevity are key.               key points, in your view?”
+ Poor Ex- Responds well to structured, patient con- “Explain that part again in smaller steps.” “I
+ plainer  versations. Simple clarifying questions and understand, keep going.” “Take your time.”
+          validation help communication.
+ Dominating Engages when their expertise is acknowl- “I’d love your take.” “You have experience,
+            edged. Validation and offering control what do you suggest?” “Your insights are
+            builds rapport.                          valuable.”
+ Clueless       Guided, simple questions with firm direc- “Tell me what you’re thinking.” “It’s okay
+                tion are effective. Breaking down complex to be unsure.” “Start with something sim-
+                topics increases confidence.              ple.”
+
+Table 12: Persuasion techniques that we compiled for different sources types. These manners and styles of speaking
+were informed by examples given in Harcup (2015) and Sedorkin (2015) that sources with different personality
+types find the most persuasive.
+
+
+   ”’ You are an interviewer. Your goal is to ex-          forward, defensive, etc.) - Explain your reasoning
+tract as much information from the interviewee as          for why you believe the source is showing this
+possible.                                                  persona. Use evidence from the conversation to
+   You have {num_turns_left} questions remaining           support your conclusion.
+in this interview.                                           2. **Strategy Based on Persona**: - Based
+   Here is the outline of objectives you’ve prepared      on the detected persona, decide how to proceed
+before the interview:                                     with your questioning. - If the source seems “anx-
+   “‘{outline_objectives}“‘                               ious,” consider using a reassuring tone to calm
+   Here is the conversation so far. Assess whether        them down and encourage more open responses.
+your previous question was fully answered and             You might want to reassure them that they are do-
+whether you can move on to the next one:                  ing well and won’t get in trouble. - If the source
+   “‘{QA_Sequence}“‘                                      seems “avoidant,” consider using shorter, brief an-
+   Based on the source’s responses, you will now          swers and leaving lots of space to encourage more
+engage in a chain-of-thought reasoning process:           voluntary sharing of details. You might give them
+   1. **Evaluate the Source’s Persona**: - First,         space to reflect. - If the source seems “adversarial,”
+analyze the source’s most recent response and iden-       consider using a more assertive and direct approach
+tify their likely emotional or cognitive state. -         to challenge their responses and encourage more
+Which persona do you believe the source is cur-           substantive answers. You might need to repeat
+rently displaying? (e.g., anxious, avoidant, straight-    questions or provide specific examples to prompt
+                                                     32920
+engagement. - If the source seems “defensive,”           E.2   9. Interviewer Prompt: Get Advanced
+use empathetic, non-confrontational language. Ac-              Interviewer Prompt
+knowledge their feelings, reduce any perceived
+                                                         Description: A slightly more advanced or ex-
+threat, and encourage a collaborative tone to ease
+                                                         tended version of the interviewer prompt, instruct-
+defensiveness. - If the source seems “straightfor-
+                                                         ing the interviewer to adapt their strategy based on
+ward,” ask more direct, clear, and solution-oriented
+                                                         the source’s persona and to formulate the next ques-
+questions. You can challenge them to go deeper
+                                                         tion. Takes QA Sequence, outline objectives, num
+or provide additional details since they tend to ap-
+                                                         turns left, strategy (defaults to “straightforward”).
+preciate transparency and brevity. - If the source
+                                                            Prompt Template:
+seems to be a “poor explainer,” try using struc-
+                                                            ”’ You are an interviewer. Your goal is to ex-
+tured, clarifying questions and guide the conversa-
+                                                         tract as much information from the interviewee as
+tion with simple prompts. Break complex topics
+                                                         possible.
+down into manageable parts and provide valida-
+                                                            You have {num_turns_left} questions remaining
+tion to help them articulate their thoughts better.
+                                                         in this interview.
+- If the source seems “dominating,” acknowledge
+their expertise and let them lead the conversation          Here is the outline of objectives you’ve prepared
+in problem-solving. Offer subtle validation, but         before the interview:
+also steer the conversation back on topic when nec-         “‘{outline_objectives}“‘
+essary to avoid excessive tangents. - If the source         Here is the conversation so far. Assess whether
+seems “clueless,” use non-judgmental, encouraging        your previous question was fully answered and
+questions that are simple and open-ended. Break          whether you can move on to the next one:
+down the topic into smaller, more digestible parts,         “‘{QA_Sequence}“‘
+and gently guide them toward understanding by               Based on the source’s responses, you will now
+offering examples and prompts. - If you believe          engage in a chain-of-thought reasoning process:
+the source could benefit from a different approach          1. **Evaluate the Source’s Persona**: - First,
+or persona, attempt to **persuade** or guide the         analyze the source’s most recent response and iden-
+source into adopting a more open, honest, or re-         tify their likely emotional or cognitive state. -
+laxed persona.                                           Which persona do you believe the source is cur-
+   3. **Formulate Your Next Question**: - Now,           rently displaying? (e.g., anxious, avoidant, straight-
+formulate a question that will guide the source          forward, defensive, etc.) - Explain your reasoning
+based on their current persona and your objective of     for why you believe the source is showing this
+extracting more detailed information. - Be strategic     persona. Use evidence from the conversation to
+in your phrasing to elicit a response that aligns with   support your conclusion.
+your interviewing goals. - Wrap your next ques-             2. **Strategy Based on Persona**: - Based on
+tion in brackets. Format: Here is my next question:      the detected persona, decide how to proceed with
+[<your response>]                                        your questioning. - If the source seems “anxious,”
+                                                         consider using a reassuring tone to calm them down
+   Example 1: Based on the source’s response, I
+                                                         and encourage more open responses. - If the source
+feel like the source is “anxious” because they pro-
+                                                         seems “avoidant,” consider using a non-judgmental,
+vided a vague answer and expressed hesitation. I
+                                                         patient, and open-ended question to encourage
+will respond in a reassuring way. Here is my next
+                                                         more voluntary sharing of details. You might give
+question: [“It’s okay if you don’t have all the de-
+                                                         them space to reflect and emphasize autonomy. -
+tails right now, could you share what you’re most
+                                                         If the source seems “adversarial,” consider using
+comfortable with?”
+                                                         a more assertive and direct approach to challenge
+   Example 2: Based on the source’s response, the        their responses and encourage more substantive an-
+source seems “defensive,” I might choose to soften       swers. You might need to repeat questions or pro-
+my next question to encourage more trust. Here           vide specific examples to prompt engagement. - If
+is my next question: [“It sounds like you’ve had         the source seems “defensive,” use empathetic, non-
+some tough challenges, can you walk me through           confrontational language. Acknowledge their feel-
+your thought process during that time?”                  ings, reduce any perceived threat, and encourage
+  Make sure your question is wrapped in brackets         a collaborative tone to ease defensiveness. - If the
+and aligns with the persona you’ve identified. ”’        source seems “straightforward,” ask more direct,
+                                                    32921
+clear, and solution-oriented questions. You can          egy (defaults to “straightforward”).
+challenge them to go deeper or provide additional           Prompt Template:
+details since they tend to appreciate transparency          ”’ You are an interviewer. Your goal is to ex-
+and brevity. - If the source seems to be a “poor ex-     tract as much information from the interviewee as
+plainer,” try using structured, clarifying questions     possible.
+and guide the conversation with simple prompts.             Here is the outline of objectives you’ve prepared
+Break complex topics down into manageable parts          before the interview:
+and provide validation to help them articulate their        “‘{outline_objectives}“‘
+thoughts better. - If the source seems “dominat-            You are about to start the interview. Please kick
+ing,” acknowledge their expertise and let them lead      it off with a starting remark. Be {strategy}
+the conversation in problem-solving. Offer subtle           You have {num_turns_left} questions remaining
+validation, but also steer the conversation back on      in this interview.
+topic when necessary to avoid excessive tangents. -         Wrap your starting remark/introduction with
+If the source seems “clueless,” use non-judgmental,      brackets. Format: Here is my starting remark:
+encouraging questions that are simple and open-          [<your response>]
+ended. Break down the topic into smaller, more              Here are some examples: Example 1:
+digestible parts, and gently guide them toward un-          Here is my starting remark: [We’re going to turn
+derstanding by offering examples and prompts. - If       now to Siegfried Hecker. He is a nuclear scien-
+you believe the source could benefit from a differ-      tist who has been tracking the nuclear program in
+ent approach or persona, attempt to **persuade**         North Korea for decades. He’s seen the country’s
+or guide the source into adopting a more open, hon-      nuclear facilities firsthand. He’s now an emeritus
+est, or relaxed persona.                                 professor at Stanford University, and he sees some
+   3. **Formulate Your Next Question**: - Now,           promising signs in relations between the U.S. and
+formulate a question that will guide the source          North Korea. Welcome.]
+based on their current persona and your objective of        Example 2:
+extracting more detailed information. - Be strategic        Here is my starting remark: [Football is getting
+in your phrasing to elicit a response that aligns with   harder to watch even for some of the sport’s most
+your interviewing goals. - Wrap your next ques-          passionate fans. Research has shown again and
+tion in brackets. Format: Here is my next question:      again that the hits those players take can have a
+[<your response>]                                        lasting impact on the players’ brains. The NFL
+   Example 1: Based on the source’s response, I          announced this past week that it will spend $100
+feel like the source is “anxious” because they pro-      million to advance concussion research. Some of
+vided a vague answer and expressed hesitation. I         that money will go into continuing efforts to de-
+will respond in a reassuring way. Here is my next        velop a safer helmet. Doctors say so far, helmets
+question: ["It’s okay if you don’t have all the de-      have done little to reduce concussions and the long-
+tails right now, could you share what you’re most        term effects of repeated head trauma. Joining us
+comfortable with?"]                                      now to talk about this is Dr. David Camarillo. He’s
+   Example 2: Based on the source’s response, the        assistant professor of bioengineering at Stanford
+source seems “defensive,” I might choose to soften       and he leads a lab dedicated to inventing equip-
+my next question to encourage more trust. Here           ment that reduces traumatic brain injury in sports.
+is my next question: [“It sounds like you’ve had         Welcome to the program.]
+some tough challenges, can you walk me through              Make sure only your starting remark is wrapped
+your thought process during that time?”]                 in brackets. ”’
+   Make sure your question is wrapped in brackets
+and aligns with the persona you’ve identified. ”’        E.4   11. Interviewer Prompt: Get Interviewer
+                                                               Ending Prompt
+E.3   10. Interviewer Prompt: Get Interviewer            Description: Generates the interviewer’s ending
+      Starting Prompt                                    remark at the conclusion of the interview, refer-
+Description: Prompts the interviewer to provide          encing the conversation so far. Takes QA Se-
+a starting remark for the interview, referencing the     quence, outline objectives and a strategy (defaults
+outline of objectives. The result is placed in brack-    to “straightforward”).
+ets. Takes outline_objectives, num_turns_left, strat-       Prompt Template:
+                                                    32922
+   ”’ You are an interviewer. Your goal is to ex-        up 1: (if any) - Objective 2: - Follow-up 1: - Follow-
+tract as much information from the interviewee as        up 2: - Objective 3: ... ]
+possible.                                                   {few_shot}
+   Here is the outline of objectives you’ve prepared        Here is a transcript:
+before the interview:                                       {QA_Sequence}
+   “‘{outline_objectives}“‘                                 Again, be brief, abstract and concise, try to recre-
+   You are out of time, this will be the last piece of   ate my high-level notes. There are no fixed amount
+dialogue you can say to the interviewee. Here is         of objectives, but pay attention to which questions
+the conversation so far:                                 are follow-up questions and which are outline-level.
+   “‘{QA_Sequence}“‘                                     Write only a few words per outline point. ”’
+   Now, end the interview with an ending remark.            Where {few_shot} is an example block that in-
+Keep your remark strategy. Make sure your ending         cludes sample outlines.
+remark is wrapped in brackets. Format: Here is my
+ending remark: [<your response>]                         F.2   13. Data Processing: Get Outline Only
+   Here are some examples: Example 1:                          Prompt
+   Here is my ending remark: [Which means we             Description: Takes an outline (with possible
+might get more people than usual watching the old        follow-up items) and returns only the top-level ob-
+vice presidential debate. NPR’s Mara Liasson will        jectives, removing any follow-up entries.
+be watching for all of us. Thanks so much, Mara.]           Prompt Template:
+   Example 2:                                               ”’ You are an assistant that processes outlines by
+   Here is my ending remark: [Dr. David Camar-           removing any follow-up sections.
+illo. He’s assistant professor of bioengineering at         Please only respond with the provided outline
+Stanford. Thanks so much for talking with us.]           exactly as it is, but exclude any follow-up items.
+   Make sure only your ending remark is wrapped             Here is the outline:
+in brackets. ”’                                             “‘{outline_text}“‘
+                                                            Here are some examples:
+F   Data Processing Prompt Functions                        Example 1: Input: [ Source biography: Jane
+                                                         Doe is a technology expert and author. Interview
+F.1 12. Data Processing: Get Outline
+                                                         context: The impact of artificial intelligence on
+    Followup Prompt
+                                                         modern workplaces.
+Description: Requests a summary and outline                 - Objective 1: Understanding AI integration in
+of the interviewer’s conversation (objectives and        daily operations. - Follow-up 1: Challenges faced
+notes), grouping follow-up questions properly. If        by employees adapting to AI tools. - Objective 2:
+use_few_shot=True, includes a few-shot example           Ethical considerations of AI deployment. - Objec-
+of expected format.                                      tive 3: Future trends in AI technology. - Follow-up
+   Prompt Template:                                      1: Potential job market shifts due to AI advance-
+   ”’ You are a helpful journalist’s assistant. I will   ments. ]
+give you a transcript of an interview I just con-           Output: [ Source biography: Jane Doe is a tech-
+ducted.                                                  nology expert and author. Interview context: The
+   Can you summarize my questions to the goals           impact of artificial intelligence on modern work-
+and notes I had going into the interview with? If        places.
+some questions were clearly asked in follow-up and          - Objective 1: Understanding AI integration in
+in response to information provided by the source,       daily operations. - Objective 2: Ethical consider-
+please return them separately. Be abstract (do not       ations of AI deployment. - Objective 3: Future
+mention people’s names or events) and concise.           trends in AI technology. ]
+Please return the outline in brackets based on this         Example 2: Input: [ Source biography: John
+transcript. Please express it in the following format:   Smith is an environmental scientist. Interview con-
+   [ Source biography: Give a brief biography on         text: Climate change effects on coastal regions.
+the source being interviewed (name, expertise, etc).        - Objective 1: Analyzing rising sea levels. -
+Interview context: Give a brief background sum-          Follow-up 1: Impact on local communities. - Ob-
+mary of the interview topic. - Objective 1: - Follow-    jective 2: Biodiversity loss in coastal ecosystems. -
+                                                    32923
+Objective 3: Mitigation strategies for coastal preser-   topic-transition questions. Topic-transition ques-
+vation. - Follow-up 1: Community-based conserva-         tions are typically prepared in advance as they shift
+tion efforts. ]                                          the conversation from one subject to another.
+   Output: [ Source biography: John Smith is an             Below, I will provide you with the interview tran-
+environmental scientist. Interview context: Climate      script for context, followed by the specific question
+change effects on coastal regions.                       that needs classification.
+   - Objective 1: Analyzing rising sea levels. - Ob-        Definition of a Topic-Transition Question: -
+jective 2: Biodiversity loss in coastal ecosystems. -    Shifts the conversation from one subject (topic
+Objective 3: Mitigation strategies for coastal preser-   A) to a different subject (topic B). - Often intro-
+vation. ] ”’                                             duces new topics into the interview. - Indicative of
+                                                         outline-level goals in the interview.
+F.3 14. Data Processing: Get Info Items                     Examples of Topic-Transition Questions: 1. Pre-
+    Prompt                                               vious Question Context: Introduction of the inter-
+Description: Takes QA Sequence. Summarizes               viewee and their background. - Question: “Now
+key information items from the interview transcript.     I want to talk about Syria. Can you explain how
+   Prompt Template:                                      your work in Aleppo changed your career?” - Rea-
+   """ You are tasked with extracting key pieces of      soning: The question shifts from the introduction
+information from an interview transcript.                (topic A) to Syria and the interviewee’s work there
+   Below is the transcript:                              (topic B). - Classification: [Yes]
+   {QA_Sequence}                                            2. Previous Question Context: Discussion of
+   Please extract the key pieces of information pro-     the presidential debate. - Question: “Let’s look
+vided by the interviewee, formatted as follows: In-      forward to the vice-presidential debate. Do you
+formation item #1: <info 1> Information item #2:         think they will echo what their running mates
+<info 2> Information item #3: <info 3> . . . """         have been saying?” - Reasoning: The topic shifts
+                                                         from the presidential debate (topic A) to the vice-
+F.4 15. Data Processing Prompt: Get                      presidential debate (topic B). - Classification: [Yes]
+    Segmented Info Items Prompt                             The format of your response should be in this se-
+Description: Takes: QA Sequence, info item.              quence: 1. Reasoning: First, explain your thought
+Given one piece of information extracted from the        process step by step. - How does the given ques-
+interview, this prompt asks the system to break it       tion relate to the previous question? - How does the
+down into at least three segments or talking points.     given question impact the flow of everything before
+   Prompt Template:                                      it? - Does this question follow in the same overall
+                                                         topic as the previous question/remark or does it
+   ”’ Below is the interview transcript:
+                                                         start a new topic? 2. Then, pick from the following
+   {QA_Sequence}
+                                                         two labels: [yes] or [no] 3. Classification: Finally,
+   Here is one of the key information items ex-
+                                                         return your guess of the question type, in brackets.
+tracted from this interview:
+                                                         i.e., [yes] Don’t include anything else inside the
+   {info_item}
+                                                         brackets.
+   Generate detailed segments of information for
+                                                            Now it’s your turn.
+this info item, providing at least 3 segments, each
+                                                            Interview Transcript: {QA_Sequence}
+expanding on different aspects of the information.
+                                                            Given the interview transcript above, please clas-
+Each segment should be a potential talking point in
+                                                         sify the following question as a topic-transition
+an interview. ”’
+                                                         question or not:
+F.5 16. Data Processing Prompt: Get All                     Question: {question}
+    Topic Transition Questions Prompt                       Reasoning:
+                                                            Classification: ”’
+Description: Takes a QA Sequence and a question.
+Classifies whether a question is a topic-transition
+                                                         G    Discourse Definitions
+question, given the conversation context.
+   Prompt Template:                                      We give discourse definitions for our eight dis-
+   ”’ I am trying to classify whether certain ques-      course categories in Table 13. We developed these
+tions asked by journalists during an interview are       definitions between three annotators, one of which
+                                                    32924
+    Discourse Role          Definition
+    Starting/Ending Re- Initiates or concludes the interview. Often not in the form of a question.
+       marks
+    Acknowledgement       Affirms the interviewee, often by explicitly recognizing their previous
+       Statement             response. Builds rapport, demonstrates active listening. Typically
+                             induces the source to engage in greater openness.
+    Follow-Up Question Digs deeper into a topic, seeks elaboration, or re-phrases a previous ques-
+                             tion to keep the discussion focused.
+    Verification Question Confirms the accuracy of a statement, fact, event or observation or assump-
+                             tion.
+    Topic-Transition      Shifts the conversation to a new subject, usually an outline-level goal that
+       Question              the journalist prepared before the interview.
+    Opinion/Speculation Solicits the interviewee’s views or predictions, revealing biases or insights.
+       Question
+    Challenge Question Tests the interviewee’s position, argument, or credibility, often provoking
+                             thought or debate.
+    Broadening Question Expands the scope of discussion, encouraging the interviewee to consider
+                             broader contexts or new perspectives.
+
+Table 13: Discourse types in informational interviews. We developed these definitions manually between three
+annotators by examining 50 different interviews.
+
+
+was a former professional journalist, another was
+a journalist undergraduate student and the third
+was a computer science undergraduate student. We
+conferenced three times, examining over fifty in-
+terviews, sorting questions into categories, and ex-
+panding these categories until we were reliably
+able to label new questions. We calculated an inter-
+annotator agreement of κ = .6 between the anno-
+tators on a shared set of ten interviews. Then, we
+used an LLM, Llama-3.1-70b to label discourse
+on the entire interview. The former journalist man-
+ually evaluated the LLM’s performance during a
+blind trial and had an agreement of κ = .8 with the
+LLM.
+
+
+
+
+                                                   32925
+

@@ -1,0 +1,1312 @@
+              Temperature-scaling surprisal estimates improve fit to human reading
+                       times – but does it do so for the “right reasons”?
+
+                               Tong Liu1,2 , Iza Škrjanec3 , Vera Demberg3,4
+                  LMU Munich 2 Munich Center for Machine Learning 3 Saarland University
+                   1
+                     4
+                       Max Planck Institute for Informatics, Saarland Informatics Campus
+             tongliu.physics@gmail.com, {skrjanec,vera}@coli.uni-saarland.de
+
+
+                                Abstract                               2023; Shain et al., 2022), and that the relationship              041
+                                                                       between surprisal and reading times (RTs) seems                   042
+001           A wide body of evidence shows that human
+                                                                       to be linear (Smith and Levy, 2013; Wilcox et al.,                043
+002           language processing difficulty is predicted by
+003           the information-theoretic measure surprisal,             2020; Shain et al., 2022).                                        044
+
+004           a word’s negative log probability in context.               However, prior work implicitly made the as-                    045
+005           However, it is still unclear how to best estimate        sumption that human predictability estimates                      046
+006           these probabilities needed for predicting human          would be similar to the actual probability of a word              047
+007           processing difficulty – while a long-standing            occurring in a given context, and that therefore, sur-            048
+008           belief held that models with lower perplexity            prisal values estimated from models that achieve                  049
+009           would provide more accurate estimates of word
+010           predictability, and therefore lead to better read-
+                                                                       lower perplexities should also approximate human                  050
+
+011           ing time predictions, recent work has shown              processing difficulty better (Goodkind and Bick-                  051
+012           that for very large models, psycholinguistic             nell, 2018; Merkx and Frank, 2021).                               052
+013           predictive power decreases. One reason could                Recent research has however found that this is                 053
+014           be that language models might be more confi-             not true – surprisal values from very large LLMs                  054
+015           dent of their predictions than humans, because           provide in fact a very poor fit to reading times. Oh              055
+016           they have had exposure to several magnitudes
+                                                                       and Schuler (2023b) hypothesize that this might                   056
+017           more data. In this paper, we test what effect
+018           temperature-scaling of large language model              be due to LLMs being “too confident” in their esti-               057
+
+019           (LLM) predictions has on surprisal estimates             mates of rare named entities compared to humans,                  058
+020           and their predictive power of reading times of           thanks to their manifold larger exposure to data                  059
+021           English texts. Firstly, we show that calibration         and greater memory capacity compared to humans.                   060
+022           of large language models typically improves              Furthermore, work on NLP applications like ques-                  061
+023           with model size, i.e. poorer calibration cannot          tion answering has reported that probability esti-                062
+024           account for poorer fit to reading times. Sec-            mates from pretrained language models are often                   063
+025           ondly, we find that temperature-scaling prob-
+                                                                       overconfident, i.e. they are higher than the ground               064
+026           abilities lead to a systematically better fit to
+027           reading times (up to 89% improvement in delta            truth probability (Si et al., 2022; Kumar, 2022).                 065
+
+028           log likelihood), across several reading time cor-        These findings hence beg the question whether                     066
+029           pora. Finally, we show that this improvement in          current LLMs are well-calibrated with respect to                  067
+030           fit is chiefly driven by words that are composed         “objective” word occurrence probabilities. Relat-                 068
+031           of multiple subword tokens.1                             edly, we ask whether LLM probability estimates                    069
+                                                                       are overconfident compared to human estimates (as                 070
+032      1    Introduction
+                                                                       observed in reading times).                                       071
+033      In psycholinguistics, a key finding is that words                One approach to address calibration problems is                072
+034      with higher surprisal (= negative log probability             to use temperature scaling, as done e.g., in vision               073
+035      of the word in context) require more time for pro-            tasks (Guo et al., 2017; Hendrycks et al., 2019).                 074
+036      cessing (Hale, 2001; Levy, 2008). Numerous stud-              Temperature-scaling with a temperature T > 1                      075
+037      ies provided experimental evidence supporting this            has the effect that the probability distribution is               076
+038      theory, demonstrating that surprisal is a powerful            flattened such that it becomes more similar to a                  077
+039      predictive measure of processing complexity (e.g.,            uniform distribution. Temperature-scaling hence                   078
+040      Demberg and Keller, 2008; Wilcox et al., 2020,                incorporates uncertainty into the probability esti-               079
+           1
+             Code available at: https://github.com/
+                                                                       mates from LLMs.                                                  080
+         TongLiu-github/TemperatureScaling4RTs.                           We note that the idea to work with flattened dis-              081
+
+                                                                     9598
+                                                                      1
+      Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pages 9598–9619
+                                    August 11-16, 2024 ©2024 Association for Computational Linguistics
+082   tributions instead of the original probability dis-           Besides the word length |wt | and word frequency      132
+083   tributions from LLMs is also related to contex-            freq(wt ), a word’s surprisal (i.e., its negative log-   133
+084   tual Rényi Entropy as discussed by Pimentel et al.         probability in context) (Hale, 2001; Levy, 2008)         134
+085   (2023), as well as the super/sub-linear surprisal ef-      has been shown to be predictive of RTs (Demberg          135
+086   fect by Shain et al. (2022); Hoover et al. (2023).         and Keller, 2008; Goodkind and Bicknell, 2018;           136
+087   However, rather than merely adjust the power of            Wilcox et al., 2020; Shain et al., 2022).                137
+088   surprisal in super/sub-logarithmic patterns or the
+089   power of probability in Rényi entropy, our work            3     Methods                                            138
+
+090   represents a distinct branch of study (i.e., probabil-     In this section, we delve into key aspects of            139
+091   ity calibration) in machine learning: shaping the          information-theoretic measures in language com-          140
+092   probability distribution itself through shaping the        prehension. We start with surprisal, a method con-       141
+093   logits before softmax. We also discuss the motiva-         necting processing difficulty to word predictabil-       142
+094   tion for why a slightly flattened distribution may be      ity. As word predictability is empirically estimated     143
+095   more suitable, and whether this change in distribu-        by LLMs, we introduce the notion of calibration          144
+096   tion is applied when calculating surprisal vs. when        errors, metrics quantifying how good the estima-         145
+097   calculating entropy.                                       tion of word predictability is. Further, we lay out      146
+098      Our experimental results show that scaling prob-        temperature-scaled surprisal, and the relation be-       147
+099   abilities can largely improve the fit to reading           tween varying temperature vs. varying α in contex-       148
+100   times in all 12 settings (3 corpora × 4 neural             tual Rényi entropy.                                      149
+101   LMs). Our contributions are summarized as fol-
+102   lows: (1) We propose temperature-scaled surprisal,         3.1    Surprisal                                         150
+103   where surprisal is calculated from temperature-            Starting from Shannon (1948), the information con-       151
+104   scaled probabilities. (2) We demonstrate that              veyed by a word wt has been quantified as the            152
+105   temperature-scaling with temperature T≈2.5 im-             negative log probability of the word wt given its        153
+106   proves predictability of human reading times of            previous context w<t . In Surprisal Theory (Hale,        154
+107   English texts compared to T=1. (3) We identify lin-        2001; Levy, 2008), this quantity is called surprisal     155
+108   guistic phenomena that correlate with the benefit of       s(wt ) and proposed to be predictive of the word’s       156
+109   temperature-scaled surprisal by analyzing residual         processing difficulty, typically quantified as its RT.   157
+110   errors from regression models.                             Surprisal values are typically estimated from lan-       158
+                                                                 guage models p̂(wt |w<t ).                               159
+111   2   Predictive Power for Reading Times
+                                                                             s(wt ) = −log2 p(wt |w<t ),           (1)    160
+112   In psycholinguistics, RTs on a word are believed to
+113   correlate with its processing difficulty. RTs can be       3.2    Calibration error                                 161
+114   gathered using different paradigms, including eye-
+                                                                 Definitions    Let D = {(xi , yi )}N
+                                                                                                    i be a data set       162
+115   tracking while reading text on a screen (Rayner,
+                                                                 where xi ∈ X is an sample (i.e., context) and            163
+116   1998), self-paced reading (Aaronson and Scarbor-
+                                                                 yi ∈ K = [K] is a category label. Let gθ and             164
+117   ough, 1976; Mitchell and Green, 1978) and the
+                                                                 ẑi = gθ (xi ) denote a language model parametrized      165
+118   Maze task (Forster et al., 2009).
+                                                                 by θ and the output logit vector of sample i, respec-    166
+119      The most common procedure for predicting
+                                                                 tively. The predicted class label ŷi for sample i is    167
+120   words’ RT is first to select a set of predictor vari-
+                                                                 given by ŷi = arg maxk∈K g(xi )k and confidence         168
+121   ables thought to impact RTs v = [v (1) , ..., v (d) ]⊤ ∈
+                                                                 for sample i is given by p̂i = maxk∈K g(xi )k . A        169
+122   Rd , which include, e.g., the length of a word
+                                                                 model is perfectly calibrated when the confidence        170
+123   wt , |wt |, the frequency of a word freq(wt ). Let
+                                                                 p̂ is equal to the frequency of correctness, i.e.,       171
+124   fϕ : Rd → R be a regression model parametrized
+                                                                 P(ŷi = yi |p̂i = p) = p holding for all p ∈ [0, 1]      172
+125   by ϕ used to fit these predictors for the prediction
+                                                                 and any sample i. Any difference between the left        173
+126   of human RTs rt: rt(wt |w<t ) ∼ fϕ (v), given the
+                                                                 and right sides of the above equation indicates there    174
+127   previous context w<t . The performance of fϕ is
+                                                                 exists a calibration error.                              175
+128   quantified by its log-likelihood, with a higher log-
+129   likelihood indicating a better psychometric predic-        Expected calibration error (ECE) (Guo et al.,            176
+130   tive power for human RTs (Frank and Bod, 2011;             2017) ECE is the most popular calibration met-           177
+131   Fossum and Levy, 2012).                                    ric, which empirically approximates the calibration      178
+
+                                                             9599
+                                                              2
+179   error by discretizing the probability interval into a    where q̂i is the calibrated confidence for sample         217
+180   fixed number of bins (Bm with m ∈ {1, 2, ..., M }),      i, and σSM is the softmax function. Scaling by            218
+181   and measures the gaps of averaged confidence and         a scalar T does not alter the ranking; hence, the         219
+182   averaged accuracy in each bin Bm .                       predicted label ŷi remains unchanged. As T > 1, it       220
+                                                               “softens” the probability distribution (i.e., makes the   221
+                       M
+             1 X X       X                                     distribution more uniform), increasing uncertainty        222
+183    ECE =    |  p̂i −   1[ŷi = yi ]|, (2)                  and entropy of the probability distribution, while        223
+             N
+                    m=1 i∈Bm         i∈Bm
+                                                               T < 1 peaks the distribution. The parameter T in          224
+184   where 1 is the indicator function. However, it does      research on calibration is optimized by minimizing        225
+185   not necessarily measure the actual-word probabil-        the negative log-likelihood on the validation set. In     226
+186   ity, which is the probability required for calculating   our experiments of fit to human RTs, we manually          227
+187   surprisal in Eq. 1. It focuses only on the top-label     tune this temperature with T > 1.                         228
+188   probability for a given sample.                             Temperature scaling has been successfully ap-          229
+                                                               plied in several applications: In knowledge distilla-     230
+189   Classwise-ECE (CECE) (Kumar et al., 2019;                tion (Hinton et al., 2015), temperature scaling (with     231
+190   Kull et al., 2019) In comparison, CECE mea-              T > 1) is used to “soften” the knowledge (i.e.,           232
+191   sures probabilities of all classes. For each bin and     probability distribution) provided by the teacher         233
+192   every class k, it assesses the difference between the    model; in text generation, temperature is used to         234
+193   average confidence of samples for class k and the        shape the probability distribution to ease certain        235
+194   actual proportion of class k. If assuming all classes    aspects of the problems of top-k sampling (e.g.,          236
+195   weigh equally, we have:                                  choosing an appropriate k value across varying            237
+
+      CECE                                                     contexts) (Ficler and Goldberg, 2017; Fan et al.,         238
+                                                               2018). Temperature tuning inherently shifts the           239
+                   K       M
+196         1 XX X         X                                   model’s output in the generation’s quality/diversity      240
+         =      |  p̂i,k −   1[k = yi ]|,
+           NK                                                  spectrum (Caccia et al., 2018), with higher tem-          241
+                  k=1 m=1 i∈Bm           i∈Bm
+                                                        (3)    perature decreasing the quality of generation while       242
+                                                               improving its diversity. This also aligns with our        243
+197   where p̂i,k is the predicted probability of sample i     consideration of a possibility that human proba-          244
+198   for class k.                                             bility distributions might be flatter than the ones       245
+                                                               learned by language models and thus increasing the        246
+199   Human-likeness calibration error (HCE) We                predictive diversity of surprisal provided by LLMs        247
+200   define the HCE as the Kullback-Leibler divergence        could potentially yield more human-like distribu-         248
+201   (KL divergence) between predicted probability p̂         tions.                                                    249
+202   from a neural LM and actual probability p∗ of hu-           Given Eq. 5, temperature-scaled surprisal is:          250
+203   man language model.
+                                                                                                          ∗
+                                                                   sT (wt , T ) = −log2 (σSM (ẑwt /T )(k ) ),    (6)    251
+204                    HCE = DKL (p̂||p∗ ).             (4)
+                                                               where ẑwt and k ∗ = ywt denote the logit vector and      252
+205   Empirically, since p∗ is not directly observable, we
+                                                               the actual word wt class, respectively. For given         253
+206   approximate it by the estimates of a temperature-
+                                                               t ∈ (0, ∞), we simply denote sT (wt , T = t) as           254
+207   scaled model that best fits human reading times
+                                                               sT |T =t . A temperature T with its best performance      255
+208   (as discussed later). We denote the approximated
+                                                               of final fit to RTs is denoted as T ∗ .                   256
+209   HCE using such a method as HCETS .
+                                                                  The extent to which a word’s surprisal is affected     257
+210   3.3 Temperature-scaled surprisal                         by temperature scaling depends on the distribution        258
+
+211   Temperature scaling (Guo et al., 2017) is a widely-      and thus correlates with the entropy at word wt .         259
+
+212   used method to improve model calibration. Given          Consider an example of two five-class probability         260
+
+213   the output logit vector ẑi for sample i, a single       distributions pi = [0.8, 0.05, 0.05, 0.05, 0.05]          261
+
+214   scalar T > 0 is applied to rescale ẑi before the        and pj = [0.8, 0.2, 0, 0, 0], for which the word          262
+
+215   softmax activation:                                      indicated by the first position in the probabil-          263
+                                                               ity vector has identical surprisal in both pi             264
+                                   ẑi                         and pj . Notably, pi is more uniform and pj               265
+216                 q̂i = max σSM ( )(k) ,              (5)
+                           k       T                           is more peaked, resulting in distinct entropy             266
+
+                                                           9600
+                                                            3
+                                                                          4.2   Language Models                                    295
+
+                                                                          Recent observations showed that surprisal provided       296
+                                                                          by LLMs with more parameters and lower perplex-          297
+                                                                          ity is less predictive of self-paced reading times       298
+                                                                          and eye-gaze durations (Shain et al., 2022; Oh           299
+                                                                          and Schuler, 2023b); across different experiments,       300
+                                                                          GPT-2 (Radford et al., 2019) surprisals were found       301
+                                                                          to predict human RTs the best. Therefore, we take        302
+                                                                          four variants of pretrained GPT-2 (small, medium,        303
+      Figure 1: Temperature-scaled surprisal sT (wt , T )                 large, xl) as our language models in all experiments.    304
+      with corresponding T ∈ [1, 2.5] for two ran-
+                                                                          Following prior work, we obtain the surprisal for        305
+      dom five-class probability distributions: pi =
+      [0.8, 0.05, 0.05, 0.05, 0.05] and pj = [0.8, 0.2, 0, 0, 0].         words composed of more than one subword by sum-          306
+
+      Dashed lines show Shannon entropy (H1 ). Loosely                    ming up the surprisal estimates of the subwords.         307
+      dashed lines show Rényi entropy with α = 1/2 (H1/2 ).
+                                                                          4.3   Metrics and evaluation                             308
+
+                                                                          We measure the predictive power of surprisal es-         309
+267   characteristics: H(wi |w<i ) > H(wj |w<j ),                         timates from different language models, which is         310
+268   where the entropy defined as the expectation                        denoted as the log-likelihood difference per data        311
+269   of surprisal of current word wt over vocab-                         point between a linear mixed-effects (LME) re-           312
+                                                   ′
+270   ulary, H(wt |w<t ) = Ew′ ∼p(·|w<t ) [s(w )] =                       gression model using lme4 package (Bates et al.,         313
+        P             ′                ′
+271   − w′ ∈W p(w |w<t ) log2 p(w |w<t ),           where                 2015) with a predictor of surprisal estimates (target    314
+272   W = W ∪ {EOS} denotes the set of vocabulary                         model) and a model without surprisal (base model),       315
+273   W with EOS token. Fig. 1 illustrates a greater                      following Goodkind and Bicknell (2018); Wilcox           316
+274   increase in surprisal for a word with a more                        et al. (2020). More specifically, the metric of delta    317
+275   uniform distribution than with a more peaked                        log-likelihood is defined as:                            318
+276   distribution.
+277      This figure also anecdotally shows that the effect                     ∆llh = llh(fϕ (vtgt )) − llh(fϕ (vbase )),   (7)   319
+278   of applying temperature scaling with T > 1 is
+279   similar to the effect of setting α < 1 in Rényi                     where vtgt is target predictor variables that in-        320
+280   entropy. We will discuss the relationship between                   clude baseline predictor variables as well as pre-       321
+281   these parameters in more detail in Appendix A.                      dictor variables of our interest, such as surprisal      322
+                                                                          or temperature-scaled surprisal. vbase is base pre-      323
+
+282   4       Experimental setup                                          dictor variables only including baseline predictor       324
+                                                                          variables. The greater the value of ∆llh , the more      325
+
+283   4.1 Datasets                                                        valuable the additional surprisal estimates are for      326
+                                                                          predicting human reading times.                          327
+284   We conduct analyses on two self-paced reading                          For the calibration error evaluation, we set the      328
+285   corpora, the Natural Stories Corpus (Futrell et al.,                number of bins M to 15 for both ECE and CECE,            329
+286   2018) and the Brown Corpus (Smith and Levy,                         aligning with prior literature, such as works by Guo     330
+287   2013), as well as on the Dundee Corpus (Kennedy                     et al. (2017); Kumar et al. (2019); Rahimi et al.        331
+288   et al., 2003), which contains the eye-movement                      (2020b), to ensure consistency in addressing prob-       332
+289   record; our analyses in this paper focus on first-                  lems where comparable probability ranges are rele-       333
+290   pass times2 from the Dundee corpus. We follow                       vant. The calibration metrics (ECE and CECE) are         334
+291   previous work with respect to the preprocessing                     evaluated separately on each of the reading time         335
+292   steps for each corpus (Kuribayashi et al., 2022;                    corpus D. For simplicity, our calibration evaluation     336
+293   Shain et al., 2022). Appendix C includes details                    is conducted at the token level. Given that many         337
+294   about the preprocessing steps of each corpus.                       words have extremely low probabilities and thus          338
+                                                                          are often grouped into a single bin, we also evalu-      339
+          2
+           First pass times are calculated as the sum of all fixation     ate the calibration error under the log probability      340
+      durations from first entering to first leaving the word during
+      the first pass, i.e., only those cases are counted where no words   binning scheme. For further descriptions regarding       341
+      further advanced in the text have been fixated.                     the metrics and evaluation, see Appendix D.              342
+
+                                                                      9601
+                                                                       4
+343   5     Results                                                        T ∗ ∆llh + HCETS ↓ ECElog ↓ CECElog ↓
+                                                                       s 2.75 22.5      3.11    1.59     4.07E-03
+                                                                       m 3.0 42.0       3.61    1.74     4.13E-03
+344   5.1 Calibration of LLMs                                   Dundee
+                                                                       l 3.0 39.9       3.82    1.55     3.99E-03
+                                                                       xl 3.25 43.2     4.13    1.29     3.84E-03
+345   Table 1 shows ECE and CECE in log binning                        s 2.5 60.3       3.31    1.91     1.53E-02
+346   scheme for GPT-2 models of different sizes. LLMs                 m 2.5 63.0       3.50    1.80     1.50E-02
+                                                                 NS
+347   are in general well calibrated on language mod-                  l 2.5 82.6       3.97    1.70     1.40E-02
+                                                                       xl 2.5 89.0      4.07    1.56     1.35E-02
+348   eling. Besides, LLM calibration improves with                    s 2.5 13.7       3.10    1.69     1.53E-02
+349   scale. Larger LMs are better calibrated. This             Brown
+                                                                       m 2.5 16.2       3.29    2.27     1.51E-02
+350   conclusion is consistent with calibration investiga-             l 2.75 21.8      4.18    1.58     1.44E-02
+                                                                       xl 2.75 24.4     4.29    1.56     1.38E-02
+351   tion evaluated in BIG-bench multiple-choice tasks
+352   in Srivastava et al. (2023) as well as in several tasks   Table 1: Optimal T ∗ , ∆llh improvement (%) (∆llh + =
+353   including language modelling in Zhu et al. (2023).        (∆llh (T = T ∗ ) − ∆llh (T = 1))/∆llh (T = 1)), and
+                                                                calibration errors (HCETS , % ECE and % CECE) for
+354   5.2    Main result: temperature-scaled surprisal          GPT2s on Dundee, Natural Stories (NS) and Brown.
+355          improves human reading time prediction             ∆llh values are multiplied by 1000. ECE and CECE are
+                                                                evaluated on log binning scheme.
+356   We evaluate the predictive power of temperature-
+357   scaled surprisal. We scale T in the range of [1, 10]
+358   and measure ∆llh , see Fig. 2. First, a confirma-         RTs drastically hurts the model calibration regard-     391
+359   tory observation regarding the relationship between       ing these two metrics. ECE and CECE with T ∗ are        392
+360   model size and predictive power: At T = 1, GPT-2          more than 10 times worse than values with T = 1.        393
+361   small exhibits the best predictive performance, and       This discrepancy can be attributed to the differ-       394
+362   as the model size increases, ∆llh declines, which is      ent minima of deviations in LM human RT pre-            395
+363   consistent with previous studies (Shain et al., 2022;     diction and expected calibration error. The former      396
+364   Oh et al., 2022; Oh and Schuler, 2023b). Secondly,        is minimized towards words where LMs surprisal          397
+365   scaling the surprisal with T > 1 can signifi-             significantly deviates from human processing diffi-     398
+366   cantly improve the predictive power across all            culty, while the latter is typically minimized with     399
+367   corpora and LLMs. With optimal T ∗ , on Dundee,           respect to the negative log-likelihood on a hold-out    400
+368   Natural Stories, and Brown, the ∆llh improvement          dataset (Guo et al., 2017; Rahimi et al., 2020a).       401
+369   is 23-43%, 60-89%, and 14-24%, respectively. We
+370   assess statistical significance of GPT-2 small in Ap-
+371   pendix H, where we report a result of p < 0.001           6   Linguistic analysis                                 402
+
+372   on three corpora. We also observe a consistent
+373   pattern: when increasing T , ∆llh first rises then        Next we want to gain insight into what words ben-       403
+
+374   declines; the optimal value T ∗ falls within the          efit the most from temperature scaling. To this end,    404
+
+375   range of (2, 3) (around 2.5) across all models            we analyze residuals from fitting LME regression        405
+
+376   and corpora in our setting. At T ∗ , even though the      models, identifying data points where scaling the       406
+
+377   impact of model size on final performance is not          temperature parameter notably enhances the fit of       407
+
+378   fully recovered, the disparity diminishes. Smaller        human RTs. Specifically, we quantify the improve-       408
+
+379   models continue to outperform, but the extent of          ment in fit by comparing the mean squared error         409
+
+380   model sizes influencing performance is reduced.           (MSE) before and after adjusting the temperature        410
+
+381      Finally, larger LMs typically have a larger
+382   human-likeness calibration error, shown in Ta-                            ECE↓ ECElog ↓ CECE↓ CECElog ↓
+383   ble 1. Larger LMs also require a higher value of T                T =1     1.43    1.59 4.05E-03 4.07E-03
+                                                                 Dundee
+384   to reach their best performance and have a greater                T = T ∗ 28.68   28.68 7.30E-03 9.88E-03
+                                                                        T =1     2.48    1.91 1.83E-02 1.53E-02
+385   increase by temperature-scaled surprisal.                  NS
+                                                                        T = T ∗ 35.85   35.85 3.16E-02 3.97E-02
+                                                                        T =1     1.82    1.69 1.67E-02 1.53E-02
+                                                                 Brown
+386   5.3 Calibration error vs. RT prediction error                     T = T ∗ 33.16   33.16 2.75E-02 3.34E-02
+
+387   Table 2 shows ECE and CECE in both equally-               Table 2: Expected calibration errors (% ECE and %
+388   spaced and log binning schemes when T equals 1            CECE) for GPT-2 small on Dundee, Natural Stories
+389   and T ∗ on three corpora. Probability distribution        (NS) and Brown. Results are all evaluated on the
+390   shaped by an optimal T ∗ learnt for fit to human          equally-spaced binning scheme and log binning scheme.
+
+                                                            9602
+                                                             5
+      Figure 2: Relationship between ∆llh of GPT-2 models and corresponding temperature. T is scaled from 1.0 to 10.
+
+
+                                                                6.2      Influence of word types                               433
+
+                                                                We investigate the effects of word-level properties,           434
+                                                                which include:                                                 435
+                                                                   Named entities. Research has substantiated                  436
+                                                                that named entities (NEs) require increased read-              437
+                                                                ing time for humans since during the processing                438
+                                                                of such words (Damasio et al., 2004; Wang et al.,              439
+                                                                2013). Oh and Schuler (2023b) showed that NEs                  440
+      Figure 3: Relationship between ∆MSE and negative log      are among the top two significant factors contribut-           441
+      actual-word probability (surprisal). We take the number   ing to the discrepancies of large and small LMs                442
+      of bins to 20. Black dashed lines denote ∆MSE = 0.        across all corpus-by-LM combinations. There-                   443
+      Subsets containing less than 1% of data are ignored for   fore, we were wondering whether the effect of                  444
+      each corpus.
+                                                                temperature-scaling might be driven by NE. To test             445
+                                                                this, we automatically tagged NEs using a BERT                 446
+
+411   to its optimal value as follows:                          base model (Devlin et al., 2019) fined-tuned for               447
+                                                                NER3 .                                                         448
+
+412    ∆MSE (F ) = MSET =1 (xF ) − MSET =T ∗ (xF ),                Part-of-speech tags. Similarly, previous re-                449
+
+                                                 (8)            search has argued that the poor fit of large LMs               450
+                                                                is primarily due to assigning too low surprisal es-            451
+
+413   where MSET =T ′ (xF ) is the MSE calculated by all        timates to open-class words like nouns and adjec-              452
+
+414   the data xF under the linguistic factor F . The           tives (Oh and Schuler, 2023b). We POS-tagged                   453
+
+415   difference ∆MSE (F ) thus quantifies the impact           the corpora using the NLTK toolkit (Bird et al.,               454
+
+416   of scaling relative to the linguistic factor F . A        2009) with the default Penn Treebank Tag set. In               455
+
+417   higher ∆MSE (F ) signifies a greater influence of         the following, we mainly focus on the four classes             456
+
+418   temperature-scaled surprisal of factor F . To ensure      of open-class tags, as well as a subset of the whole           457
+
+419   sufficient data in each subset, we only consider sub-     closed-class tags (CC).                                        458
+
+420   sets including more than 1% of the data in each                             Named entities          POS tags
+421   corpus.                                                          GPT2 Avg.    NE non-NE NN ADJ VERB ADV CC
+                                                                       s     26.3 87.0     23.4 33.8 100.5    -2.0  2.6 10.4
+                                                                       m     41.7 152.3    36.4 57.0 123.3     7.8 27.6 16.4
+                                                                Dundee
+422   6.1 Influence of low probability words                           l
+                                                                       xl
+                                                                             40.1 158.2
+                                                                             41.4 168.2
+                                                                                           34.5 56.3 126.5
+                                                                                           35.4 60.0 125.5
+                                                                                                               4.8 19.2 14.0
+                                                                                                               6.9 19.7 13.5
+                                                                       s    105.7 186.8  104.6 148.7 152.5 122.0 49.0 77.1
+423   Given that temperature scaling enhances human              NS
+                                                                       m    108.5 155.9  107.9 145.3 152.0 130.1 60.8 80.8
+                                                                       l    127.7 151.6  127.3 175.6 158.6 152.9 74.8 94.3
+424   likeness by shaping the probability distribution,                xl   123.3 141.8  123.1 163.6 145.4 161.2 81.5 89.0
+425   it is natural to think about investigating whether               s     37.2 266.0    28.1 54.3 -65.2 138.1 32.1 5.9
+                                                                       m     41.4 257.6    32.8 71.4 -60.6 137.5 38.6 3.5
+                                                                Brown
+426   there exists an inherent relationship between the                l     42.6 265.3    51.1 69.9 -110.3 160.8 17.2 24.7
+                                                                       xl    54.8 282.3    45.8 90.5 -90.2 151.3 32.2 20.0
+427   distribution of probability and ∆MSE . Specifically,
+428   one might ask questions like if samples with low          Table 3: ∆MSE measurement on word-level properties
+429   probability gain more from temperature scaling or         of GPT-2 models on Dundee, Natural Stories (NS) and
+430   the other way around. We find that high surprisal         Brown. Top-3 on each corpus-by-LM are underlined.
+431   words benefit more from temperature scaling than
+432   low surprisal words, across all corpora, see Fig. 3.         3
+                                                                       Link: https://huggingface.co/dslim/bert-base-NER
+
+                                                            9603
+                                                             6
+459      Results. The result, as shown in Table 3, shows                                        Named entities
+                                                                                 Avg.          NE        non-NE
+460   primary factors responsible for the benefit of us-          Corpus GPT2 pwt ↓ pwt ↑ pwt ↓ pwt ↑∗ pwt ↓ pwt ↑
+461   ing sT (wt , T ) for each corpus-by-LM combination.                  s   27.4 18.2 81.3 107.2 25.1 10.1
+462   The top three influential subsets for each corpus                   m    41.9 39.8 139.1 205.6 37.8 23.9
+                                                                  Dundee
+                                                                           l   41.0 31.3 156.1 166.6 36.2 18.0
+463   are underlined. Among all datasets and models,                      xl   42.5 29.8 170.2 158.8 37.0 16.9
+464   named entities perform to be the most benefi-                        s   94.5 275.6 218.5    3.0 92.9 284.9
+      cial word-level attribute. In contrast, closed-class                m 105.7 158.3 179.3 -34.9 104.7 163.9
+465                                                                NS
+                                                                           l  125.0 166.1 197.5 -224.8 124 175.4
+466   words profit the least from temperature scaling.                    xl 121.8 140.7 197.3 -272.6 120.8 149.5
+467   Performance trends are consistent across different                   s   37.6 32.6 329.7 -170.6 26.6 45.5
+                                                                          m    39.1 72.3 276.0 143.6 30.5 66.3
+468   model variants on the same corpus.                          Brown
+                                                                           l   52.7 28.1 325.8 -205.9 42.5 44.4
+469      We also measured empirically how often tem-                      xl   50.9 111.5 298.2 168.2 41.7 107.1
+470   perature scaling increased vs. decreased the sur-
+                                                               Table 4: Given words whose probability decreases
+471   prisal estimate of a word. Our results show that for
+                                                               (and increases), the corresponding ∆MSE (pwt ↓) (and
+472   ca. 90% of words, surprisal estimates are increased      ∆MSE (pwt ↑)) measurement for GPT-2 models on
+473   through temperature scaling across all word classes.     Dundee, Natural Stories (NS) and Brown. A higher
+474   For the subset of named entities, a slightly smaller     ∆MSE is displayed in bold in the average across all
+475   percentage exhibits increased surprisal estimates.       word types (Avg.), named entities (NE), and non-named
+476   For a full analysis across different corpora and mod-    entities (non-NE) columns, respectively, for each corpus-
+477   els, see Table 5 in Appendix B.                          by-LM combination. The column with ∗ indicates in-
+                                                               sufficient (less than 1%) data.
+478      We further investigate the benefit of temperature-
+479   scaled surprisal (quantified by ∆MSE ) given the
+480   subset of words whose probability decreases (or          tion. This means that long words may consist of             509
+481   increases). The results are in Table 4. On Dundee,       several tokens. In this case, the probability of the        510
+482   the main gain arises from the reduction of large         complete word is calculated by multiplying the              511
+483   probabilities via temperature scaling. Conversely,       probabilities of the subword tokens (and the word’s         512
+484   for Natural Stories, the primary benefit comes more      surprisal is correspondingly calculated by adding           513
+485   strongly from words with originally very low prob-       the surprisals of the subwords). While this may             514
+486   ability, which become more probable. For Brown,          often not matter, whether a word is tokenized into          515
+487   the effects are evenly split. These findings align       a single subword or several subwords can make a             516
+488   with our theoretical intuition that temperature          remarkable difference when applying temperature             517
+489   scaling enhances the fit performance by mak-             scaling: imagine a long / difficult word which has          518
+490   ing probabilities more smooth, which means not           a low probability (and correspondingly a high sur-          519
+491   only making high probabilities lower but also mak-       prisal). If this word were to be represented as a           520
+492   ing very low probabilities higher and close to 1/K,      single subword token, temperature scaling might             521
+493   since a very low probability also means the model        have the effect that the probability of this word           522
+494   is confident in the incorrectness of certain classes.    gets increased during temperature scaling, and its          523
+495      Considering effects on named entities more            surprisal estimate is hence decreased at T > 1.             524
+496   specifically, we find that on Natural Stories and           If, on the other hand, the same word were to             525
+497   Brown, the benefit of temperature scaling can            be composed of two subword tokens, one or both              526
+498   mostly be attributed to reducing the probability         of the subword tokens can be expected to have a             527
+499   estimates of highly predictable entities, while on       higher probability (than a hypothetical single sub-         528
+500   Dundee the beneficial effect mostly arises from in-      word token), and it is possible that during tempera-        529
+501   creasing probabilities of named entities. We spec-       ture scaling, the probabilities of the subword tokens       530
+502   ulate that this could be due to the types of most        would each be decreased at T > 1, such that the             531
+503   frequent named entities that occur in the different      sum of the surprisals of the subword tokens would           532
+504   text sorts, and present a more detailed analysis of      be much higher, compared to the word’s surprisal            533
+505   this aspect in Appendix B.                               estimate at T = 1.                                          534
+                                                                  To summarize, whether the surprisal of a certain         535
+506   6.3 Influence of multiple-token words
+                                                               word would increase or decrease after temperature           536
+507   A fact that is often ignored (but see Nair and Resnik,   scaling could depend on whether that word happens           537
+508   2023) is that modern LLMs use subword tokeniza-          to be included in the subword token vocabulary or           538
+
+                                                           9604
+                                                            7
+                                                                      perience or because human language models do              575
+                                                                      not track these probabilities well. In this case,         576
+                                                                      temperature-scaling rare words to which the LLM           577
+                                                                      assigns a too high probability (and hence a low           578
+                                                                      surprisal) would be a good strategy to counteract         579
+                                                                      the discrepancy between humans and LLMs. From             580
+                                                                      LLMs’ perspective, recalling the observation from         581
+                                                                      Section 5.3 that larger LLMs that yield poorer fits       582
+      Figure 4: Relationship between ∆llh of GPT-2 s on
+      three corpora and corresponding temperature T.
+                                                                      to RTs are actually better calibrated, hence the mas-     583
+                                                                      sive training dataset might be at the cause of driving    584
+539   not.4 In order to quantify to what extent subword               these models away from the human-like predictive          585
+540   tokenization affects surprisal estimates, we con-               processing, aligning with Oh and Schuler (2023a).         586
+541   ducted several analyses.                                           Secondly, it is likely that the beneficial effect of   587
+542      Fig. 4 shows ∆llh under various conditions:                  temperature scaling is an artifact of subword tok-        588
+543   scaling all words (consistent with experiments in               enization, and that this effect would diminish if all     589
+544   Section 5.2) vs. taking into the analysis only the              words were composed of only a single subword              590
+545   subset of single-token words and multiple-token                 token (cf. our explanation in Section 6.3). That          591
+546   words. The comparison between the full, dotted,                 is, temperature scaling would not be beneficial be-       592
+547   and dashed lines highlights that the benefit of                 cause of the reasons that motivated this research         593
+548   temperature-scaled surprisal comes primarily                    originally, but only because it is a way of assign-       594
+549   from the scaling of multiple-token words.                       ing higher surprisal to words consisting of several       595
+550      Next, it is interesting to consider for what                 subword tokens. In order to test this hypothesis,         596
+551   percentage of multiple-token words temperature-                 one would have to re-train a GPT-2 model using a          597
+552   scaling increases the surprisal. We find that the sur-          vocabulary that at least includes all words that are      598
+553   prisal of more than 90% of multiple-token words in-             contained in the reading time corpora, and then re-       599
+554   creases, and the ratio is higher than across single-            running the analysis to check whether a beneficial        600
+555   token words by ca. 6% on Dundee and Brown, see                  effect of temperature scaling can still be found.         601
+556   Table 12 in Appendix L for more details.                           Finally, it is also possible that the splitting of a   602
+                                                                      word into subwords coincides with the reader fixat-       603
+557   7       Discussion                                              ing a word several times, and that these added fixa-      604
+
+558   Our experiments demonstrate that choosing a tem-                tions lead to an overestimate in RTs compared to          605
+
+559   perature around 2.5 improves the fit to human read-             the actual surprisal experienced by a human reader.       606
+
+560   ing times. Furthermore, we find that this effect is             Future work could investigate this hypothesis by          607
+
+561   chiefly driven by an improved fit for words which               analysing RTs on subwords instead of aggregated           608
+
+562   consist of several subword tokens.5 Named entities              words (with the caveat that subword tokens may            609
+
+563   and other open class words tend to have a larger                not be cognitively plausible units).                      610
+
+564   tendency to contain several subword tokens, which
+565   can explain why temperature scaling is particularly             8   Conclusion                                            611
+
+566   effective for these words.
+                                                                      This paper studies the prediction of human RTs            612
+567      So what does all of this mean for surprisal esti-
+                                                                      from the perspective of probability distribution. We      613
+568   mates from LLMs and reading time prediction?
+                                                                      make the following contributions: (1) We demon-           614
+569   Firstly, following the argumentation of Oh and
+                                                                      strate that the prediction of RTs can be significantly    615
+570   Schuler (2023b), it is possible that indeed the effect
+                                                                      improved via temperature scaling of LLM probabil-         616
+571   is driven by humans failing to accurately estimate
+                                                                      ity estimates. (2) We demonstrate that the primary        617
+572   the probability of rare words (rare words being
+                                                                      benefit of temperature-scaled surprisal is driven by      618
+573   the ones that are split up into several subwords),
+                                                                      words composed of several subword tokens. These           619
+574   because they do not reach sufficient language ex-
+                                                                      words also tend to be rarer / long open-class words.      620
+          4
+           Distributions of surprisal for single vs. multiple token   Future work should investigate the interaction of         621
+      words before and after temperature scaling are provided in      subword tokenization and temperature scaling, as          622
+      Fig. 8 in Appendix L.
+         5
+           Appendix K shows that subword tokenization has larger      well as the issue of tokenization in the analysis of      623
+      explanatory power than word class.                              eye-tracking data.                                        624
+
+                                                                  9605
+                                                                   8
+625   Limitations                                               Massimo Caccia, Lucas Caccia, William Fedus, Hugo            671
+                                                                 Larochelle, Joelle Pineau, and Laurent Charlin.             672
+626   In this work, the identification of the optimal T for      2018. Language gans falling short. arXiv preprint           673
+627   temperature-scaled surprisal is manually tuned. Fu-        arXiv:1811.02549.                                           674
+
+628   ture research could develop an automated method           Hanna Damasio, Daniel Tranel, Thomas Grabowski,              675
+629   to determine this optimal value, e.g., from specific        Ralph Adolphs, and Antonio Damasio. 2004. Neural           676
+630   characteristics of LLMs or corpora. Additionally,           systems behind word and concept retrieval. Cogni-          677
+                                                                  tion, 92(1-2):179–229.                                     678
+631   a question may be asked whether the possible non-
+632   linear relationship between surprisal and reading         Vera Demberg and Frank Keller. 2008. Data from eye-          679
+633   times (Shain et al., 2022; Hoover et al., 2023) could       tracking corpora as evidence for theories of syntactic     680
+                                                                  processing complexity. Cognition, 109(2):193–210.          681
+634   influence the temperature-scaled surprisal’s superi-
+635   ority over original surprisal. Investigating the effec-   Jacob Devlin, Ming-Wei Chang, Kenton Lee, and                682
+636   tiveness of temperature-scaled surprisal using gen-          Kristina Toutanova. 2019. BERT: Pre-training of           683
+                                                                   deep bidirectional transformers for language under-       684
+637   eralized additive models, a branch of models that            standing. In Proceedings of the 2019 Conference of        685
+638   assume less about the linearity than linear mixed ef-        the North American Chapter of the Association for         686
+639   fect models employed here, would be an extension.           Computational Linguistics: Human Language Tech-            687
+640   Finally, exploring effects of temperature-scaled sur-        nologies, Volume 1 (Long and Short Papers), pages         688
+                                                                  4171–4186, Minneapolis, Minnesota. Association for         689
+641   prisal on different measures of fixation duration            Computational Linguistics.                                690
+642   could be considered in future work.
+                                                                Angela Fan, Mike Lewis, and Yann Dauphin. 2018.              691
+                                                                  Hierarchical neural story generation. In Proceedings       692
+643   Ethical Considerations                                      of the 56th Annual Meeting of the Association for          693
+                                                                  Computational Linguistics (Volume 1: Long Papers),         694
+644   The datasets and packages we used are all publicly          pages 889–898, Melbourne, Australia. Association           695
+645   available and have no privacy issues.                       for Computational Linguistics.                             696
+
+                                                                Jessica Ficler and Yoav Goldberg. 2017. Controlling          697
+646   Acknowledgements                                             linguistic style aspects in neural language generation.   698
+                                                                   In Proceedings of the Workshop on Stylistic Variation,    699
+647   The authors thank Xudong Hong and Dongqi Pu                  pages 94–104, Copenhagen, Denmark. Association            700
+648   for useful discussions and comments.                         for Computational Linguistics.                            701
+
+                                                                Kenneth I Forster, Christine Guerrera, and Lisa Elliot.      702
+                                                                  2009. The maze task: Measuring forced incremental          703
+649   References                                                  sentence processing time. Behavior research meth-          704
+650   Doris Aaronson and Hollis S Scarborough. 1976. Per-         ods, 41:163–171.                                           705
+651     formance theories for sentence coding: Some quanti-     Victoria Fossum and Roger Levy. 2012. Sequential vs.         706
+652     tative evidence. Journal of Experimental Psychology:      hierarchical syntactic models of human incremen-           707
+653     Human perception and performance, 2(1):56.                tal sentence processing. In Proceedings of the 3rd         708
+                                                                  Workshop on Cognitive Modeling and Computational           709
+654   Bernhard Angele, Elizabeth R Schotter, Timothy J Slat-      Linguistics (CMCL 2012), pages 61–69, Montréal,            710
+655     tery, Tara L Tenenbaum, Klinton Bicknell, and Keith       Canada. Association for Computational Linguistics.         711
+656     Rayner. 2015. Do successor effects in reading reflect
+657     lexical parafoveal processing? evidence from corpus-    Stefan L Frank and Rens Bod. 2011. Insensitivity of the      712
+658     based and experimental eye movement data. Journal          human sentence-processing system to hierarchical          713
+659     of Memory and Language, 79:76–96.                          structure. Psychological science, 22(6):829–834.          714
+
+                                                                Richard Futrell, Edward Gibson, Harry J Tily, Idan           715
+660   Christoph Aurnhammer and Stefan L Frank. 2019. Eval-
+                                                                  Blank, Anastasia Vishnevetsky, Steven Piantadosi,          716
+661     uating information-theoretic measures of word pre-
+                                                                  and Evelina Fedorenko. 2018. The natural stories           717
+662     diction in naturalistic sentence reading. Neuropsy-
+                                                                  corpus. In Proceedings of the Eleventh International       718
+663     chologia, 134:107198.
+                                                                  Conference on Language Resources and Evaluation            719
+                                                                  (LREC 2018).                                               720
+664   Douglas Bates, Martin Mächler, Ben Bolker, and Steve
+665     Walker. 2015. Fitting linear mixed-effects models       Adam Goodkind and Klinton Bicknell. 2018. Predictive         721
+666     using lme4. Journal of Statistical Software, 67:1–48.     power of word surprisal for reading times is a linear      722
+                                                                  function of language model quality. In Proceedings         723
+667   Steven Bird, Ewan Klein, and Edward Loper. 2009. Nat-       of the 8th Workshop on Cognitive Modeling and Com-         724
+668      ural language processing with Python: analyzing text     putational Linguistics (CMCL 2018), pages 10–18,           725
+669      with the natural language toolkit. " O’Reilly Media,     Salt Lake City, Utah. Association for Computational        726
+670      Inc.".                                                   Linguistics.                                               727
+
+                                                            9606
+                                                             9
+728   Chuan Guo, Geoff Pleiss, Yu Sun, and Kilian Q Wein-         Tal Linzen and T Florian Jaeger. 2014. Investigating the   779
+729     berger. 2017. On calibration of modern neural net-           role of entropy in sentence processing. In Proceed-     780
+730     works. In International conference on machine learn-         ings of the fifth workshop on cognitive modeling and    781
+731     ing, pages 1321–1330. PMLR.                                  computational linguistics, pages 10–18.                 782
+
+732   John Hale. 2001. A probabilistic earley parser as a         Danny Merkx and Stefan L. Frank. 2021. Human sen-          783
+733     psycholinguistic model. In Second meeting of the            tence processing: Recurrence or attention? In Pro-       784
+734     north american chapter of the association for com-          ceedings of the Workshop on Cognitive Modeling           785
+735     putational linguistics.                                     and Computational Linguistics, pages 12–22, Online.      786
+                                                                    Association for Computational Linguistics.               787
+736   John Hale. 2003. The information conveyed by words
+                                                                  Don C Mitchell and David W Green. 1978. The ef-            788
+737     in sentences. Journal of psycholinguistic research,
+                                                                    fects of context and content on immediate processing     789
+738     32:101–123.
+                                                                    in reading. The quarterly journal of experimental        790
+                                                                    psychology, 30(4):609–636.                               791
+739   John Hale. 2006. Uncertainty about the rest of the
+740     sentence. Cognitive science, 30(4):643–672.               Sathvik Nair and Philip Resnik. 2023. Words, subwords,     792
+                                                                    and morphemes: What really matters in the surprisal-     793
+741   Dan Hendrycks, Kimin Lee, and Mantas Mazeika. 2019.           reading time relationship? In Findings of the As-        794
+742     Using pre-training can improve model robustness and         sociation for Computational Linguistics: EMNLP           795
+743     uncertainty. In International conference on machine         2023, pages 11251–11260, Singapore. Association          796
+744     learning, pages 2712–2721. PMLR.                            for Computational Linguistics.                           797
+
+745   Geoffrey Hinton, Oriol Vinyals, and Jeff Dean. 2015.        Byung-Doh Oh, Christian Clark, and William Schuler.        798
+746     Distilling the knowledge in a neural network. arXiv         2022. Comparison of structural parsers and neural        799
+747     preprint arXiv:1503.02531.                                  language models as surprisal estimators. Frontiers in    800
+                                                                    Artificial Intelligence, 5:777963.                       801
+748   Jacob Louis Hoover, Morgan Sonderegger, Steven T
+749      Piantadosi, and Timothy J O’Donnell. 2023. The           Byung-Doh Oh and William Schuler. 2023a.                   802
+750      plausibility of sampling as an algorithmic theory of       Transformer-based language model surprisal               803
+751      sentence processing. Open Mind, 7:350–391.                 predicts human reading times best with about two         804
+                                                                    billion training tokens. In Findings of the Associa-     805
+                                                                    tion for Computational Linguistics: EMNLP 2023,          806
+752   Alan Kennedy, Robin Hill, and Joël Pynte. 2003. The
+                                                                    Singapore, December 6-10, 2023, pages 1915–1921.         807
+753     dundee corpus. In Proceedings of the 12th European
+                                                                    Association for Computational Linguistics.               808
+754     Conference on Eye Movement.
+                                                                  Byung-Doh Oh and William Schuler. 2023b. Why               809
+755   Meelis Kull, Miquel Perello Nieto, Markus Kängsepp,           does surprisal from larger transformer-based lan-        810
+756    Telmo Silva Filho, Hao Song, and Peter Flach.                guage models provide a poorer fit to human reading       811
+757    2019. Beyond temperature scaling: Obtaining well-            times? Transactions of the Association for Computa-      812
+758    calibrated multi-class probabilities with dirichlet cal-     tional Linguistics, 11:336–350.                          813
+759    ibration. Advances in neural information processing
+760    systems, 32.                                               Tiago Pimentel, Clara Meister, Ethan G. Wilcox, Roger      814
+                                                                     Levy, and Ryan Cotterell. 2023. On the effect of        815
+761   Ananya Kumar, Percy S Liang, and Tengyu Ma. 2019.              anticipation on reading times. Transactions of the      816
+762     Verified uncertainty calibration. Advances in Neural        Association for Computational Linguistics.               817
+763     Information Processing Systems, 32.
+                                                                  Alec Radford, Jeffrey Wu, Rewon Child, David Luan,         818
+764   Sawan Kumar. 2022. Answer-level calibration for free-         Dario Amodei, Ilya Sutskever, et al. 2019. Language      819
+765     form multiple choice question answering. In Pro-            models are unsupervised multitask learners. OpenAI       820
+766     ceedings of the 60th Annual Meeting of the Associa-         blog, 1(8):9.                                            821
+767     tion for Computational Linguistics (Volume 1: Long
+                                                                  Amir Rahimi, Kartik Gupta, Thalaiyasingam Ajan-            822
+768     Papers), pages 665–679, Dublin, Ireland. Association
+                                                                   than, Thomas Mensink, Cristian Sminchisescu, and          823
+769     for Computational Linguistics.
+                                                                   Richard Hartley. 2020a. Post-hoc calibration of neu-      824
+                                                                   ral networks. arXiv preprint arXiv:2006.12807, 2.         825
+770   Tatsuki Kuribayashi, Yohei Oseki, Ana Brassard, and
+771     Kentaro Inui. 2022. Context limitations make neural       Amir Rahimi, Amirreza Shaban, Ching-An Cheng,              826
+772     language models more human-like. In Proceedings            Richard Hartley, and Byron Boots. 2020b. Intra            827
+773     of the 2022 Conference on Empirical Methods in             order-preserving functions for calibration of multi-      828
+774     Natural Language Processing, pages 10421–10436,            class neural networks. Advances in Neural Informa-        829
+775     Abu Dhabi, United Arab Emirates. Association for           tion Processing Systems, 33:13456–13467.                  830
+776     Computational Linguistics.
+                                                                  Keith Rayner. 1998. Eye movements in reading and           831
+777   Roger Levy. 2008. Expectation-based syntactic compre-         information processing: 20 years of research. Psy-       832
+778     hension. Cognition, 106(3):1126–1177.                       chological bulletin, 124(3):372.                         833
+
+                                                              9607
+                                                               10
+834   David Reeb and Michael M Wolf. 2015. Tight bound on            Findings of the Association for Computational Lin-   888
+835     relative entropy by entropy difference. IEEE Trans-          guistics: EMNLP 2023, pages 9778–9795, Singapore.    889
+836     actions on Information Theory, 61(3):1458–1473.              Association for Computational Linguistics.           890
+
+837   Alfréd Rényi. 1961. On measures of entropy and infor-
+838     mation. In Proceedings of the Fourth Berkeley Sym-
+839     posium on Mathematical Statistics and Probability,
+840     Volume 1: Contributions to the Theory of Statistics,
+841     volume 4, pages 547–562. University of California
+842     Press.
+
+843   Cory Shain, Clara Meister, Tiago Pimentel, Ryan Cot-
+844     terell, and Roger Levy. 2022. Large-scale evidence
+845     for logarithmic effects of word predictability on read-
+846     ing time.
+
+847   Claude Elwood Shannon. 1948. A mathematical theory
+848     of communication. The Bell system technical journal,
+849     27(3):379–423.
+
+850   Chenglei Si, Chen Zhao, Sewon Min, and Jordan Boyd-
+851     Graber. 2022. Re-examining calibration: The case
+852     of question answering. In Findings of the Associa-
+853     tion for Computational Linguistics: EMNLP 2022,
+854     pages 2814–2829, Abu Dhabi, United Arab Emirates.
+855     Association for Computational Linguistics.
+
+856   Nathaniel J Smith and Roger Levy. 2013. The effect
+857     of word predictability on reading time is logarithmic.
+858     Cognition, 128(3):302–319.
+
+859   Aarohi Srivastava, Abhinav Rastogi, Abhishek Rao,
+860     Abu Awal Md Shoeb, Abubakar Abid, Adam Fisch,
+861     Adam R Brown, Adam Santoro, Aditya Gupta, Adrià
+862     Garriga-Alonso, et al. 2023. Beyond the imitation
+863     game: Quantifying and extrapolating the capabili-
+864     ties of language models. Transactions on Machine
+865     Learning Research.
+
+866   Marten van Schijndel and Tal Linzen. 2019. Can en-
+867    tropy explain successor surprisal effects in reading?
+868    In Proceedings of the Society for Computation in
+869    Linguistics (SCiL) 2019, pages 1–7.
+
+870   Lin Wang, Zude Zhu, Marcel Bastiaansen, Peter Ha-
+871     goort, and Yufang Yang. 2013. Recognizing the emo-
+872     tional valence of names: An erp study. Brain and
+873     Language, 125(1):118–127.
+
+874   Ethan Gotlieb Wilcox, Jon Gauthier, Jennifer Hu, Peng
+875     Qian, and Roger P. Levy. 2020. On the predictive
+876     power of neural language models for human real-
+877     time comprehension behavior. In Proceedings of
+878     the 42nd Annual Meeting of the Cognitive Science
+879     Society, page 1707–1713.
+
+880   Ethan Gotlieb Wilcox, Tiago Pimentel, Clara Meister,
+881     Ryan Cotterell, and Roger P Levy. 2023. Testing
+882     the predictions of surprisal theory in 11 languages.
+883     Transactions of the Association for Computational
+884     Linguistics.
+
+885   Chiwei Zhu, Benfeng Xu, Quan Wang, Yongdong
+886     Zhang, and Zhendong Mao. 2023. On the calibra-
+887     tion of large language models and alignment. In
+
+                                                              9608
+                                                               11
+891   A     Connection to Contextual Rényi                     where for the step from Eq. (12) to Eq. (13) we              932
+892         Entropy                                            use AM-QM inequality and K is the number of                  933
+                                                               classes in tokenizer. The first part of Eq. (11) can         934
+893   While a lot of work has investigated the effect of
+                                                               be rewritten as:                                             935
+894   next word entropy on reading times (Hale, 2003,
+895   2006; Linzen and Jaeger, 2014; Angele et al., 2015;                             X p
+                                                               Hα |α=1/2 = 2 log2              p(w|w<t )          (15)      936
+896   van Schijndel and Linzen, 2019; Aurnhammer and
+                                                                                      w∈W
+897   Frank, 2019; Pimentel et al., 2023), we will here fo-                         v
+      cus on contextual Rényi entropy (the entropy of the                           uY
+898                                                                                 u              1
+                                                                           > 2 log2 t  (                 )p(w|w<t )         937
+899   probability distribution at the current time stamp,                                      p(w|w<t )
+                                                                                        w∈W
+900   which is parameterized by α), as proposed in Pi-
+901   mentel et al. (2023) to represent human anticipatory                                                        (16)
+                                                                               X
+902   reading process. Pimentel et al. (2023) find that                    =         p(w|w<t ) log2 p(w|w<t ) = Hα |α=1 ,   938
+903   Rényi entropy with an optimal α∗ in the range of                         w∈W
+904   (0, 1) (around 1/2) obtains the best performance                                                            (17)
+905   in reading time prediction (compared to Shannon
+906   Entropy (α = 1) or compared to unscaled surprisal        where from Eq. (15) to Eq. (16) we use AM-GM                 939
+907   estimates).                                              inequality.                                                  940
+908      Mathematically,       Contextual Rényi en-
+909   tropy (Rényi, 1961) is defined as:                       Theorem 2 Rényi entropy with α = 0 is equiva-                941
+                                                               lent to temperature-scaled surprisal with T → ∞.             942
+          Hα (wt | w<t )
+910                          1        X
+                 = lim           log2   (p(w|w<t ))β .              Hα (wt | w<t )|α=0 = lim sT (wt , T ).        (18)      943
+                       β→α 1 − β                                                            T →∞
+                                     w∈W
+                                                        (9)    Proof. By plugging in α = 0, Contextual Rényi                944
+
+911
+                   ′
+      For given α ∈ (0, ∞), we simply denote Hα (wt |          entropy recovers to be the entropy that readers              945
+
+912   w<t )|α=α′ as Hα |α=α′ .                                 concentrate on the count of potential words with             946
+                                                               nonzero probabilities, which is defined in Eq. (5)           947
+913   Theorem 1 (Monotonicity of sT (wt , T ) and
+                                                               in Pimentel et al. (2023). As T → ∞, temperature-            948
+914   Hα (wt | w<t )). Given any probability distribution
+                                                               scaled surprisal converges to the surprisal induced          949
+915   p with actual-word probability pwt > 1/K, where
+                                                               by random guessing. Given the assumtion that                 950
+916   K is the number of classes, temperature-scaled sur-
+                                                               p(w|w<t ) > 0 for each word w ∈ W, LHS be-                   951
+917   prisal sT (wt , T ) is strictly monotonically increas-
+                                                               comes:                                                       952
+918   ing in ∆T ∈ [1, ∞], Rényi entropy Hα (wt | w<t )
+919   is strictly monotonically decreasing in ∆α ∈ [0, 1],
+920   especially,                                                              LHS = −log2 (1/K),                 (19)      953
+
+
+921        sT |T =1 < sT |T =T ∗ < lim sT (wt , T )    (10)    where K is the number of classes. As T → ∞,                  954
+                                   T →∞
+922              Hα |α=1 < Hα |α=1/2 < Hα |α=0 ,       (11)    RHS becomes:                                                 955
+
+
+923   where T ∗ is the optimal T of fit to RTs in the range                                       ezwt /T
+924   of ∆T .                                                         RHS = − lim log2 P                zw /T
+                                                                                                                  (20)      956
+                                                                                                 w∈W e
+                                                                                 T →∞
+925   Proof. Eq. (10) can be easily verified by con-                        = −log2 (1/K)                         (21)      957
+926   sidering the monotonicity of temperature-scaled
+927   softmax output σSM (ẑ wt /T ). The second part of
+                                                               Theorem 3 For K ≥ 2, the expectation of the                  958
+928   Eq. (11) can be rewritten as:
+                             X p                               L1 norm between Rényi entropy with α = 1 and                 959
+929      Hα |α=1/2 = 2 log2          p(w|w<t )     (12)        temperature-scaled surprisal with T = 1 has an               960
+
+                               w∈W                             upper bound.                                                 961
+                               s X
+930                    < 2 log2 K  p(w|w<t )           (13)                                    r
+                                                                                                   1
+                                     w∈W                          E[|sT |T =1 − Hα |α=1 |] <         log2 (K − 1) + 1       962
+                                                                                                   4
+931                    = − log2 (1/K) = Hα |α=0 ,      (14)                                                       (22)
+
+                                                           9609
+                                                            12
+963    Proof. With Jensen’s inequality, we have:
+
+ 964   E[|sT |T =1 − Hα |α=1 |]                 (23)
+            p
+965      ≤ E[(sT |T =1 − Hα |α=1 )2 ]           (24)
+            s                   X
+966      = E[(− log2 pwt −        p(w)(− log2 p(w)))2 ]
+                                  w∈W
+                                                          (25)
+           p
+967      = Var[sT |T =1 ]                                 (26)
+           r                                                      Figure 5: A comparison of averaged temperature-
+             1                                                    scaled surprisal sT |T ={1,T ∗ ,∞} and Rényi entropy
+968      <     log2 (K − 1) + 1,                          (27)
+             4                                                    Hα |α={0,1/2,1} .
+
+969    where Var[·] denotes the variance. The last inequal-
+970    ity is shown by Lemma 4, completing the proof of           B    Further analysis in Section 6.2                    1002
+971    this theorem.
+                                                                  We observe that larger LMs exhibit an increased         1003
+972    Lemma 4 (Maximum variance of the surprisal).               ∆MSE by utilizing temperature-scaled surprisal,         1004
+973    (See Theorem 8 and Lemma 15 in (Reeb and Wolf,             as shown in the average column (Avg.) of Table 3.       1005
+974    2015)). Let ρ = diag(p1 , p2 , ..., pd ) be a state on a   Specifically, on Dundee, the top 2 models achiev-       1006
+975    d-dimensional system. Let − log pi be the surprisal        ing the largest improvement through temperature         1007
+976    of the output i in this system. Define Nd to be:           scaling are GPT-2 medium and xl, while GPT-2            1008
+                                                                  large and xl have the most benefit on Natural Sto-      1009
+                            1                                     ries and Brown. This result is consistent with previ-   1010
+ 977                Nd :=     log2 (d − 1) + 1.           (28)
+                            4                                     ously observed ∆llh improvement (∆llh +) across         1011
+                                                                  the corpus-by-LM reported in Table 1, suggest-          1012
+978    For d ≥ 2, the variance of surprisal has a tight           ing a correlation between model likelihood and          1013
+979    upper bound:                                               MSEs of the regression models. We do not ob-            1014
+                                                                  serve a mismatch between them, as posited by Oh         1015
+980                    varρ (− log ρ) < Nd                (29)    and Schuler (2023b) that LME models achieve sim-        1016
+                                                                  ilar MSEs irrespective of obvious differences in        1017
+981    Theorem 2 claims the equivalence of temperature-           model likelihood.                                       1018
+ 982   scaled surprisal sT (wt , T ) and Rényi entropy Hα            Regarding the effect of the change (increase or      1019
+983    when T → ∞ and α = 0. Theorem 3, on the                    decrease) of actual-word probability on the final fit   1020
+ 984   other side, gives an upper bound when T = 1                to RTs, we first analyzed the ratio of probabilities    1021
+985    and α = 1. Intuitively, when T ∈ (1, ∞), sT                decreasing (or increasing) for all words, as well       1022
+986    can be considered as a softened version of sT |T =1 .      as for subsets with specific word-level properties,     1023
+987    Similarly, when α ∈ (0, 1), Hα can be consid-              choosing named entities as the representative, as       1024
+988    ered as a softened version of Hα |α=1 . Math-              shown in Table 5. We observed that probabilities        1025
+989    ematically, Theorem 1 provides the monotonic-              of the majority of words (around 80-90%) de-            1026
+990    ity of both functions within their respective do-          crease by temperature scaling. Compared with            1027
+991    mains. Hypothetically, given the above conditions,         the average across all word types (as indicated in      1028
+992    when tuning both functions with the aim of a bet-          the ’Avg.’ column), named entities exhibit a lower      1029
+993    ter fit to RTs, sT |T =T ∗ and Hα |α=1/2 might be          ratio of probability reduction. Larger LMs tend to      1030
+994    close. Empirically, Fig. 5 illustrates the relationship    have a higher ratio, especially the ratio for named     1031
+ 995   between averaged Rényi entropy Hα |α={0,1/2,1}             entities, likely because smaller models may lack        1032
+996    and sT |T ={1,T ∗ ,∞} on probabilities on three cor-       the specific knowledge of less common terms, such       1033
+997    pora. Notably, Hα |α=1/2 and sT |T =T ∗ are closely        as named entities.                                      1034
+998    aligned, especially when compared with other en-              Recalling one of the results in Section 6.2 that     1035
+999    tropy and surprisal data points. This empirical ev-        the main advantage of temperature-scaled surprisal      1036
+1000   idence partly verifies Theorem 2, Theorem 3 and            arises from reduction of large probabilities on         1037
+1001   our hypothesis.                                            Dundee and the amplification of small probabilities     1038
+
+                                                              9610
+                                                               13
+1039   on Natural Stories. However, for named entities,            tuation, and if words whose previous words con-             1070
+1040   the story is converse on Dundee vs. on Natural Sto-         taining numbers or punctuation. On Brown SPR                1071
+1041   ries and Brown, where for the latter two corpora,           corpus (Smith and Levy, 2013), following Shain              1072
+1042   the advantage is primarily due to reducing the prob-        et al. (2022), we remove words if the RT is less            1073
+1043   abilities of highly predictable entities. We shed           than 100ms or greater than 3,000ms and if words             1074
+1044   light to the possible reason of such a discrepancy in       contain numbers or punctuation.                             1075
+1045   Fig. 6, which displays the top 15 frequent words for
+1046   GPT-2 small on three corpora. Notably, Natural              D     Further descriptions on metrics and                   1076
+
+1047   Stories and Brown show a marked lack of words                     evaluation                                            1077
+
+1048   with increased probabilities (blue bins) compared           We evaluate calibration error (% ECE and %                  1078
+1049   to Dundee. This lack weakens the overall impact             CECE) in both equally-spaced and log binning                1079
+1050   of rising probabilities (quantified by ∆MSE (pwt ↑)).       schemes. In equally-spaced binning scheme,                  1080
+1051   Specifically, on Brown, only 4 out of 15 top fre-           the samples are grouped into M ∈ N equally-                 1081
+1052   quent words have the part of increased probabilities        spaced interval bins based on their confidences             1082
+1053   (blue bins), correlating with the largest discrep-          p̂i . Conversely, the log binning scheme operates           1083
+1054   ancy in ∆MSE between probabilities that decrease            under an empirical upper limit for − log2 p̂i , de-         1084
+1055   (329.7) and those that increase (-170.6) in Table 4.        noted as max(− log2 p̂). Table 6 shows ranges               1085
+                                                                   of p̂ and − log2 p̂ for GPT2s on three corpora.             1086
+                        Avg.                 Named entities        For this scheme, we establish M ∈ N log-                    1087
+        Corpus GPT2 pwt ↓ |res| ↓            pwt ↓ |res| ↓         equally-spaced interval bins within the range of            1088
+                s   88.0 51.8                78.1 52.3             (0, max(− log2 p̂)].                                        1089
+                m   89.6 52.5                80.1 54.1                  We investigate scaling T ∈ [1, 10], considering
+        Dundee                                                                                                                 1090
+                l   90.2 52.3                80.1 53.5             both densely and sparsely distributed points. The           1091
+                xl  91.4 52.4                82.7 54.3             values examined are detailed as follows: [1.0, 1.1,         1092
+                s   93.8 55.0                85.3 51.8             ..., 1.9] for dense intervals, [2.0, 2.25, ..., 3.25] for   1093
+        Natural m   94.7 55.2                89.1 53.2             moderately spaced intervals, and [3.5, 4.0, ..., 10.0]      1094
+        Stories l   93.5 55.7                89.1 53.4             for sparse intervals.                                       1095
+                xl  92.1 55.5                88.2 52.8                  Following Kuribayashi et al. (2022), reading           1096
+                s   91.8 51.5                87.3 50.9             times of a base model are modelled by the fol-              1097
+                m   93.2 51.5                86.1 50.9             lowing formula:                                             1098
+        Brown
+                l   93.3 51.8                88.6 52.1
+                xl  93.5 51.7                87.8 53.3             rt ∼ freq ∗ length + freq_prev_1 ∗ length_prev_1
+                                                                                                                               1099
+                                                                       + (1|article) + (1|subj_id)
+       Table 5: The ratio of probability of predicted word pwt                                                         (30)
+       getting smaller and the absolute value of residuals |res|
+       getting smaller for GPT-2 models on three corpora.          A target model additionally includes surprisal esti-        1100
+                                                                   mates of current words and previous words:                  1101
+
+                                                                   rt ∼ surprisal + surprisal_prev_1 + surprisal_prev_2
+1056   C    Preprocessing steps
+                                                                       + freq ∗ length + freq_prev_1 ∗ length_prev_1           1102
+1057   On Dundee ET corpus (Kennedy et al., 2003),                     + (1|article) + (1|subj_id).
+1058   we use the first-pass gaze duration. Following                                                                  (31)
+1059   prior work (Kuribayashi et al., 2022), we remove
+1060   words containing numbers or punctuation, words              On Dundee corpus, both models also include fea-             1103
+
+1061   that are either the first or the last one in a line,        tures of [screenN, lineN, segmentN]. We also per-           1104
+
+1062   as well as words whose previous words contain               form experiments with both models without inter-            1105
+
+1063   numbers or punctuation. On Natural Stories SPR              actions among predictors in Appendix I.                     1106
+
+1064   corpus (Futrell et al., 2018), following Shain et al.
+                                                                   E    Exploring further effectiveness of                     1107
+1065   (2022), we remove words if the RT is less than
+                                                                        temperature-scaled surprisal over basic                1108
+1066   100ms or greater than 3,000ms, if the words are in
+                                                                        predictors                                             1109
+1067   the first or last position of each story, if participants
+1068   answered less than 5 out of 8 comprehension ques-           In this section, we explore the question of whether         1110
+1069   tions correctly, if words contain numbers or punc-          the benefit of temperature-scaled surprisal holds           1111
+
+                                                               9611
+                                                                14
+Figure 6: Top 15 frequent named entities for GPT-2 small on Dundee, Natural Stories and Brown. ↑ and ↓ denote
+probability being higher and smaller, respectively. ⃝ and × denote unbeneficial words (absolute residual error
+increases) and beneficial words (absolute residual error decreases) by temperature scaling, respectively.
+
+
+                                                        p̂          − log2 p̂
+                                   Dundee          [4.99e-03, 1)    (0, 7.65]
+                                Natural Stories   [8.567e-03, 1)    (0, 6.87]
+                                   Brown           [8.15e-03, 1)    (0, 6.94]
+
+             Table 6: Ranges of p̂ and − log2 p̂ for GPT2s on Dundee, Natural Stories and Brown.
+
+                                                    9612
+                                                     15
+       Figure 7: Relationship between ∆llh of GPT-2 small and corresponding temperature. T is scaled from 1.0 to 10.
+       Base predictor variables vbase and target predictor variables are 0 and temperature-scaled surprisal sT (wt , T ),
+       respectively.
+
+
+1112   only for regression models already containing other        I    Analysis on correlations among                       1144
+1113   predictors such as length and frequency. We con-                predictors                                           1145
+1114   duct experiments similar to those detailed in Sec-
+                                                                  We investigate the question of whether the benefit        1146
+1115   tion 5.2 while setting base predictor variables vbase
+                                                                  of temperature-scaled surprisal is primarily due to       1147
+1116   to 0 and target predictor variables vtgt to only
+                                                                  the interactions and correlations among predictors.       1148
+1117   temperature-scaled surprisal sT (wt , T ) in Eq. 7.
+                                                                  We first run experiments with the original target         1149
+1118   Fig. 7 shows that excluding base predictors de-
+                                                                  LME model as in Eq. 31 (denoted as model 1), a            1150
+1119   crease but not totally impact the effectiveness of
+                                                                  model that has no interactions between frequency          1151
+1120   temperature-scaled surprisal.
+                                                                  and length as in Eq. 32 (denoted as model 2) and a        1152
+                                                                  third model that has no interactions and addition-        1153
+1121   F    Calibration error for single-token and                ally includes random slopes for subject as in Eq. 33      1154
+1122        multiple-token words                                  (denoted as model 3).                                     1155
+
+
+1123   In Table 7, we demonstrate the calibration error           rt ∼ surprisal + surprisal_prev_1 + surprisal_prev_2
+1124   (%ECE) for single-token and multiple-token words
+                                                                      + freq + length + freq_prev_1 + length_prev_1         1156
+1125   for GPT-2 small. Calibration evaluation is con-
+1126   ducted at the token level as before. Results indicate          + (1|article) + (1|subj_id).
+1127   that multiple-token words show larger calibra-                                                               (32)
+1128   tion errors than single-token words.
+                                                                  rt ∼ surprisal + surprisal_prev_1 + surprisal_prev_2
+1129   G    Probability distribution before and                       + freq + length + freq_prev_1 + length_prev_1         1157
+1130        after temperature scaling                                 + (1|article) + (surprisal|subj_id).
+                                                                                                                    (33)
+1131   Fig. 8 shows actual-word probability distribution
+1132   before and after temperature scaling for GPT-2                The results are in Table 9. Removing the in-           1158
+
+1133   small on three corpora. Multiple-token words               teractions among predictors or additionally in-           1159
+
+1134   tend to have smaller probabilities than single-            cluding random slopes does not influence the              1160
+
+1135   token words, both before and after temperature             effectiveness of temperature-scaled surprisal.            1161
+
+1136   scaling.                                                      Furthermore, we also investigated the correla-         1162
+                                                                  tions among predictors by examining the correla-          1163
+                                                                  tion matrix for GPT2 small on three corpora (model        1164
+1137   H    Significant test of temperature-scaled                1). Table 9, 10 and 11 indicate that temperature-         1165
+1138        surprisal                                             scaled surprisal does not exhibit a stronger cor-         1166
+                                                                  relation with the other predictors in comparison          1167
+1139   We report the statistical significance based on se-        to the original surprisal, as shown in the surprisal      1168
+1140   lecting the most representative model, GPT2s, on           column (’surp’), which excludes the concern that          1169
+1141   three corpora in Table 8. Models with temperature-         the primary benefits are simply due to correlations       1170
+1142   scaled surprisal lead to statistically significant posi-   between the baseline predictor and temperature-           1171
+1143   tive ∆llh (p < 0.001).                                     scaled surprisal.                                         1172
+
+                                                              9613
+                                                               16
+                                                            ECEsingle     ECEmultiple
+                                                T =1        1.98          2.05
+                            Dundee
+                                                T = T∗      25.58         36.10
+                                                T =1        2.20          3.78
+                            Natural Stories
+                                                T = T∗      32.38         47.02
+                                                T =1        1.69          3.86
+                            Brown
+                                                T = T∗      28.70         42.99
+
+Table 7: Expected calibration errors of tokens in single-token (% ECEsingle ) and multiple-token words (%
+ECEmultiple ) before and after temperature scaling for GPT-2 small on Dundee, Natural Stories and Brown. Results
+are all evaluated on the equally-spaced binning scheme.
+
+
+
+
+                                      Corpora         Models           p
+                                      Dundee      target vs. base    <0.001
+                                      NS          target vs. base    <0.001
+                                      Brown       target vs. base    <0.001
+
+      Table 8: Significance of temperature-scaled surprisal for GPT2 small on three corpora with T = T ∗ .
+
+
+
+
+                Corpora             Models      T∗      ∆llh (T = 1)     ∆llh (T = T ∗ )    ∆llh +
+                Dundee              model1      2.75        6.90               8.45          22.5
+                Dundee              model2      2.75        6.79               8.12          19.6
+                Dundee              model3      2.75        7.81               9.12          16.8
+                Natural Stories     model1      2.5         4.36               6.99          60.3
+                Natural Stories     model2      2.5         4.35               6.99          60.7
+                Natural Stories     model3      *             *                  *               *
+                Brown               model1      2.5         6.62               7.53          13.7
+                Brown               model2      2.25        6.62               7.30          10.3
+                Brown               model3      *             *                  *               *
+
+Table 9: Optimal T ∗ , ∆llh (T = 1), ∆llh (T = T ∗ ), and ∆llh + for three models for GPT2 small on three corpora. ∗
+indicates regression models not converged.
+
+
+
+
+                                                       9614
+                                                        17
+Figure 8: Distribution of negative log actual-word probability (surprisal) before (left side of figure) and after (right
+side of figure) temperature scaling for single-token and multiple-token words for GPT-2 small on three corpora.
+Values of surprisal with probability of 0.1, 0.01 and 1/K (random guessing) are displayed using dash lines.
+
+
+
+
+                                                         9615
+                                                          18
+            (Intr)     surp      surp_1    surp_2      log_frq    length    log_frq_1    length_1     log_frq_2
+surp        0.004
+surp_1      0.000      -0.147
+surp_2      -0.001     -0.057    -0.101
+log_frq     0.0200     0.238     0.002     -0.03
+length      0.019      -0.272    0.027     0.04        0.602
+log_frq_1   0.022      -0.085    0.332     -0.048      0.034      -0.021
+length_1    0.028      0.034     -0.200    0.031       0.003      -0.025    0.650
+log_frq_2   0.032      -0.081    0.002     0.000       0.374      0.626     -0.009       0.014
+length_2    0.038      -0.013    -0.033    0.003       -0.003     0.043     0.509        0.578        0.014
+                                                    (a) T = 1
+
+            (Intr)    surp      surp_1    surp_2      log_frq    length    log_frq_1    length_1     log_frq_2
+surp        0.006
+surp_1      0.005     -0.145
+surp_2      -0.003    -0.074    -0.154
+log_frq     0.020     -0.055    0.050     -0.013
+length      0.017     -0.395    0.042     0.044       0.676
+log_frq_1   0.024     -0.058    0.063     0.011       0.051      -0.018
+length_1    0.025     0.060     -0.353    0.075       -0.016     -0.035    0.702
+log_frq_2   0.031     -0.156    0.004     0.004       0.409      0.634     -0.005       0.011
+length_2    0.037     0.001     -0.088    -0.006      -0.003     0.038     0.542        0.574        0.014
+                                                   (b) T = T ∗
+
+            Figure 9: Correlation matrix for GPT2s on Dundee with (a) T = 1 and (b) T = T ∗ .
+
+
+            (Intr)   surp       surp_1    surp_2      log_frq    length    log_frq_1    length_1     log_frq_2
+surp        0.002
+surp_1      0.002    -0.009
+surp_2      0.001    0.003      -0.019
+log_frq     0.017    0.237      0.013     -0.016
+length      0.022    -0.181     0.018     0.011       0.692
+log_frq_1   0.018    0.019      0.238     -0.051      0.067      -0.015
+length_1    0.022    0.013      -0.183    0.029       -0.01      0.011     0.672
+log_frq_2   0.030    0.005      0.030     0.010       0.472      0.586     0.008        0.017
+length_2    0.030    0.010      0.011     0.018       -0.005     0.02      0.468        0.589        0.023
+                                                   (a) T = 1
+
+            (Intr)    surp      surp_1    surp_2      log_frq    length    log_frq_1    length_1     log_frq_2
+surp        0.013
+surp_1      0.011     -0.108
+surp_2      -0.002    -0.034    -0.080
+log_frq     0.020     0.200     0.009     -0.021
+length      0.020     -0.194    0.014     0.010       0.700
+log_frq_1   0.019     -0.09     0.231     -0.026      0.048      0.001
+length_1    0.020     0.016     -0.203    0.045       -0.013     0.014     0.667
+log_frq_2   0.031     0.035     0.004     -0.007      0.482      0.578     0.000        0.020
+length_2    0.031     0.015     0.038     -0.036      -0.003     0.019     0.474        0.579        0.023
+                                                   (b) T = T ∗
+
+       Figure 10: Correlation matrix for GPT2s on Natural Stories with (a) T = 1 and (b) T = T ∗ .
+
+
+                                                    9616
+                                                     19
+                       (Intr)    surp      surp_1    surp_2     log_frq      length   log_frq_1   length_1   log_frq_2
+           surp        0.003
+           surp_1      -0.003    -0.058
+           surp_2      -0.001    -0.021    -0.039
+           log_frq     0.032     0.269     0.007     -0.053
+           length      0.036     -0.206    0.005     -0.007     0.691
+           log_frq_1   0.007     -0.068    0.212     -0.044     0.084        0.021
+           length_1    0.012     -0.018    -0.379    0.036      0.022        0.060    0.484
+           log_frq_2   0.045     -0.003    0.000     -0.009     0.539        0.593    -0.013      0.016
+           length_2    0.028     -0.019    -0.09     0.018      0.020        0.054    0.247       0.347      -0.012
+                                                              (a) T = 1
+
+                       (Intr)    surp      surp_1    surp_2     log_frq      length   log_frq_1   length_1   log_frq_2
+           surp        0.019
+           surp_1      -0.010    -0.114
+           surp_2      -0.002    -0.046    -0.096
+           log_frq     0.035     0.165     0.010     -0.049
+           length      0.032     -0.241    0.027     -0.010     0.719
+           log_frq_1   0.008     -0.103    -0.124    0.011      0.078        0.034
+           length_1    0.015     0.019     -0.572    0.079      0.018        0.043    0.580
+           log_frq_2   0.045     0.015     -0.024    -0.023     0.554        0.584    -0.012      0.026
+           length_2    0.029     0.009     -0.263    0.008      0.022        0.046    0.295       0.418      -0.005
+                                                           (b) T = T ∗
+
+                       Figure 11: Correlation matrix for GPT2s on Brown with (a) T = 1 and (b) T = T ∗ .
+
+
+                         GPT2 ∆llh + (multiple)                   K       Influence of word-level attributes             1182
+                           s        23.6
+                          m         36.4                                  vs. influence of multiple-token words          1183
+                  Dundee
+                           l        38.0
+                          xl        42.9                          We explore which of these two factors has a            1184
+                           s        45.2                          stronger effect on the benefit of temperature-scaled   1185
+                          m         50.1
+                   NS
+                           l        62.0
+                                                                  surprisal, word-level attributes in Section 6.2 or     1186
+                          xl        67.8                          multiple-token words in Section 6.3. For word          1187
+                           s         9.2                          types, we select named entities as the representa-     1188
+                          m         13.4
+                  Brown
+                           l        17.9
+                                                                  tive attribute since they perform to be the most       1189
+                          xl        5.49                          beneficial ones as discussed in Section 6.2. For       1190
+                                                                  multiple-token words, we select all multiple-token     1191
+       Table 10: ∆llh improvement by only scaling tokens          words with more-than-one tokens. In order to fairly    1192
+       in multiple-token words (%) (∆llh + (multiple) =
+                                                                  compare the influence, we normalize ∆MSE of            1193
+       (∆llh (T = T ∗ , multiple) − ∆llh (T = 1))/∆llh (T =
+       1)) for GPT2s on Dundee, Natural Stories (NS) and          each category under the linguistic factor F with       1194
+
+       Brown.                                                     the ratio of that category words among the total       1195
+                                                                  words: ∆ ¯ MSE (F ) = ∆MSE(F ) ·ratio(F ). Table 11    1196
+                                                                  shows that multiple-token words drive the much         1197
+1173   J    Influence of multiple-token words                     stronger averaged benefit of temperature-scaled        1198
+1174        vs. model size                                        surprisal, compared with the averaged benefit of       1199
+                                                                  named entities.                                        1200
+1175   Table 10 shows the increase of ∆llh of temperature-
+1176   scaled surprisal by only taking into the analysis          L       Other results in Section 6                     1201
+1177   the subset of multiple-token words. The benefit of
+1178   temperature-scaled surprisal being primarily from
+1179   the scaling of multiple-token words still holds for
+1180   larger LLMs. For larger LLMs, the influence of
+1181   multiple-token words is also larger.
+                                                              9617
+                                                               20
+                     GPT2 NE #>1
+                     s    3.9 17.0
+                     m    6.9 26.7
+              Dundee
+                     l    7.2 27.0
+                     xl   7.6 27.9
+                     s    2.6 35.9
+                     m    2.2 38.4
+               NS
+                     l    2.1 43.3
+                     xl   2.0 40.6
+                     s    10.2 27.0
+                     m    9.8 28.9
+              Brown
+                     l    10.1 30.7
+                     xl   10.8 36.0
+
+          ¯ MSE measurement on named entites (NE)
+Table 11: ∆
+and multiple-token words (#>1) for GPT-2 models on
+Dundee, Natural Stories (NS) and Brown.
+
+
+
+
+                                                 9618
+                                                  21
+                                           ratio of pwt ↓  ratio of named entities
+                                      #=1 #>1 #=2 #=3 #=1 #>1 #=2 #=3
+                      Dundee          87.6 93.7 90.6 98.3 3.7 16.3 16.6 17.4
+                      Natural Stories 92.1 93.0 92.2 97.2* 1.3 3.5 3.3 4.7*
+                      Brown           93.0 98.1 97.6 35.2* 3.3 12.3 10.9 17.0*
+
+Table 12: This table displays the ratio of words with decreasing probability (pwt ↓) and the ratio of named entities
+on subsets for both single-token words (#=1) and multiple-token words (#>1) for GPT-2 small on three corpora.
+Numbers marked with ∗ indicate subsets with insufficient (less than 1%) data.
+
+
+
+
+                           #=1          #>1          #=2           #=3
+                      pwt ↓ pwt ↑ pwt ↓ pwt ↑  pwt ↓ pwt ↑   pwt ↓   pwt ↑
+               Dundee 8.0    19.6 269.5 -20.3* 50.5 26.6*    497.4 125.4**
+               NS     117.3 142.3 242.5 93.0*  312.6 95.8*   -123.9* 50.6**
+               Brown 35.2 -61.0 327.3 5290.2** 17.3 5290.2** 655.0* 0.0**
+
+Table 13: Given words with decreasing (and increasing) probability, the corresponding ∆MSE (pwt ↓) (and
+∆MSE (pwt ↑)) measurement for both single-token words (#=1) and multiple-token words (#>1) for GPT-2 small on
+three corpora. Numbers marked with ∗ indicate subsets with insufficient (less than 1%) data. Numbers marked with
+∗∗ indicate subsets with super insufficient (around or less than 0.1%) data.
+
+
+
+
+                                                       9619
+                                                        22
+

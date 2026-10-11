@@ -1,0 +1,1257 @@
+        Rolling the DICE on Idiomaticity: How LLMs Fail to Grasp Context
+
+                        Maggie Mi1 Aline Villavicencio1,2 Nafise Sadat Moosavi1
+                              1
+                                University of Sheffield 2 University of Exeter
+                       zmi1@sheffield.ac.uk a.villavicencio@exeter.ac.uk
+                                     n.s.moosavi@sheffield.ac.uk
+
+
+
+
+                          Abstract                                    Additionally, some of these expressions are am-
+                                                                  biguous, “potentially idiomatic expressions" (PIEs)
+        Human processing of idioms heavily depends                that can be interpreted either non-compositionally
+        on interpreting the surrounding context in                (figuratively or idiomatically) or compositionally
+        which they appear. While large language mod-
+                                                                  (literally), depending on the context in which they
+        els (LLMs) have achieved impressive perfor-
+        mance on idiomaticity detection benchmarks,               appear. Accurately identifying the meaning of a
+        this success may be driven by reasoning short-            PIE often depends on its context and is essential
+        cuts present in existing datasets. To address             for numerous downstream applications, such as
+        this, we introduce a novel, controlled con-               machine translation (Dankers et al., 2022; Barreiro
+        trastive dataset (DICE) specifically designed             et al., 2013; Salton et al., 2014; Fadaee et al., 2018),
+        to assess whether LLMs can effectively lever-             sentiment analysis (Williams et al., 2015; Liu et al.,
+        age context to disambiguate idiomatic mean-
+                                                                  2017), and automatic spelling correction (Horbach
+        ings. Furthermore, we investigate the influence
+        of collocational frequency and sentence prob-
+                                                                  et al., 2016). Beyond these applications, under-
+        ability—proxies for human processing known                standing idiomatic expressions in context is also
+        to affect idiom resolution—on model perfor-               crucial to grasp the underlying meaning of the text.
+        mance. Our results show that LLMs frequently                  Existing datasets that feature expressions with
+        fail to resolve idiomaticity when it depends              both literal and idiomatic usages often fail to rigor-
+        on contextual understanding, and they perform             ously examine the role of context in disambiguating
+        better on sentences deemed more likely by the             meaning. This shortcoming arises because the lit-
+        model. Additionally, idiom frequency influ-
+                                                                  eral meanings in such datasets typically result from
+        ences performance but does not guarantee ac-
+        curate interpretation. Our findings emphasize             syntactic modifications or semantic shifts, which in-
+        the limitations of current models in grasping             herently disrupt the idiomaticity of the expression.
+        contextual meaning and highlight the need for             In fact, these changes in form have been deliber-
+        more context-sensitive evaluation.                        ately used as signals to disentangle and differentiate
+              https://github.com/mi-m1/dice
+                                                                  literal from figurative meaning (Fazly et al., 2009).
+                                                                  For example, passivisation (2) or modification to
+   1    Introduction                                              the expression (3) often strip the expression of its
+                                                                  idiomatic meaning, as shown in comparison to the
+   Idiomatic expressions (IEs) are strange birds whose            idiomatic usage in (1) (Jackendoff, 1997; Gibbs and
+   meaning may not be straightforwardly related to                Gonzales, 1985; Langlotz, 2006; Kyriacou et al.,
+   the meaning of the component words in isolation.               2020)1 .
+   For example, proficient English speakers under-
+   stand “kick the bucket” not as “striking a metal               (1)       He kicked the bucket.
+   container”, but as “to die”. Estimates suggest that            (2)       The bucket was kicked by him.
+   there are 25,000 fixed expressions in English alone            (3)       He kicked the tin bucket angrily.
+   (Wèinreich, 1969), and a similar estimate is quoted
+   for French (Gross, 1982). Notably, this figure is                Consequently, this allows models to exploit
+   comparable to the order of magnitude of individual             surface-level differences, such as changes in gram-
+   words in the lexicon (Jackendoff, 1997). This sug-                1
+                                                                       “Kick the bucket” is a classic example of a rigid idiom,
+   gests that idioms are not mere linguistic curiosities          but expressions vary in flexibility; some can better tolerate
+   but fundamental components of language.                        changes without losing their idiomatic meaning than others.
+
+                                                             7314
+Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pages 7314–7332
+                            July 27 - August 1, 2025 ©2025 Association for Computational Linguistics
+matical structure or insertions, as shortcuts for de-   2   Related Works
+termining literalness, rather than relying on their
+                                                        Idiomaticity Detection. The task of idiomaticity
+understanding of idiomaticity in context as the task
+                                                        sense disambiguation (ISD), or idiomaticity detec-
+intends. This undermines the evaluation’s effective-
+                                                        tion, involves evaluating whether an expression
+ness by encouraging models to use superficial cues
+                                                        is used literally or figuratively in a sentence (Liu
+instead of deeper contextual comprehension.
+                                                        and Hwa, 2018; Salehi et al., 2014; Senaldi et al.,
+   In this paper, we address this gap by introducing    2016; Gharbieh et al., 2016). This task is typically
+DICE (Dataset for Idiomatic Contrastive Evalua-         framed as binary classification. While large lan-
+tion), a benchmark designed to evaluate the abil-       guage models have achieved strong performance
+ity of LLMs to interpret idiomatic expressions in       on existing ISD benchmarks (Phelps et al., 2024;
+context. We focus on idioms, as these figurative ex-    Zeng and Bhat, 2021), it remains unclear whether
+pressions may serve as key indicators of a model’s      this reflects true contextual understanding or re-
+linguistic understanding. Given the possibility of a    liance on memorized surface forms (Garcia et al.,
+predominant sense, DICE presents idiomatic ex-          2021b). Given the crucial role of context in resolv-
+pressions in both literal and figurative contexts       ing idiomaticity, it is essential to evaluate whether
+and challenges models to rely on context for the        models are genuinely interpreting surrounding text
+correct interpretation. This contrastive evaluation     or simply exploiting distributional cues.
+forces models to distinguish between meanings
+based solely on context, preventing them from rely-     Existing Datasets. The biggest dataset for
+ing on memorized idioms. We hypothesize that if         idiomatic sense disambiguation is MAGPIE
+models do not depend on memorization, they will         (Haagsma et al., 2020). MAGPIE contains a to-
+perform equally well in both senses of a PIE.           tal of 56,622 PIE instances, across 1,756 idioms.
+                                                        However, a large amount of deviation of the form
+   Moreover, in human language processing, fac-
+                                                        of an expression was allowed when MAGPIE was
+tors such as frequency (Swinney and Cutler,
+                                                        curated. As a result, most of the literal uses of PIEs
+1979) and familiarity (Nippold and Rudzinski,
+                                                        involve modifications to the form of the expres-
+1993), alongside context (Estill and Kemper, 1982;
+                                                        sion (similar to the example in § 1). Other large
+Gibbs Jr et al., 1989; Gibbs and Nayak, 1989), are
+                                                        datasets targeting various types of IEs have been
+known to influence idiom comprehension and pro-
+                                                        released: The VNC-Tokens dataset focusing on
+cessing speed (Tabossi et al., 2009). We investigate
+                                                        verb-noun combinations (Cook et al., 2008), IDIX
+whether similar effects hold for language models.
+                                                        on verb-noun phrase or verb-prepositional phrase
+Specifically, beyond contextual understanding, we
+                                                        expressions (Sporleder et al., 2010). SemEval-2013
+examine the influence of a language-intrinsic fea-
+                                                        has unrestricted expressions (Korkontzelos et al.,
+ture (expression frequency) and a model-intrinsic
+                                                        2013), AStitchInLanguageModels contains noun
+feature (sentence likelihood) on model perfor-
+                                                        compounds (Tayyar Madabushi et al., 2021) and
+mance.
+                                                        more recently, IdioTS contains a mixture of expres-
+                                                        sions changed and unchanged to support the literal
+Contributions (1) We present DICE, a compre-            meaning (De Luca Fornaciari et al., 2024).
+hensive and robust evaluation dataset, containing          To address these problems: (1) we propose a
+PIEs that occur in the same grammatical form            novel evaluation set (DICE), which strictly con-
+across both figurative and literal contexts. (2)        trols the form of idiomatic expressions. This design
+Through fine-grained evaluations, we find that mod-     eliminates the possibility that models rely on gram-
+els struggle to use context for idiomaticity process-   matical variations for idiomaticity disambiguation.
+ing. (3) Based on frequency estimates, we find          By maintaining consistent forms across literal and
+that frequency is not a “free lunch”: whilst highly     figurative contexts, DICE ensures that the chal-
+frequent idioms may be more likely to be disam-         lenge lies in understanding contextual nuances,
+biguated correctly, there is a trade-off in model       thereby providing a more accurate assessment of
+performance between literal and figurative settings.    a model’s idiomatic comprehension. (2) Existing
+(4) For models that demonstrate some capacity for       datasets typically focus on a single type of expres-
+idiomatic understanding, we observe a strong rela-      sion. We address this limitation by including both
+tionship between the likelihood of the contextual       phrasal idioms and noun compounds to provide
+sentence and idiomaticity detection performance.        broader coverage of idiomatic phenomena.
+                                                    7315
+Contrastive Evaluation. This evaluation
+paradigm involves comparing model outputs
+on carefully constructed input pairs that differ
+in minimal, controlled ways, typically along
+a dimension relevant to a specific linguistic
+phenomenon (Prasad et al., 2019; Garcia et al.,
+2021a). Such comparisons have been found to be
+particularly effective at isolating specific linguistic
+competencies or revealing systematic weaknesses
+in generalization and robustness (Linzen et al.,
+2016; Sennrich, 2017; Robertson, 2019). Our
+work adopts this approach to assess contex-
+tual comprehension in idiomaticity detection.
+Specifically, DICE presents potentially idiomatic
+expressions in both literal and figurative uses while
+holding surface form constant. This setup requires
+models to rely entirely on surrounding context to
+disambiguate meaning, eliminating the possibility         Figure 1: Overview of the DICE curation process. A list
+of exploiting shallow lexical or syntactic cues.          of idioms is extracted from existing datasets, and GPT-4
+                                                          is prompted to generate sentences using each idiom in a
+                                                          literal context. Experts annotate these to form the literal
+                                                          subset. Figurative examples are drawn directly from
+Memorization and Context. Pretrained lan-                 existing datasets.
+guage models tend to handle IEs mainly through
+memorization of stored expressions and token dis-
+tributions rather than reasoning about the mean-          3   DICE: Dataset for Idiomatic
+ing in context. This reliance on memorization be-             Contrastive Evaluation
+comes evident when models face novel noun com-
+pounds. For instance, Li et al. (2022) found that         We now describe the construction of DICE. Fig-
+while GPT-3’s interpretations of novel compounds          ure 1 shows an overview of the curation process.
+closely matched human responses, its performance
+                                                          Expression Selection. To build our dataset, we
+faltered when tasked with interpreting nonsensical
+                                                          compiled a comprehensive list of idiomatic ex-
+strings, which suggests limited contextual flexibil-
+                                                          pressions, focusing on both phrasal idioms and
+ity.
+                                                          noun compound idioms. For phrasal idioms, we
+   Similarly, Coil and Shwartz (2023) explored            identified overlapping expressions from two estab-
+noun compound interpretation using GPT-3 and              lished resources: MAGPIE (Haagsma et al., 2020)
+found that, although the model performs well with         and SLIDE (Jochim et al., 2018). For noun com-
+common noun compounds, its performance drops              pound idioms, we selected idiomatic expressions
+significantly with novel compounds. This suggests         that appeared in both the NCTTI dataset (Garcia
+that the model relies on pre-existing knowledge for       et al., 2021b) and AStitchInLanguageModels (Tay-
+familiar compounds, but struggles when required to        yar Madabushi et al., 2021). We specifically fo-
+reason about unseen combinations. Supporting this         cused on idiomatic noun compounds, as the mean-
+view, Cheng and Bhat (2024) found that models             ing of these expressions cannot be directly derived
+sometimes perform better on idiomatic reasoning           from the meanings of their individual words.
+tasks when contextual information is removed, im-            We excluded compositional and partially compo-
+plying that context may occasionally mislead rather       sitional compounds, as these tend to have dominant
+than assist the model. Sun et al. (2021) further          literal meanings that are difficult to override in
+showed that LLMs tend to use context only when            context (e.g., “skin tone” or “noble gas”). Such ex-
+the relevant information is explicitly present. These     pressions do not present the same interpretive chal-
+findings collectively raise questions about whether       lenge for models, as their meanings are more di-
+current models truly engage in contextual reason-         rectly tied to their components. By focusing solely
+ing or primarily depend on surface-level cues.            on non-compositional idioms, we ensure that the
+                                                      7316
+                                            Counts       Examples and Remarks
+ Number of Sentences (Literal)              1033         Carpenters recommend not to sand against the grain as it can damage the wood.
+ Number of Sentences (Figurative)           1033         Out of duty she had caved in, but it still went against the grain. (MAGPIE)
+ Total no. of sentences                     2066         -
+ Number of Unique Idioms                    402          -
+ Total Number of Expressions                402          103 noun compounds + 299 phrasal expressions
+ Average length of sentences (literal)      15.4 words   -
+ Average length of sentences (figurative)   28.1 words   -
+
+                                      Table 1: Summary statistics of the DICE dataset.
+
+
+dataset tests the model’s ability to interpret figura-                inter-rater agreement was high, as indicated by a
+tive language based on context rather than relying                    Cohen’s kappa coefficient of 0.95.
+on straightforward lexical composition. This se-                         The figurative counterparts of these sentences
+lection process resulted in a total of 783 unique                     were sourced from MAGPIE and AStitchInLan-
+idiomatic expressions, comprising 680 phrasal id-                     guageModels. We ensure that the same number
+ioms and 103 idiomatic noun compounds.                                of variants is matched between the figurative and
+                                                                      literal settings. In other words, if we have three
+Sentence Generation. We used GPT-4 (OpenAI                            sentences containing “all hell broke loose” in lit-
+et al., 2024) to generate sentences where a given                     eral contexts, we would extract an equal number of
+idiom appears in a literal context, intentionally sup-                sentences containing the idiom from the figurative
+pressing its figurative interpretation. The specific                  datasets. This ensures that the dataset is balanced
+prompting setup we used for sentence generation                       with regards to the idiomatic and literal interpreta-
+is provided in Appendix C. To determine the best                      tion of each expression.
+model for sentence generation, we piloted the pro-
+cess using three versions: GPT-4o, GPT-4, and                         3.1    Dataset Statistics
+GPT-3.5. The models were prompted to produce                          In total, DICE consists of 2,066 sentences, featur-
+three different sentences, where the form of the                      ing 402 expressions. A summary of its statistics
+idiom must be kept the same. Overall, we found                        is presented in Table 1. In this paper, we only use
+GPT-4 to perform the best in generating sentences                     the subset whose literal meaning was confirmed by
+where the figurative interpretation is suppressed.                    the annotators. However, we release the complete
+Our preference for GPT-4 aligns with the findings                     dataset, along with an additional subset that can
+of Phelps et al. (2024), which demonstrate that off-                  serve as a resource for additional analyses or for
+the-shelf GPT-4 possesses relatively stronger id-                     creating even more challenging evaluation settings
+iomaticity knowledge as it performed consistently                     (see Appendix B).
+well across idiomaticity detection tasks compared
+to other off-the-shelf LLMs. In total, we obtained                    4     How Well Do LLMs Use Context for
+2,349 sentences from GPT-4.                                                 Idiomaticity?
+Expert Annotations. We recruited four experts                         Using DICE, we evaluated the ability of various
+with at least three years of university-level expe-                   language models to differentiate between literal
+rience in Linguistics, compensated at a rate of                       and figurative uses of idioms. Replicating the Id-
+£15/hour. The annotators reviewed each sentence                       iomaticity Sense Disambiguation (ISD) task, we
+and decided whether to accept it unconditionally,                     prompted each model with a sentence containing
+skip it, or reject it if the idiom’s figurative meaning               an idiom and asked it to classify the idiom as ei-
+could not be fully suppressed. In cases of rejec-                     ther “literal” or “figurative” based on its usage in
+tion, annotators provided reasons such as ambigu-                     context.
+ity, figurative interpretation, change of form, or
+other issues. We provide information about this                       4.1    Experimental Setup.
+subset in Appendix B along with the briefing given                    Models. We evalute 13 models on the task of
+to annotators in Appendix D. If an expression was                     idiomatic sense disambiguation. These models
+skipped, a second annotator reviewed it to confirm                    are: GPT-4o, GPT-3.5-Turbo (Brown et al., 2020),
+if it should be discarded. Examples of sentences                      FLAN-T5 models in the XXL (11B), XL (3B),
+for each category are presented in Table 3. The                       Large (780M), Small (80M) sizes (Chung et al.,
+                                                                 7317
+2023), Llama 2 (7B, 13B, 70B) (Touvron et al.,               of a given expression as “literal”, it earns a
+2023), and Llama 3 models (incl. Llama 3.1 (405B,            point for that expression. Similarly, the model
+8B, 70B) (Dubey et al., 2024). Additionally, we              is rewarded if it correctly identifies all figura-
+evaluated GPT-4 (OpenAI et al., 2024), which was             tive instances of an expression as “idiomatic”.
+used to generate the sentences. The computational            Let E be the set of all expressions. Let Le
+resources used are reported in Appendix E.                   and Fe be the literal and figurative instances of
+                                                             expression e, respectively.
+Prompts. We used three prompt variations (Ta-
+ble 5 in Appendix E.2) that are semantically equiv-                            (
+                                                                                1   if ∀i ∈ Le , ŷi = yi
+alent but differ in surface form. This allows us                     Celit =                                (3)
+to evaluate the robustness of model predictions to                              0   otherwise
+prompt phrasing. We report the mean and stan-                               (
+dard deviation across these prompts to assess per-                           1 if ∀i ∈ Fe , ŷi = yi
+                                                                    Cefig =                                 (4)
+formance stability under variation. We also run                              0 otherwise
+experiments in a few-shot setting, where an anno-
+tated example (shown in the middle part of Table 5)
+is prepended to each prompt.                                                               1 X lit           
+                                                             Lenient Consistency =                Ce + Cefig
+                                                                                         2|E|
+                                                                                              e∈E
+Evaluation. To thoroughly evaluate the models’                                                           (5)
+performance, we employed three distinct evalua-
+                                                             Strict Consistency: This is the most stringent
+tion settings.
+                                                             evaluation. The model had to correctly identify
+   Accuracy includes two sub evaluations:
+                                                             all variations of an expression in both figurative
+ • Figurative Accuracy: We compute the accu-                 and literal contexts to be rewarded. This set-
+   racy of each model in correctly identifying the           ting assumes that a truly understanding model
+   figurative uses of expressions within the figu-           should correctly classify an idiom regardless of
+   rative subset. Let F be the set of all figurative         its context. Let Ve be the set of all variations of
+   instances, yi and ŷi denote the true and pre-            expression e.
+   dicted labels, respectively.
+                                                                          (
+                          1 X                                              1        if ∀i ∈ Ve , ŷi = yi
+           Accuracyfig =      1(ŷi = yi )          (1)              Se =                                   (6)
+                         |F |                                              0        otherwise
+                              i∈F
+
+   where                                                                                       1 X
+                                                                    Strict Consistency =           Se       (7)
+                     (                                                                        |E|
+                                                                                                   e∈E
+                      1      if condition is true
+      1(condition) =                                         By employing these evaluation settings, we
+                      0      otherwise
+                                                             aim to provide a comprehensive assessment of
+ • Literal Accuracy: We assessed the accuracy                the models’ capabilities in understanding and
+   of the models in correctly identifying the literal        differentiating idiomatic expressions. This ap-
+   uses of expressions within the literal subset.            proach helps us determine whether the models
+   These evaluations measure the models’ abil-               rely on contextual understanding or memorized
+   ity to recognize idiomatic and literal meanings           patterns to perform the task.
+   based on context. Let L be the set of all literal
+                                                             4.2   Results
+   instances.
+                                                             Table 2 presents the results of model perfor-
+                          1 X                                mances on our evaluation set. It is important
+           Accuracylit =      1(ŷi = yi )          (2)
+                         |L|
+                              i∈L
+                                                             to note that, GPT-4 was used to generate the
+                                                             sentences for DICE, so we do not consider its
+   Lenient Consistency: This metric rewards the              performance to be revealing.
+   model for consistently classifying all instances
+   of an expression as either literal or figurative          Degradation across evaluation levels. As
+   within a specific type. For example, if the               expected, performance declines from Accuracy
+   model correctly classifies all literal variations         to Lenient Consistency, and further to Strict
+                                                      7318
+                                         Accuracy                                   Lenient Consistency                  Strict Consistency
+ Model
+
+                           Figurative         Literal       Overall         Figurative         Literal        Overall         Both Settings
+                                                             Z ERO - SHOT
+ GPT-4o                  87.05 ± 3.62    87.30 ± 2.98   84.33 ± 4.44   69.49 ± 11.71      71.06 ± 6.68    70.32 ± 7.11         48.59 ± 9.75
+ GPT-3.5 Turbo           79.05 ± 5.01   70.02 ± 12.72   75.54 ± 7.81    82.59 ± 9.17     44.36 ± 22.28    63.47 ± 7.61        32.84 ± 15.81
+ Flan-T5-XXL (11B)       77.18 ± 1.40    74.91 ± 8.35   76.40 ± 4.49   63.93 ± 13.71     58.79 ± 23.16    61.36 ± 4.73         32.92 ± 6.80
+ Flan-T5-XL (3B)         70.48 ± 3.56   33.94 ± 26.91   59.65 ± 8.19    91.13 ± 6.97     13.02 ± 11.24    52.07 ± 3.58          9.95 ± 8.88
+ Flan-T5-Large (780M)    66.63 ± 0.10     3.45 ± 4.72   50.42 ± 0.53    97.68 ± 3.40       0.58 ± 0.80    49.13 ± 1.30          0.58 ± 0.80
+ Flan-T5-Small (80M)      0.51 ± 0.59    66.72 ± 0.07   50.13 ± 0.15     0.00 ± 0.00     100.00 ± 0.00    50.00 ± 0.00          0.00 ± 0.00
+ Llama 3.1 (405B)        88.63 ± 2.36    88.25 ± 3.93   88.45 ± 3.10    78.52 ± 5.61     80.02 ± 12.43    79.27 ± 3.46         60.36 ± 6.61
+ Llama 3 (70B)           87.72 ± 4.63    86.13 ± 7.10   87.00 ± 5.73    81.84 ± 4.00     72.64 ± 16.12    77.24 ± 7.45        57.55 ± 12.41
+ Llama 3 (8B)            79.27 ± 1.97    74.01 ± 2.79   76.91 ± 2.25    77.86 ± 5.18      48.76 ± 3.37    63.31 ± 1.43         33.83 ± 2.60
+ Llama 2 (70B)           76.28 ± 4.39   56.64 ± 17.13   69.62 ± 7.82    93.20 ± 4.75     24.54 ± 16.89    59.12 ± 5.78        21.81 ± 13.51
+ Llama 2 (13B)           68.99 ± 1.39    36.09 ± 3.85   58.26 ± 1.96    85.41 ± 3.56       8.37 ± 3.34    46.93 ± 2.30          5.64 ± 2.00
+ Llama 2 (7B)           55.51 ± 19.54   31.97 ± 24.25   51.34 ± 1.55   59.87 ± 46.26     18.08 ± 29.16    38.97 ± 8.59          1.66 ± 1.37
+ GPT-4                   88.56 ± 2.03    88.63 ± 2.08   88.48 ± 2.18    79.02 ± 3.11      78.03 ± 4.60    78.52 ± 2.95         59.62 ± 4.67
+                                                              O NE - SHOT
+ GPT-4o                  89.43 ± 1.23    90.15 ± 1.71   89.72 ± 1.45    74.63 ± 1.99      87.40 ± 5.81    81.01 ± 1.93         63.52 ± 3.15
+ GPT-3.5 Turbo           79.41 ± 4.19   72.69 ± 10.87   76.70 ± 6.54    78.44 ± 8.80     49.42 ± 18.96    63.93 ± 5.92        34.16 ± 12.19
+ Flan-T5-XXL (11B)      10.20 ± 15.69    67.90 ± 1.91   52.79 ± 4.34     1.58 ± 2.52      99.25 ± 1.29    50.41 ± 0.61          1.49 ± 2.37
+ Flan-T5-XL (3B)          0.64 ± 0.80    66.71 ± 0.11   50.13 ± 0.22     0.08 ± 0.14      99.83 ± 0.29    49.96 ± 0.19          0.08 ± 0.14
+ Flan-T5-Large (780M)     3.28 ± 3.64    66.27 ± 0.45   50.00 ± 0.00     0.66 ± 0.76      96.93 ± 3.73    48.80 ± 1.48          0.00 ± 0.00
+ Flan-T5-Small (80M)    45.23 ± 39.19   35.55 ± 33.55   53.03 ± 5.25   60.78 ± 53.37     37.31 ± 54.62    49.05 ± 1.65          2.40 ± 4.16
+ Llama 3.1 (405B)        89.57 ± 1.80    89.54 ± 2.54   89.53 ± 2.17    79.10 ± 3.26      82.01 ± 7.85    80.56 ± 2.56         63.27 ± 4.66
+ Llama 3 (70B)           87.75 ± 3.76    86.97 ± 5.64   87.27 ± 4.61    78.52 ± 3.59     75.62 ± 14.01    77.07 ± 6.00        57.55 ± 10.22
+ Llama 3 (8B)            80.32 ± 5.33   73.81 ± 11.40   77.59 ± 7.62    79.35 ± 1.08     48.01 ± 15.70    63.68 ± 7.34        34.91 ± 13.59
+ Llama 2 (70B)           70.40 ± 1.19    31.44 ± 6.18   58.65 ± 2.28    96.52 ± 0.66       7.55 ± 2.75    52.03 ± 1.50          6.72 ± 2.63
+ Llama 2 (13B)           70.64 ± 1.15    34.20 ± 6.92   59.36 ± 2.45    94.94 ± 0.52       9.54 ± 4.14    52.24 ± 1.83          8.29 ± 3.11
+ Llama 2 (7B)            70.26 ± 3.14   42.18 ± 26.31   61.21 ± 9.28   80.76 ± 15.43     20.73 ± 22.25    50.75 ± 3.46        11.69 ± 10.42
+ GPT-4                   88.52 ± 1.49    88.95 ± 2.09   88.42 ± 1.73    78.44 ± 0.76      77.94 ± 5.84    78.19 ± 2.63         58.87 ± 4.86
+
+
+Table 2: Results are reported as mean ± standard deviation over 3 different prompt variants, under zero-shot (top)
+and one-shot (bottom) conditions. GPT-4 is shown separately, as it generated the evaluation sentences.
+
+
+    Consistency. The results from the strictest eval-                       all contextual sentences than in the literal set-
+    uation show that, only three models—Llama                               ting. We observe the largest aggregate drop for
+    3.1, Llama 3, and GPT4o—achieve an accu-                                GPT-4o which indicates that GPT-4o’s high per-
+    racy above 40%, with 60.36%, 57.55%, and                                formance (evidenced by a overall accuracy of
+    48.59% respectively. This pattern highlights                            84.33 ± 4.44 in zershot evaluations) stems from
+    that, while the current LLMs can correctly clas-                        its consistency across a broad range of idioms.
+    sify individual instances, they often fail to do so                     However, the model lacks a deep understand-
+    consistently for both literal and figurative uses                       ing of these idioms, and it is susceptible to
+    of the same idiomatic expression. Compound-                             variations. This is illustrated by an overall Le-
+    ing this, we observe substantial standard devi-                         nient Consistency score of 70.32 ± 7.1, which
+    ations across prompts, particularly for smaller                         indicates that the model can only accurately
+    models. If the models truly relied on contex-                           interpret a subset of idioms consistently across
+    tual understanding, we would expect them to                             different texts. Llama 3.1 is the model with the
+    perform consistently across varying levels of                           least performance difference across the two sub-
+    consistency and remain robust to prompt vari-                           sets, indicating a more balanced understanding
+    ations; however, the results suggest that the                           of both figurative and literal contexts.
+    performance is highly inconsistent, and thus,
+    models are not effectively leveraging context.                          Mixed impact of one-shot prompting. Intro-
+                                                                            ducing an example improves performance for
+    Preference towards figurative. The general                              some models—most notably GPT-4o, which
+    trend for based on lenient consistency aligns                           shows gains across all metrics and achieves
+    with our observation on base accuracy: mod-                             the highest strict consistency (63.5%). How-
+    els show a preference for figurative interpreta-                        ever, this improvement is not consistent: for
+    tions when encountering an idiom, as there is                           many models, particularly the Flan-T5 variants,
+    a higher proportion of idioms that the models                           one-shot prompting offers little benefit or even
+    can consistently predict to be figurative across                        degrades performance. This likely stems from
+                                                               7319
+a task-specific issue: instead of clarifying the
+                                                                                  175
+task requirements, showing examples where
+
+
+
+
+                                                          Number of Expressions
+idiomatic expressions appear literally clashes                                    150
+with the model’s prior expectations. Conse-                                       125
+quently, the one-shot example creates uncer-                                      100
+tainty instead of enhancing contextual under-                                     75
+standing.                                                                         50
+                                                                                  25
+Summary. While larger models like GPT-4o
+and Llama 3.1 (405B) show stronger overall                                         0
+                                                                                        0    00    000    000    000
+performance, the results reveal that idiomaticity                                           500   100    150    200
+disambiguation, especially under consistency-                                               Frequency Ranges
+based evaluation, remains a challenging task.
+The substantial drop from accuracy to strict         Figure 2: Frequency distribution of idioms in DICE
+consistency, coupled with high variation across      below 200,000 counts.
+prompts, suggests that models still rely heavily
+on shallow heuristics rather than robust contex-
+                                                        identical to the pretraining datasets of LLMs,
+tual understanding.
+                                                        it provides a reasonable proxy for estimating
+                                                        expression frequency, as high-frequency terms
+5 Impact of Frequency and Sentence
+                                                        in enTenTen are likely to appear frequently in
+Likelihood on Model Performance
+                                                        similar web-based pretraining corpora. This
+This section examines how idiom frequency               analysis helps us understand whether model
+and sentence likelihood impact LLM perfor-              performance is affected by how often they may
+mance. In human processing, idiom frequency             have encountered each expression during train-
+and familiarity, alongside context, influence           ing. See Appendix F for further details on how
+comprehension (Cronk et al., 1993; Levorato             we obtain frequency counts.
+and Cacciari, 1992; Schweigert, 1986; Brys-
+baert et al., 2018). Similarly, in LLMs, expres-        5.2                       Likelihood Scores
+sion frequency and sentence probability may             LLMs are trained to maximize the likelihood
+shape idiom detection. Exploring these factors          of their training data, learning to assign higher
+helps clarify how language-intrinsic and model-         probabilities to sequences that resemble those
+intrinsic features affect performance.                  seen during training. At inference time, these
+As shown in Figure 2, the frequency of idioms           models can assign likelihood scores to input
+in DICE varies, with the majority of expres-            sentences, reflecting how typical or expected
+sions occurring fewer than 200,000 times. The           a sentence appears under the model’s inter-
+highest concentration of idioms falls within the        nal distribution. Recent studies have shown
+0 to 100,000 range. To focus on the most rele-          that models tend to perform better, or assign
+vant portion of the dataset, we limit our analysis      higher evaluation scores, to sentences they
+to this range to avoid skewed results.                  deem more likely, regardless of the specific
+                                                        target task or evaluation criteria (Ohi et al.,
+5.1 Frequency Estimation                                2024; McCoy et al., 2024). In our setting, we
+We use the English Web Corpus (enTenTen)                use sentence-level likelihood as a proxy to test
+(Jakubíček et al., 2013) to approximate the fre-       whether model performance on idiomaticity dis-
+quency of idioms in our dataset. This was for           ambiguation is influenced by how probable a
+two key reasons: (1) it is parsed and tagged            sentence appears to the model. Specifically, we
+which allows us to query all morphological              ask whether models are more accurate on DICE
+forms of the expressions using lemmas, en-              when the input context has high likelihood, po-
+suring comprehensive frequency counts, and              tentially indicating a preference for familiar or
+(2) its large scale 52 billion words across di-         prototypical constructions over true contextual
+verse genres offers a robust generalization of          reasoning.
+natural language usage. While enTenTen is not           To analyze the relationship between sentence
+                                                 7320
+                   1.0                                                                             1.0                                                                                  1.0
+
+                   0.8                                                                             0.8                                                                                  0.8
+
+
+
+
+Performance (F1)                                                                Performance (F1)                                                                     Performance (F1)
+                   0.6                                                                             0.6                                                                                  0.6
+
+                   0.4                                                                             0.4                                                                                  0.4
+
+                   0.2                                        Figurative                           0.2                                             Figurative                           0.2                       Figurative
+                                                              Literal                                                                              Literal                                                        Literal
+                   0.0                                        Overall                              0.0                                             Overall                              0.0                       Overall
+                         0     25000 50000 75000 100000                                                  0        25000 50000 75000 100000                                                    0   25000 50000 75000 100000
+                                  Frequency                                                                          Frequency                                                                        Frequency
+
+                             Figure 3: Frequency results of GPT-3.5 Turbo, Llama 2 (70B), Flan-T5 XL (left to right).
+
+                                                      1.0                                                                                   1.0
+
+                                                      0.8                                                                                   0.8
+
+
+
+
+                                   Performance (F1)                                                                      Performance (F1)
+                                                      0.6                                                                                   0.6
+
+                                                      0.4                                                                                   0.4
+
+                                                      0.2          Figurative                                                               0.2             Figurative
+                                                                   Literal                                                                                  Literal
+                                                      0.0          Overall                                                                  0.0             Overall
+                                                            150    125       100                   75        50     25                              20          15                       10       5      0
+                                                                           Log Likelihood                                                                        Log Likelihood
+
+                                 Figure 4: Likelihood results from Llama 3 (8B) and Flan-T5 XXL (left to right).
+
+        likelihood and model performance, we com-                                                                                                 Turbo, Llama 2 (70B) and Flan-T5 XL in Fig-
+        pute the likelihood of each sentence in DICE                                                                                              ure 3. For the likelihood analysis, we present
+        using the standard language modeling formu-                                                                                               the results for Llama 3 (8B) and Flan-T5 XXL
+        lation. For a sentence y = [y (1) , . . . , y (T ) ], the                                                                                 in Figure 4. Results for the other models can
+        likelihood is given by:                                                                                                                   be found in Appendix H. These models were
+                                                                                                                                                  chosen as they are representative of the general
+                                                        T
+                                                        Y                                                                                         patterns observed across all the models evalu-
+                               P (y) =                        P (y (t) | y (<t) ),
+                                                                                                                                                  ated.
+                                                        t=1
+
+       where y (<t) denotes the preceding tokens. In
+                                                                                                                                              Frequency is not a free lunch. In general,
+       practice, we compute the log-likelihood (nega-
+                                                                                                                                              we do not observe a consistent pattern that ac-
+       tive cross-entropy loss) for each sentence and
+                                                                                                                                              curacy correlates with expression frequency,
+       use it as a proxy for model-assigned likelihood
+                                                                                                                                              suggesting that while models may have encoun-
+       (Appendix G).
+                                                                                                                                              tered certain expressions frequently during pre-
+        5.3 Results                                                                                                                           training, they may still struggle to properly in-
+                                                                                                                                              terpret their idiomaticity in new contexts. No-
+       To explore the impact of these two features on                                                                                         tably, this trend was observed in 9 out of the 13
+       model performance, we fit a linear regression                                                                                          models we analyzed. Additionally, as the fre-
+       model, with idiom frequency/likelihood as the                                                                                          quency of an expression increases, the models
+       independent variable and the model’s accuracy                                                                                          tend to perform better at identifying its literal
+       as the dependent variable. This approach al-                                                                                           occurrences, but their accuracy in recognizing
+       lows us to estimate how these two variations                                                                                           idiomatic uses declines. One possible explana-
+       influence the ability of language models to dis-                                                                                       tion is that for high-frequency expressions, the
+       tinguish between literal and idiomatic uses.                                                                                           model may have seen both literal and idiomatic
+       We present the frequency results for GPT-3.5                                                                                           usages during pretraining. However, due to
+                                                                                                                     7321
+limited contextual understanding, the model              better capture contextual nuances.
+may default to interpreting these expressions            We also investigate the effects of expression
+literally more often, regardless of the actual           frequency and sentence likelihood. While fre-
+usage; however, this hypothesis requires fur-            quency can correlate with performance in some
+ther investigation. The contrasting relationship         settings, it does not guarantee accurate inter-
+between the two settings explains why no over-           pretation, highlighting that surface-level expo-
+all correlation is observed between accuracy             sure is not a substitute for contextual reasoning.
+and frequency. Therefore, frequency does not             Similarly, while some models tend to perform
+guarantee performance.                                   better on sentences with higher likelihood, this
+                                                         correlation is inconsistent across models. Over-
+Likelihood ̸= Understanding. Our analy-                  all, our findings highlight the limitations of
+sis of sentence likelihoods reveals contrasting          existing models in comprehending idiomatic
+trends across model families. In the case of             language and highlight the need for evaluation
+the Llama models, performance correlates pos-            settings, and model architectures, that empha-
+itively with sentence probability. In both set-          size deep contextual understanding over mem-
+tings, the model perform better on sentences on          orization or distributional familiarity.
+which it has a higher likelihood. This is particu-
+larly the case on the literal subsets, as indicated      7   Limitations
+by Llama 2 (13B) and Llama 3 (8B). For the
+Flan-T5 models, we see a negative or negligible          One of the limitations of our work is that some
+correlation between frequency/likelihood and             idiomatic expressions are noticeably more re-
+performance. As seen in § 4.2, Small and Large           liant on the context than others. This means that
+do not appear to have effectively utilized the           there were cases, where we could not provide
+context to learn meanings as successfully as the         a literal counterpart to the figurative interpre-
+other models. The counter-intuitive pattern ob-          tation. For example, the expression “set eyes
+served in XL and XXL models could be due to              on” has such a dominant meaning of “to see”,
+models being over-confident in their wrong pre-          that the annotators believed to be impossible
+diction. This leads to situations where model            to override. In these cases, we would discard
+would assign high probabilities to idiomatic             the expression. As a result, our dataset only
+sentences but performs poorly on the idiomatic-          contains a selected sample of idioms, and we
+ity detection task, where surface-level fluency          acknowledge that this idea of contrastive evalu-
+inflates likelihood scores without supporting            ation cannot necessarily be applied to all idioms
+deeper semantic resolution. These results show           in a language.
+that high likelihood does not necessarily imply          Another of the limitations of our work is that
+correct contextual understanding, especially for         we only consider English idioms. We would
+figurative language.                                     like to have extended this work to other lan-
+                                                         guages, however, this relies on the existence
+6 Conclusion                                             of idiomaticity datasets in the target languages.
+                                                         Moreover, the idea of making idioms literal
+In this work, we contribute to idiomaticity de-          might not be translatable to other languages,
+tection in NLP with several key findings. First,         where the expression’s domainant, figurative
+we introduce DICE, a challenging dataset for             meaning cannot be overridden.
+context-dependent idiom detection, where dis-
+tinguishing figurative from literal meanings re-         Acknowledgements
+lies heavily on understanding context. Second,
+we propose an evaluation framework that mea-             We thank the anonymous reviewers and
+sures both overall accuracy and strict consis-           metareviewer for their feedback on this pa-
+tency, requiring models to correctly identify            per. This work was supported by the Cen-
+all figurative and literal instances of an expres-       tre for Doctoral Training in Speech and Lan-
+sion across different contexts. Third, we show           guage Technologies (SLT) and their Applica-
+that current LLMs struggle to use context ef-            tions funded by UK Research and Innovation
+fectively, highlighting the need for models that         [grant number EP/S023062/1], UK EPSRC
+                                                  7322
+grantEP/T02450X/1, the Turing Institute Fel-             ACL 2023, pages 2698–2710, Toronto, Canada. As-
+lowship and the UniDive COST Action. We                  sociation for Computational Linguistics.
+acknowledge IT Services at The University of             Paul Cook, Afsaneh Fazly, and Suzanne Stevenson.
+                                                         2008. The vnc-tokens dataset. In Proceedings of
+Sheffield for the provision of services for High
+                                                         the LREC Workshop Towards a Shared Task for
+Performance Computing. Additional thanks                 Multiword Expressions (MWE 2008), pages 19–22.
+to our annotators for their hard work. A fur-            Citeseer.
+ther acknowledgement to Lily Zeng, Thomas                Brian C. Cronk, Susan D. Lima, and Wendy A.
+Pickard and members of the MWE Group for                 Schweigert. 1993. Idioms in sentences: Effects of
+                                                         frequency, literalness, and familiarity. Journal of
+their helpful discussions.
+                                                         Psycholinguistic Research, 22(1):59–82.
+                                                         Verna Dankers, Christopher Lucas, and Ivan Titov.
+                                                         2022. Can transformer be too compositional?
+References                                               analysing idiom processing in neural machine trans-
+                                                         lation. In Proceedings of the 60th Annual Meeting
+John Ayto. 2020. The Oxford Dictionary of Idioms.
+                                                         of the Association for Computational Linguistics
+Oxford University Press.
+                                                         (Volume 1: Long Papers), pages 3608–3626, Dublin,
+Anabela Barreiro, Johanna Monti, Brigitte Orliac,        Ireland. Association for Computational Linguistics.
+and Fernando Batista. 2013. When multiwords go
+bad in machine translation. In Proceedings of the        Francesca De Luca Fornaciari, Begoña Altuna,
+Workshop on Multi-word Units in Machine Transla-         Itziar Gonzalez-Dios, and Maite Melero. 2024. A
+tion and Translation Technologies, Nice, France.         hard nut to crack: Idiom detection with conversa-
+                                                         tional large language models. In Proceedings of the
+Steven Bird and Edward Loper. 2004. NLTK: The
+                                                         4th Workshop on Figurative Language Processing
+natural language toolkit. In Proceedings of the
+                                                         (FigLang 2024), pages 35–44, Mexico City, Mexico
+ACL Interactive Poster and Demonstration Sessions,
+                                                         (Hybrid). Association for Computational Linguis-
+pages 214–217, Barcelona, Spain. Association for
+                                                         tics.
+Computational Linguistics.
+Tom B. Brown, Benjamin Mann, Nick Ryder,                 Abhimanyu Dubey, Abhinav Jauhri, Abhinav
+Melanie Subbiah, Jared Kaplan, Prafulla Dhari-           Pandey, Abhishek Kadian, Ahmad Al-Dahle,
+wal, Arvind Neelakantan, Pranav Shyam, Girish            Aiesha Letman, Akhil Mathur, Alan Schelten,
+Sastry, Amanda Askell, Sandhini Agarwal, Ariel           Amy Yang, Angela Fan, Anirudh Goyal, An-
+Herbert-Voss, Gretchen Krueger, Tom Henighan,            thony Hartshorn, Aobo Yang, Archi Mitra, Archie
+Rewon Child, Aditya Ramesh, Daniel M. Ziegler,           Sravankumar, Artem Korenev, Arthur Hinsvark,
+Jeffrey Wu, Clemens Winter, Christopher Hesse,           Arun Rao, Aston Zhang, Aurelien Rodriguez,
+Mark Chen, Eric Sigler, Mateusz Litwin, Scott Gray,      Austen Gregerson, Ava Spataru, Baptiste Roziere,
+Benjamin Chess, Jack Clark, Christopher Berner,          Bethany Biron, Binh Tang, Bobbie Chern, Charlotte
+Sam McCandlish, Alec Radford, Ilya Sutskever,            Caucheteux, Chaya Nayak, Chloe Bi, Chris Marra,
+and Dario Amodei. 2020. Language models are              Chris McConnell, Christian Keller, Christophe
+few-shot learners. Preprint, arXiv:2005.14165.           Touret, Chunyang Wu, Corinne Wong, Cristian Can-
+                                                         ton Ferrer, Cyrus Nikolaidis, Damien Allonsius,
+Marc Brysbaert, Paweł Mandera, and Emmanuel              Daniel Song, Danielle Pintz, Danny Livshits, David
+Keuleers. 2018. The word frequency effect in word        Esiobu, Dhruv Choudhary, Dhruv Mahajan, Diego
+processing: An updated review. Current directions        Garcia-Olano, Diego Perino, Dieuwke Hupkes,
+in psychological science, 27(1):45–50.                   Egor Lakomkin, Ehab AlBadawy, Elina Lobanova,
+Kellen Cheng and Suma Bhat. 2024. No context             Emily Dinan, Eric Michael Smith, Filip Raden-
+needed: Contextual quandary in idiomatic reason-         ovic, Frank Zhang, Gabriel Synnaeve, Gabrielle
+ing with pre-trained language models. In Proceed-        Lee, Georgia Lewis Anderson, Graeme Nail, Gre-
+ings of the 2024 Conference of the North American        goire Mialon, Guan Pang, Guillem Cucurell, Hai-
+Chapter of the Association for Computational Lin-        ley Nguyen, Hannah Korevaar, Hu Xu, Hugo Tou-
+guistics: Human Language Technologies (Volume            vron, Iliyan Zarov, Imanol Arrieta Ibarra, Isabel
+1: Long Papers), pages 4863–4880, Mexico City,           Kloumann, Ishan Misra, Ivan Evtimov, Jade Copet,
+Mexico. Association for Computational Linguistics.       Jaewon Lee, Jan Geffert, Jana Vranes, Jason Park,
+John Chung, Ece Kamar, and Saleema Amershi.              Jay Mahadeokar, Jeet Shah, Jelmer van der Linde,
+2023. Increasing diversity while maintaining ac-         Jennifer Billock, Jenny Hong, Jenya Lee, Jeremy
+curacy: Text data generation with large language         Fu, Jianfeng Chi, Jianyu Huang, Jiawen Liu, Jie
+models and human interventions. In Proceedings of        Wang, Jiecao Yu, Joanna Bitton, Joe Spisak, Jong-
+the 61st Annual Meeting of the Association for Com-      soo Park, Joseph Rocca, Joshua Johnstun, Joshua
+putational Linguistics (Volume 1: Long Papers),          Saxe, Junteng Jia, Kalyan Vasuden Alwala, Kar-
+pages 575–593, Toronto, Canada. Association for          tikeya Upasani, Kate Plawiak, Ke Li, Kenneth
+Computational Linguistics.                               Heafield, Kevin Stone, Khalid El-Arini, Krithika
+Albert Coil and Vered Shwartz. 2023. From choco-         Iyer, Kshitiz Malik, Kuenley Chiu, Kunal Bhalla,
+late bunny to chocolate crocodile: Do language           Lauren Rantala-Yeary, Laurens van der Maaten,
+models understand noun compounds? In Findings            Lawrence Chen, Liang Tan, Liz Jenkins, Louis Mar-
+of the Association for Computational Linguistics:        tin, Lovish Madaan, Lubo Malo, Lukas Blecher,
+                                                  7323
+Lukas Landzaat, Luke de Oliveira, Madeline Muzzi,        Kanayet, Frank Seide, Gabriela Medina Florez,
+Mahesh Pasupuleti, Mannat Singh, Manohar Paluri,         Gabriella Schwarz, Gada Badeer, Georgia Swee, Gil
+Marcin Kardas, Mathew Oldham, Mathieu Rita,              Halpern, Govind Thattai, Grant Herman, Grigory
+Maya Pavlova, Melanie Kambadur, Mike Lewis,              Sizov, Guangyi, Zhang, Guna Lakshminarayanan,
+Min Si, Mitesh Kumar Singh, Mona Hassan, Na-             Hamid Shojanazeri, Han Zou, Hannah Wang, Han-
+man Goyal, Narjes Torabi, Nikolay Bashlykov,             wen Zha, Haroun Habeeb, Harrison Rudolph, Helen
+Nikolay Bogoychev, Niladri Chatterji, Olivier            Suk, Henry Aspegren, Hunter Goldman, Ibrahim
+Duchenne, Onur Çelebi, Patrick Alrassy, Pengchuan        Damlaj, Igor Molybog, Igor Tufanov, Irina-Elena
+Zhang, Pengwei Li, Petar Vasic, Peter Weng, Pra-         Veliche, Itai Gat, Jake Weissman, James Geboski,
+jjwal Bhargava, Pratik Dubal, Praveen Krishnan,          James Kohli, Japhet Asher, Jean-Baptiste Gaya,
+Punit Singh Koura, Puxin Xu, Qing He, Qingx-             Jeff Marcus, Jeff Tang, Jennifer Chan, Jenny Zhen,
+iao Dong, Ragavan Srinivasan, Raj Ganapathy, Ra-         Jeremy Reizenstein, Jeremy Teboul, Jessica Zhong,
+mon Calderer, Ricardo Silveira Cabral, Robert Sto-       Jian Jin, Jingyi Yang, Joe Cummings, Jon Carvill,
+jnic, Roberta Raileanu, Rohit Girdhar, Rohit Patel,      Jon Shepard, Jonathan McPhie, Jonathan Torres,
+Romain Sauvestre, Ronnie Polidoro, Roshan Sum-           Josh Ginsburg, Junjie Wang, Kai Wu, Kam Hou
+baly, Ross Taylor, Ruan Silva, Rui Hou, Rui Wang,        U, Karan Saxena, Karthik Prasad, Kartikay Khan-
+Saghar Hosseini, Sahana Chennabasappa, Sanjay            delwal, Katayoun Zand, Kathy Matosich, Kaushik
+Singh, Sean Bell, Seohyun Sonia Kim, Sergey              Veeraraghavan, Kelly Michelena, Keqian Li, Kun
+Edunov, Shaoliang Nie, Sharan Narang, Sharath Ra-        Huang, Kunal Chawla, Kushal Lakhotia, Kyle
+parthy, Sheng Shen, Shengye Wan, Shruti Bhosale,         Huang, Lailin Chen, Lakshya Garg, Lavender A,
+Shun Zhang, Simon Vandenhende, Soumya Batra,             Leandro Silva, Lee Bell, Lei Zhang, Liangpeng
+Spencer Whitman, Sten Sootla, Stephane Collot,           Guo, Licheng Yu, Liron Moshkovich, Luca Wehrst-
+Suchin Gururangan, Sydney Borodinsky, Tamar              edt, Madian Khabsa, Manav Avalani, Manish Bhatt,
+Herman, Tara Fowler, Tarek Sheasha, Thomas               Maria Tsimpoukelli, Martynas Mankus, Matan Has-
+Georgiou, Thomas Scialom, Tobias Speckbacher,            son, Matthew Lennie, Matthias Reso, Maxim Gro-
+Todor Mihaylov, Tong Xiao, Ujjwal Karn, Vedanuj          shev, Maxim Naumov, Maya Lathi, Meghan Ke-
+Goswami, Vibhor Gupta, Vignesh Ramanathan, Vik-          neally, Michael L. Seltzer, Michal Valko, Michelle
+tor Kerkez, Vincent Gonguet, Virginie Do, Vish           Restrepo, Mihir Patel, Mik Vyatskov, Mikayel
+Vogeti, Vladan Petrovic, Weiwei Chu, Wenhan              Samvelyan, Mike Clark, Mike Macey, Mike Wang,
+Xiong, Wenyin Fu, Whitney Meers, Xavier Mar-             Miquel Jubert Hermoso, Mo Metanat, Moham-
+tinet, Xiaodong Wang, Xiaoqing Ellen Tan, Xin-           mad Rastegari, Munish Bansal, Nandhini San-
+feng Xie, Xuchao Jia, Xuewei Wang, Yaelle Gold-          thanam, Natascha Parks, Natasha White, Navy-
+schlag, Yashesh Gaur, Yasmine Babaei, Yi Wen,            ata Bawa, Nayan Singhal, Nick Egebo, Nicolas
+Yiwen Song, Yuchen Zhang, Yue Li, Yuning Mao,            Usunier, Nikolay Pavlovich Laptev, Ning Dong,
+Zacharie Delpierre Coudert, Zheng Yan, Zhengx-           Ning Zhang, Norman Cheng, Oleg Chernoguz,
+ing Chen, Zoe Papakipos, Aaditya Singh, Aaron            Olivia Hart, Omkar Salpekar, Ozlem Kalinli, Parkin
+Grattafiori, Abha Jain, Adam Kelsey, Adam Sha-           Kent, Parth Parekh, Paul Saab, Pavan Balaji, Pe-
+jnfeld, Adithya Gangidi, Adolfo Victoria, Ahuva          dro Rittner, Philip Bontrager, Pierre Roux, Pi-
+Goldstand, Ajay Menon, Ajay Sharma, Alex Boe-            otr Dollar, Polina Zvyagina, Prashant Ratanchan-
+senberg, Alex Vaughan, Alexei Baevski, Allie Fein-       dani, Pritish Yuvraj, Qian Liang, Rachad Alao,
+stein, Amanda Kallet, Amit Sangani, Anam Yunus,          Rachel Rodriguez, Rafi Ayub, Raghotham Murthy,
+Andrei Lupu, Andres Alvarado, Andrew Caples,             Raghu Nayani, Rahul Mitra, Raymond Li, Re-
+Andrew Gu, Andrew Ho, Andrew Poulton, Andrew             bekkah Hogan, Robin Battey, Rocky Wang, Rohan
+Ryan, Ankit Ramchandani, Annie Franco, Apara-            Maheswari, Russ Howes, Ruty Rinott, Sai Jayesh
+jita Saraf, Arkabandhu Chowdhury, Ashley Gabriel,        Bondu, Samyak Datta, Sara Chugh, Sara Hunt, Sar-
+Ashwin Bharambe, Assaf Eisenman, Azadeh Yaz-             gun Dhillon, Sasha Sidorov, Satadru Pan, Saurabh
+dan, Beau James, Ben Maurer, Benjamin Leonhardi,         Verma, Seiji Yamamoto, Sharadh Ramaswamy,
+Bernie Huang, Beth Loyd, Beto De Paola, Bhar-            Shaun Lindsay, Shaun Lindsay, Sheng Feng, Sheng-
+gavi Paranjape, Bing Liu, Bo Wu, Boyu Ni, Braden         hao Lin, Shengxin Cindy Zha, Shiva Shankar,
+Hancock, Bram Wasti, Brandon Spence, Brani Sto-          Shuqiang Zhang, Shuqiang Zhang, Sinong Wang,
+jkovic, Brian Gamido, Britt Montalvo, Carl Parker,       Sneha Agarwal, Soji Sajuyigbe, Soumith Chin-
+Carly Burton, Catalina Mejia, Changhan Wang,             tala, Stephanie Max, Stephen Chen, Steve Kehoe,
+Changkyu Kim, Chao Zhou, Chester Hu, Ching-              Steve Satterfield, Sudarshan Govindaprasad, Sumit
+Hsiang Chu, Chris Cai, Chris Tindal, Christoph           Gupta, Sungmin Cho, Sunny Virk, Suraj Subra-
+Feichtenhofer, Damon Civin, Dana Beaty, Daniel           manian, Sy Choudhury, Sydney Goldman, Tal Re-
+Kreymer, Daniel Li, Danny Wyatt, David Adkins,           mez, Tamar Glaser, Tamara Best, Thilo Kohler,
+David Xu, Davide Testuggine, Delia David, Devi           Thomas Robinson, Tianhe Li, Tianjun Zhang, Tim
+Parikh, Diana Liskovich, Didem Foss, Dingkang            Matthews, Timothy Chou, Tzook Shaked, Varun
+Wang, Duc Le, Dustin Holland, Edward Dowling,            Vontimitta, Victoria Ajayi, Victoria Montanez, Vijai
+Eissa Jamil, Elaine Montgomery, Eleonora Pre-            Mohan, Vinay Satish Kumar, Vishal Mangla, Vítor
+sani, Emily Hahn, Emily Wood, Erik Brinkman,             Albiero, Vlad Ionescu, Vlad Poenaru, Vlad Tiberiu
+Esteban Arcaute, Evan Dunbar, Evan Smothers,             Mihailescu, Vladimir Ivanov, Wei Li, Wenchen
+Fei Sun, Felix Kreuk, Feng Tian, Firat Ozgenel,          Wang, Wenwen Jiang, Wes Bouaziz, Will Consta-
+Francesco Caggioni, Francisco Guzmán, Frank              ble, Xiaocheng Tang, Xiaofang Wang, Xiaojian Wu,
+                                                  7324
+Xiaolan Wang, Xide Xia, Xilun Wu, Xinbo Gao,               pages 279–287, Marseille, France. European Lan-
+Yanjun Chen, Ye Hu, Ye Jia, Ye Qi, Yenda Li, Yilin         guage Resources Association.
+Zhang, Ying Zhang, Yossi Adi, Youngjin Nam, Yu,            Andrea Horbach, Andrea Hensler, Sabine Krome,
+Wang, Yuchen Hao, Yundi Qian, Yuzi He, Zach Rait,          Jakob Prange, Werner Scholze-Stubenrecht, Diana
+Zachary DeVito, Zef Rosnbrick, Zhaoduo Wen,                Steffen, Stefan Thater, Christian Wellner, and Man-
+Zhenyu Yang, and Zhiwei Zhao. 2024. The llama 3            fred Pinkal. 2016. A corpus of literal and idiomatic
+herd of models. Preprint, arXiv:2407.21783.                uses of German infinitive-verb compounds. In Pro-
+Robert B Estill and Susan Kemper. 1982. Interpret-         ceedings of the Tenth International Conference on
+ing idioms. Journal of psycholinguistic research,          Language Resources and Evaluation (LREC’16),
+11(6):559–568.                                             pages 836–841, Portorož, Slovenia. European Lan-
+Marzieh Fadaee, Arianna Bisazza, and Christof              guage Resources Association (ELRA).
+Monz. 2018. Examining the tip of the iceberg: A            R. Jackendoff. 1997. The Architecture of the Lan-
+data set for idiom translation. In Proceedings of          guage Faculty. Linguistic inquiry monographs.
+the Eleventh International Conference on Language          MIT Press.
+Resources and Evaluation (LREC 2018), Miyazaki,
+                                                           Miloš Jakubíček, Adam Kilgarriff, Vojtěch Kovář,
+Japan. European Language Resources Association
+                                                           Pavel Rychlỳ, and Vít Suchomel. 2013. The tenten
+(ELRA).
+                                                           corpus family. In 7th international corpus linguis-
+Afsaneh Fazly, Paul Cook, and Suzanne Stevenson.           tics conference CL, pages 125–127. Valladolid.
+2009. Unsupervised type and token identification of
+idiomatic expressions. Computational Linguistics,          Charles Jochim, Francesca Bonin, Roy Bar-Haim,
+35(1):61–103.                                              and Noam Slonim. 2018. SLIDE - a sentiment
+                                                           lexicon of common idioms. In Proceedings of the
+Marcos Garcia, Tiago Kramer Vieira, Carolina Scar-         Eleventh International Conference on Language Re-
+ton, Marco Idiart, and Aline Villavicencio. 2021a.         sources and Evaluation (LREC 2018), Miyazaki,
+Assessing the representations of idiomaticity in vec-      Japan. European Language Resources Association
+tor models with a noun compound dataset labeled            (ELRA).
+at type and token levels. In Proceedings of the 59th
+Annual Meeting of the Association for Computa-             Ioannis Korkontzelos, Torsten Zesch, Fabio Mas-
+tional Linguistics and the 11th International Joint        simo Zanzotto, and Chris Biemann. 2013. SemEval-
+Conference on Natural Language Processing (Vol-            2013 task 5: Evaluating phrasal semantics. In Sec-
+ume 1: Long Papers), pages 2730–2741, Online.              ond Joint Conference on Lexical and Computational
+Association for Computational Linguistics.                 Semantics (*SEM), Volume 2: Proceedings of the
+                                                           Seventh International Workshop on Semantic Evalu-
+Marcos Garcia, Tiago Kramer Vieira, Carolina Scar-         ation (SemEval 2013), pages 39–47, Atlanta, Geor-
+ton, Marco Idiart, and Aline Villavicencio. 2021b.         gia, USA. Association for Computational Linguis-
+Probing for idiomaticity in vector space models. In        tics.
+Proceedings of the 16th Conference of the European
+Chapter of the Association for Computational Lin-          Marianna Kyriacou, Kathy Conklin, and Dominic
+guistics: Main Volume, pages 3551–3564, Online.            Thompson. 2020. Passivizability of idioms: Has the
+Association for Computational Linguistics.                 wrong tree been barked up? Language and Speech,
+Waseem Gharbieh, Virendra Bhavsar, and Paul                63(2):404–435. PMID: 31106699.
+Cook. 2016. A word embedding approach to iden-             Andreas Langlotz. 2006. Idiomatic Creativity. John
+tifying verb-noun idiomatic combinations. In Pro-          Benjamins.
+ceedings of the 12th Workshop on Multiword Ex-             Maria Chiara Levorato and Cristina Cacciari. 1992.
+pressions, pages 112–118, Berlin, Germany. Asso-           Children’s comprehension and production of id-
+ciation for Computational Linguistics.                     ioms: the role of context and familiarity. Journal of
+Raymond W. Gibbs and Gayle P. Gonzales. 1985.              Child Language, 19(2):415–433.
+Syntactic frozenness in processing and remember-           Siyan Li, Riley Carlson, and Christopher Potts.
+ing idioms. Cognition, 20(3):243–259.                      2022. Systematicity in GPT-3’s interpretation of
+Raymond W Gibbs and Nandini P Nayak. 1989.                 novel English noun compounds. In Findings of the
+Psycholinguistic studies on the syntactic behavior         Association for Computational Linguistics: EMNLP
+of idioms. Cognitive Psychology, 21(1):100–138.            2022, pages 717–728, Abu Dhabi, United Arab Emi-
+Raymond W Gibbs Jr, Nandini P Nayak, and                   rates. Association for Computational Linguistics.
+Cooper Cutting. 1989. How to kick the bucket and           Tal Linzen, Emmanuel Dupoux, and Yoav Gold-
+not decompose: Analyzability and idiom process-            berg. 2016. Assessing the Ability of LSTMs to
+ing. Journal of memory and language, 28(5):576–            Learn Syntax-Sensitive Dependencies. Transac-
+593.                                                       tions of the Association for Computational Linguis-
+Maurice Gross. 1982. Une classification des                tics, 4:521–535.
+phrases « figées » du français. Revue québécoise de        Changsheng Liu and Rebecca Hwa. 2018. Heuristi-
+linguistique, 11(2):151–185.                               cally informed unsupervised idiom usage recogni-
+Hessel Haagsma, Johan Bos, and Malvina Nissim.             tion. In Proceedings of the 2018 Conference on Em-
+2020. MAGPIE: A large corpus of potentially id-            pirical Methods in Natural Language Processing,
+iomatic expressions. In Proceedings of the Twelfth         pages 1723–1731, Brussels, Belgium. Association
+Language Resources and Evaluation Conference,              for Computational Linguistics.
+                                                    7325
+Pengfei Liu, Kaiyu Qian, Xipeng Qiu, and Xuan-           Kyle Kosic, Gretchen Krueger, Vishal Kuo, Michael
+jing Huang. 2017. Idiom-aware compositional dis-         Lampe, Ikai Lan, Teddy Lee, Jan Leike, Jade Leung,
+tributed semantics. In Proceedings of the 2017 Con-      Daniel Levy, Chak Ming Li, Rachel Lim, Molly
+ference on Empirical Methods in Natural Language         Lin, Stephanie Lin, Mateusz Litwin, Theresa Lopez,
+Processing, pages 1204–1213, Copenhagen, Den-            Ryan Lowe, Patricia Lue, Anna Makanju, Kim
+mark. Association for Computational Linguistics.         Malfacini, Sam Manning, Todor Markov, Yaniv
+R. Thomas McCoy, Shunyu Yao, Dan Friedman,               Markovski, Bianca Martin, Katie Mayer, Andrew
+Mathew D. Hardy, and Thomas L. Griffiths. 2024.          Mayne, Bob McGrew, Scott Mayer McKinney,
+Embers of autoregression show how large language         Christine McLeavey, Paul McMillan, Jake McNeil,
+models are shaped by the problem they are trained        David Medina, Aalok Mehta, Jacob Menick, Luke
+to solve. Proceedings of the National Academy of         Metz, Andrey Mishchenko, Pamela Mishkin, Vinnie
+Sciences, 121(41):e2322420121.                           Monaco, Evan Morikawa, Daniel Mossing, Tong
+                                                         Mu, Mira Murati, Oleg Murk, David Mély, Ashvin
+Marilyn A Nippold and Mishelle Rudzinski. 1993.
+                                                         Nair, Reiichiro Nakano, Rajeev Nayak, Arvind
+Familiarity and transparency in idiom explanation:
+                                                         Neelakantan, Richard Ngo, Hyeonwoo Noh, Long
+A developmental study of children and adolescents.
+                                                         Ouyang, Cullen O’Keefe, Jakub Pachocki, Alex
+Journal of Speech, Language, and Hearing Re-
+                                                         Paino, Joe Palermo, Ashley Pantuliano, Giambat-
+search, 36(4):728–737.
+                                                         tista Parascandolo, Joel Parish, Emy Parparita, Alex
+Masanari Ohi, Masahiro Kaneko, Ryuto Koike,              Passos, Mikhail Pavlov, Andrew Peng, Adam Perel-
+Mengsay Loem, and Naoaki Okazaki. 2024.                  man, Filipe de Avila Belbute Peres, Michael Petrov,
+Likelihood-based mitigation of evaluation bias in        Henrique Ponde de Oliveira Pinto, Michael, Poko-
+large language models. In Findings of the Associa-       rny, Michelle Pokrass, Vitchyr H. Pong, Tolly Pow-
+tion for Computational Linguistics ACL 2024, pages       ell, Alethea Power, Boris Power, Elizabeth Proehl,
+3237–3245, Bangkok, Thailand and virtual meeting.        Raul Puri, Alec Radford, Jack Rae, Aditya Ramesh,
+Association for Computational Linguistics.               Cameron Raymond, Francis Real, Kendra Rim-
+OpenAI, Josh Achiam, Steven Adler, Sandhini              bach, Carl Ross, Bob Rotsted, Henri Roussez,
+Agarwal, Lama Ahmad, Ilge Akkaya, Floren-                Nick Ryder, Mario Saltarelli, Ted Sanders, Shibani
+cia Leoni Aleman, Diogo Almeida, Janko Al-               Santurkar, Girish Sastry, Heather Schmidt, David
+tenschmidt, Sam Altman, Shyamal Anadkat, Red             Schnurr, John Schulman, Daniel Selsam, Kyla Shep-
+Avila, Igor Babuschkin, Suchir Balaji, Valerie Bal-      pard, Toki Sherbakov, Jessica Shieh, Sarah Shoker,
+com, Paul Baltescu, Haiming Bao, Mohammad                Pranav Shyam, Szymon Sidor, Eric Sigler, Maddie
+Bavarian, Jeff Belgum, Irwan Bello, Jake Berdine,        Simens, Jordan Sitkin, Katarina Slama, Ian Sohl,
+Gabriel Bernadett-Shapiro, Christopher Berner,           Benjamin Sokolowsky, Yang Song, Natalie Stau-
+Lenny Bogdonoff, Oleg Boiko, Madelaine Boyd,             dacher, Felipe Petroski Such, Natalie Summers, Ilya
+Anna-Luisa Brakman, Greg Brockman, Tim Brooks,           Sutskever, Jie Tang, Nikolas Tezak, Madeleine B.
+Miles Brundage, Kevin Button, Trevor Cai, Rosie          Thompson, Phil Tillet, Amin Tootoonchian, Eliz-
+Campbell, Andrew Cann, Brittany Carey, Chelsea           abeth Tseng, Preston Tuggle, Nick Turley, Jerry
+Carlson, Rory Carmichael, Brooke Chan, Che               Tworek, Juan Felipe Cerón Uribe, Andrea Val-
+Chang, Fotis Chantzis, Derek Chen, Sully Chen,           lone, Arun Vijayvergiya, Chelsea Voss, Carroll
+Ruby Chen, Jason Chen, Mark Chen, Ben Chess,             Wainwright, Justin Jay Wang, Alvin Wang, Ben
+Chester Cho, Casey Chu, Hyung Won Chung, Dave            Wang, Jonathan Ward, Jason Wei, CJ Weinmann,
+Cummings, Jeremiah Currier, Yunxing Dai, Cory            Akila Welihinda, Peter Welinder, Jiayi Weng, Lil-
+Decareaux, Thomas Degry, Noah Deutsch, Damien            ian Weng, Matt Wiethoff, Dave Willner, Clemens
+Deville, Arka Dhar, David Dohan, Steve Dowling,          Winter, Samuel Wolrich, Hannah Wong, Lauren
+Sheila Dunning, Adrien Ecoffet, Atty Eleti, Tyna         Workman, Sherwin Wu, Jeff Wu, Michael Wu,
+Eloundou, David Farhi, Liam Fedus, Niko Felix,           Kai Xiao, Tao Xu, Sarah Yoo, Kevin Yu, Qiming
+Simón Posada Fishman, Juston Forte, Isabella Ful-        Yuan, Wojciech Zaremba, Rowan Zellers, Chong
+ford, Leo Gao, Elie Georges, Christian Gibson, Vik       Zhang, Marvin Zhang, Shengjia Zhao, Tianhao
+Goel, Tarun Gogineni, Gabriel Goh, Rapha Gontijo-        Zheng, Juntang Zhuang, William Zhuk, and Bar-
+Lopes, Jonathan Gordon, Morgan Grafstein, Scott          ret Zoph. 2024. Gpt-4 technical report. Preprint,
+Gray, Ryan Greene, Joshua Gross, Shixiang Shane          arXiv:2303.08774.
+Gu, Yufei Guo, Chris Hallacy, Jesse Han, Jeff Har-
+                                                         Dylan Phelps, Thomas M. R. Pickard, Maggie Mi,
+ris, Yuchen He, Mike Heaton, Johannes Heidecke,
+                                                         Edward Gow-Smith, and Aline Villavicencio. 2024.
+Chris Hesse, Alan Hickey, Wade Hickey, Peter
+                                                         Sign of the times: Evaluating the use of large lan-
+Hoeschele, Brandon Houghton, Kenny Hsu, Shengli
+                                                         guage models for idiomaticity detection. In Pro-
+Hu, Xin Hu, Joost Huizinga, Shantanu Jain, Shawn
+                                                         ceedings of the Joint Workshop on Multiword Ex-
+Jain, Joanne Jang, Angela Jiang, Roger Jiang,
+                                                         pressions and Universal Dependencies (MWE-UD)
+Haozhun Jin, Denny Jin, Shino Jomoto, Billie Jonn,
+                                                         @ LREC-COLING 2024, pages 178–187, Torino,
+Heewoo Jun, Tomer Kaftan, Łukasz Kaiser, Ali Ka-
+                                                         Italia. ELRA and ICCL.
+mali, Ingmar Kanitscheider, Nitish Shirish Keskar,
+Tabarak Khan, Logan Kilpatrick, Jong Wook Kim,           Grusha Prasad, Marten van Schijndel, and Tal
+Christina Kim, Yongjik Kim, Jan Hendrik Kirchner,        Linzen. 2019. Using priming to uncover the or-
+Jamie Kiros, Matt Knight, Daniel Kokotajlo, Łukasz       ganization of syntactic representations in neural lan-
+Kondraciuk, Andrew Kondrich, Aris Konstantinidis,        guage models. In Proceedings of the 23rd Confer-
+                                                  7326
+ence on Computational Natural Language Learning            Harish Tayyar Madabushi, Edward Gow-Smith,
+(CoNLL), pages 66–76, Hong Kong, China. Associ-            Carolina Scarton, and Aline Villavicencio. 2021.
+ation for Computational Linguistics.                       AStitchInLanguageModels: Dataset and methods
+Frankie Robertson. 2019. A contrastive evaluation          for the exploration of idiomaticity in pre-trained
+of word sense disambiguation systems for Finnish.          language models. In Findings of the Association for
+In Proceedings of the Fifth International Workshop         Computational Linguistics: EMNLP 2021, pages
+on Computational Linguistics for Uralic Languages,         3464–3477, Punta Cana, Dominican Republic. As-
+pages 42–54, Tartu, Estonia. Association for Com-          sociation for Computational Linguistics.
+putational Linguistics.                                    Hugo Touvron, Louis Martin, Kevin Stone, Peter
+Bahar Salehi, Paul Cook, and Timothy Baldwin.              Albert, Amjad Almahairi, Yasmine Babaei, Niko-
+2014. Detecting non-compositional MWE com-                 lay Bashlykov, Soumya Batra, Prajjwal Bhargava,
+ponents using Wiktionary. In Proceedings of the            Shruti Bhosale, Dan Bikel, Lukas Blecher, Cris-
+2014 Conference on Empirical Methods in Natural            tian Canton Ferrer, Moya Chen, Guillem Cucu-
+Language Processing (EMNLP), pages 1792–1797,              rull, David Esiobu, Jude Fernandes, Jeremy Fu,
+Doha, Qatar. Association for Computational Lin-            Wenyin Fu, Brian Fuller, Cynthia Gao, Vedanuj
+guistics.                                                  Goswami, Naman Goyal, Anthony Hartshorn,
+Giancarlo Salton, Robert Ross, and John Kelleher.          Saghar Hosseini, Rui Hou, Hakan Inan, Marcin
+2014. An empirical study of the impact of idioms           Kardas, Viktor Kerkez, Madian Khabsa, Isabel
+on phrase based statistical machine translation of         Kloumann, Artem Korenev, Punit Singh Koura,
+English to Brazilian-Portuguese. In Proceedings            Marie-Anne Lachaux, Thibaut Lavril, Jenya Lee,
+of the 3rd Workshop on Hybrid Approaches to Ma-            Diana Liskovich, Yinghai Lu, Yuning Mao, Xavier
+chine Translation (HyTra), pages 36–41, Gothen-            Martinet, Todor Mihaylov, Pushkar Mishra, Igor
+burg, Sweden. Association for Computational Lin-           Molybog, Yixin Nie, Andrew Poulton, Jeremy
+guistics.                                                  Reizenstein, Rashi Rungta, Kalyan Saladi, Alan
+Wendy A Schweigert. 1986. The comprehension                Schelten, Ruan Silva, Eric Michael Smith, Ranjan
+of familiar and less familiar idioms. Journal of           Subramanian, Xiaoqing Ellen Tan, Binh Tang, Ross
+Psycholinguistic Research, 15:33–45.                       Taylor, Adina Williams, Jian Xiang Kuan, Puxin
+                                                           Xu, Zheng Yan, Iliyan Zarov, Yuchen Zhang, An-
+Marco Silvio Giuseppe Senaldi, Gianluca E. Lebani,         gela Fan, Melanie Kambadur, Sharan Narang, Au-
+and Alessandro Lenci. 2016. Lexical variability and        relien Rodriguez, Robert Stojnic, Sergey Edunov,
+compositionality: Investigating idiomaticity with          and Thomas Scialom. 2023. Llama 2: Open
+distributional semantic models. In Proceedings of          foundation and fine-tuned chat models. Preprint,
+the 12th Workshop on Multiword Expressions, pages          arXiv:2307.09288.
+21–31, Berlin, Germany. Association for Computa-
+tional Linguistics.                                        Lowri Williams, Christian Bannister, Michael
+Rico Sennrich. 2017.         How grammatical is            Arribas-Ayllon, Alun Preece, and Irena Spasić.
+character-level neural machine translation? assess-        2015. The role of idioms in sentiment analysis. Ex-
+ing MT quality with contrastive translation pairs. In      pert Systems with Applications, 42(21):7375–7385.
+Proceedings of the 15th Conference of the European         Uriel Wèinreich. 1969. Problems in the Analysis
+Chapter of the Association for Computational Lin-          of Idioms, pages 23–82. University of California
+guistics: Volume 2, Short Papers, pages 376–382,           Press, Berkeley.
+Valencia, Spain. Association for Computational Lin-        Ziheng Zeng and Suma Bhat. 2021. Idiomatic Ex-
+guistics.                                                  pression Identification using Semantic Compatibil-
+Caroline Sporleder, Linlin Li, Philip Gorinski, and        ity. Transactions of the Association for Computa-
+Xaver Koch. 2010. Idioms in context: The IDIX              tional Linguistics, 9:1546–1562.
+corpus. In Proceedings of the Seventh International
+Conference on Language Resources and Evaluation
+(LREC’10), Valletta, Malta. European Language              A    Examples of Expert Annotations
+Resources Association (ELRA).
+Simeng Sun, Kalpesh Krishna, Andrew Mattarella-
+                                                           We provid an example of expert annotations in
+Micke, and Mohit Iyyer. 2021. Do long-range lan-
+guage models actually use long-range context? In           Table 3.
+Proceedings of the 2021 Conference on Empirical
+Methods in Natural Language Processing, pages
+807–822, Online and Punta Cana, Dominican Re-              B    Additional Annotations of DICE
+public. Association for Computational Linguistics.
+David A Swinney and Anne Cutler. 1979. The                 The analysis we focus on in this paper uses
+access and processing of idiomatic expressions.            the main subsets of DICE. There are additional
+Journal of verbal learning and verbal behavior,
+                                                           sentences we have collected that can be used for
+18(5):523–534.
+Patrizia Tabossi, Rachele Fanari, and Kinou Wolf.
+                                                           further analysis in the domain of idiomaticity.
+2009. Why are idioms recognized fast? Memory &             A summary is presented in Table 4. We make
+cognition, 37:529–540.                                     all annotations collected publicly available.
+                                                    7327
+ Idiom               Definition of the Figurative Meaning                                    Sentence                                                                                 Accept   Reject    Reason (if reject)
+ smoking gun         "a piece of incontrovertible evidence"                                  The detective found a smoking gun at the crime scene.                                    N          Y         Ambiguous
+ guilt trip          "to make someone feel guilty"                                           After breaking her mother’s vase, Sarah’s sister put her on a guilt trip for weeks.      N          Y      Doesn’t make sense
+ turn a blind eye    "pretend not to notice"                                                 Despite the obvious safety hazards, the supervisor chose to turn a blind eye.            N          Y          Figurative
+ down the wire       "a situation whose outcome is not decided until the very last minute"   The electrician was careful not to cut down to the wire while he was working.            N          Y        Form changed
+ set eyes on         "see"                                                                   As soon as she set eyes on the beach, she was overwhelmed by its serene beauty.          N          Y             Skip
+ blow off steam      "get rid of pent-up energy or emotion"                                  During the train ride, the kids were excited to see the old locomotive blow off steam.   Y
+ get a grip          "begin to deal with or understand"                                      He struggled to get a grip on the slippery glass jar of pickles.                         Y
+
+
+Table 3: Examples of expert annotations. Definitions are taken from Ayto (2020). "N" and "Y" stands for "No" and
+"Yes", respectively.
+
+                                                                 Counts          Examples and Remarks
+  All annotated sentences                                        2349            This includes the aforementioned 1033 literal sentences.
+  Unique expressions                                             783             -
+  Ambiguous sentences                                            165             The panda car is a popular item in the collectible toy market.
+  Figurative/Idiomatic sentences                                 465             It was a close call when the hiker almost slipped off the cliff.
+  Change in Form sentences                                       32              She reached into the bag to find her glasses. (The idiom is "in the bag".)
+  Doesn’t make sense sentences                                   162             When the children play at the park, their parents always remind them to play it safe.
+  Grammatical Error sentences                                    9               The old locomotive runs out of steam halfway up the mountain.
+  Can’t be literal sentences ("skips")                           462             The nurse cared for the critical patients day in, day out without a moment’s rest.
+  Total sentences                                                1295            -
+
+                                         Table 4: Properties of the additional annotations that we have collected.
+
+
+         C          Sentence Generation Prompt
+
+         The prompt we used for generating the sen-
+         tences is shown here. For other configurations
+         that are not mentioned, we used the default
+         setting.
+
+         Model: GPT-4
+         "role": "system", "content": "You are an expert
+         of English"
+         "role": "user", "content": "Generate three
+         sentences using the expression: ’idiom’,
+         where the expression has a literal meaning.
+         Each sentence must contain the expression
+         unchanged. Format these sentences as a
+         Python list. Don’t say anything that are not the
+         sentences."
+                                                                                                                        Figure 5: Parts of the briefing annotators received.
+
+         The temperature used was 0.8.
+                                                                                                                              3_5-turbo-0125)3 and GPT-4 (gpt-4-0613)4 .
+         D          Participant Briefing
+                                                                                                                              E.2        Prompting Paradigm
+         Upon signing up for participation, each anno-
+         tator received a 30mins training session where                                                                       We ran the FLAN-T5 models on a NVIDIA
+         they were shown examples, including Table 3.                                                                         H100 GPU. We use OpenAI’s API for interac-
+                                                                                                                              tions with the GPT models, HuggingFace for
+         E Evaluation Implementation Details                                                                                  Flan-T5 models and Replicate 5 for the Llama
+                                                                                                                              models. Each model was evaluated with three
+         E.1 ChatGPT Versions                                                                                                 different prompts. All of the results we report
+         We evaluate the following GPT models: GPT-                                                                       3
+                                                                                                                        https://platform.openai.com/docs/models/
+         4o (gpt-4o-2024-08-06) 2 , GPT-3.5-Turbo (gpt-                                                            gpt-3.5-turbo
+                                                                                                                      4
+                                                                                                                        https://platform.openai.com/docs/models/
+     2                                                                                                             gpt-4
+    https://platform.openai.com/docs/models/
+                                                                                                                      5
+gpt-4o                                                                                                                  https://replicate.com/
+
+                                                                                                          7328
+    are the average across the three prompt settings.                                   cross-entropy loss Lsentence is defined as:
+                                                                                                            T
+                                                                                                            X
+    E.3 Hyper-parameters                                                                    Lsentence = −         log P (y (t) | y (<t) )    (8)
+                                                                                                            t=1
+    The hyper-parameters we used for running the
+    evaluation are provided in Table 6.                                                 where y <t represents all tokens preceding the
+                                                                                        token at position t.
+               GPT Models    Flan-T5 Models   Llama 2s   Llama 3s    Llama 3.1
+                                                                                        Recognizing the relationship between the cross-
+ Temperature            1                -         0.7         0.7         0.6
+ max_tokens        Default             512         512        512         512           entropy loss and the sequence probability, we
+ top_p                  1                -        0.95       0.95          0.9
+                                                                                        observe:
+Table 6: Hyper-parameters used for model evaluation,                                                           T
+                                                                                                                                    !
+                                                                                                              Y
+sorted by model family                                                                    Lsentence = − log      P (y (t) | y (<t) )  (9)
+                                                                                                                  t=1
+
+    F Frequency Counts                                                                             = − log P (y)                            (10)
+
+    We access the enTenTen corpus using                                                 Thus, the log likelihood of the sentence is
+    SketchEngine and employ Corpus Query Lan-
+                                                                                                    log P (y) = −Lsentence                  (11)
+    guage (CQL) to find concordances that match
+    specific lexical patterns.
+                                                                                        We calculate the log likelihood for all sentences
+    For each target expression, we determine its                                        in DICE.
+    frequency in the corpus by accounting for
+    all lemma-based forms of the expression.                                            H Additional Results for Frequency
+    We simply slot in the lemmas of the target                                          and Likelihood Analysis
+    expression directly into the following CQL
+    query pattern. For example, for the expres-                                         We present the results we obtained across all the
+    sion “spill the beans”, the CQL would be:                                           models. This includes both frequency analysis
+    [lemma=“spill”][lemma=“the”][lemma=“bean”].                                         per setting, and across both settings.
+    This would capture occurrences such as                                              Due to resource limitations we could not obtain
+    “spilled the beans”, “spilling the beans”, and                                      probabilities for the larger models, which are
+    other morphological variants. We utilize                                            Llama 3.1 (405B), Llama 3 (70B) and Llama 2
+    NLTK (Bird and Loper, 2004) to perform                                              (70B). As a result, we only conducted the fre-
+    lemmatisation and acquire the lemmas needed                                         quency analysis on these models, see Figure 6.
+    for the CQL query.                                                                  Figure 9 presents side-by-side regression plots
+    It is important to note that CQL query we use                                       of the frequency and likelihood analysis. Simi-
+    does not account for more syntactically flexi-                                      larly, Figure 8 presents the plots for the smaller
+    ble realizations, such as passive constructions                                     Llama models. Finally, Figure 7 shows the
+    (e.g., “the beans were spilled”), as these devi-                                    frequency analysis plots for the GPT models.
+    ate from the fixed linear ordering captured by
+    the CQL query. Consequently, the resulting
+    frequency estimates represent a conservative
+    measure. Nonetheless, for the purposes of cor-
+    relating expression frequency with downstream
+    model performance, we consider this approxi-
+    mation to be sufficiently informative.
+
+    G Sentence Likelihood
+
+    We derive the sentence likelihood by using the
+    cross-entropy loss. For a sequence of tokens
+    y = [y (1) , y (2) , . . . , y (T ) ], the sentence-level
+                                                                                 7329
+                   Method         Prompt No.         Prompt Design
+                                   Prompt 1          Is the expression ’idiom’ used figuratively or literally in the sentence: ’sentence’.
+             Zero-shot                               Answer ’i’ for figurative, ’l’ for literal.
+                                   Prompt 2          In the sentence ’sentence’, is the expression ’idiom’ being used figuratively or
+                                                     literally? Respond with ’i’ for figurative and ’l’ for literal.
+                                   Prompt 3          How is the expression ’idiom’ used in this context: ’sentence’. Output ’i’ if the
+                                                     expression holds figurative meaning, output ’l’ if the expression holds literal
+                                                     meaning.
+               Example                 –            The expression ’play with fire’ is used figuratively in the sentence: ’The war
+                                                    took away the unfortunate necessity, as Unionists saw it, to play with fire in
+                                                    the national interest, but it did not materially alter their view of themselves.’
+                                                    → Output: i The expression ’play with fire’ is used literally in the sentence:
+                                                    ’Despite the danger, he decided to play with fire, poking the embers with a stick.’
+                                                    → Output: l"
+                                   Prompt 1          Example + Prompt 1
+              Few-shot             Prompt 2          Example + Prompt 2
+                                   Prompt 3          Example + Prompt 3
+
+Table 5: We use three prompts for our experiments. The top panel of the table shows the prompts used in the
+zero-shot setting, while the bottom panel displays the few-shot prompts. For the few-shot setting, we prepend the
+same example (middle panel) to each of the zero-shot prompts.
+
+
+
+
+                   1.0                                                         1.0                                                      1.0
+
+                   0.8                                                         0.8                                                      0.8
+
+
+
+
+Performance (F1)                                            Performance (F1)                                         Performance (F1)
+                   0.6                                                         0.6                                                      0.6
+
+                   0.4                                                         0.4                                                      0.4
+
+                   0.2                        Figurative                       0.2                      Figurative                      0.2                      Figurative
+                                              Literal                                                   Literal                                                  Literal
+                   0.0                        Overall                          0.0                      Overall                         0.0                      Overall
+                          0   25000 50000 75000 100000                               0   25000 50000 75000 100000                             0   25000 50000 75000 100000
+                                  Frequency                                                 Frequency                                                Frequency
+
+                         Figure 6: Left to right: Frequency analysis for Llama 2 (70B), Llama 3 (70B), and Llama 3.1 (405B)
+
+
+
+                   1.0                                                         1.0                                                      1.0
+
+                   0.8                                                         0.8                                                      0.8
+
+
+
+
+Performance (F1)                                            Performance (F1)                                         Performance (F1)
+                   0.6                                                         0.6                                                      0.6
+
+                   0.4                                                         0.4                                                      0.4
+
+                   0.2                        Figurative                       0.2                      Figurative                      0.2                      Figurative
+                                              Literal                                                   Literal                                                  Literal
+                   0.0                        Overall                          0.0                      Overall                         0.0                      Overall
+                          0   25000 50000 75000 100000                               0   25000 50000 75000 100000                             0   25000 50000 75000 100000
+                                  Frequency                                                 Frequency                                                Frequency
+
+                                 Figure 7: Left to right: Frequency analysis for GPT-3.5 Turbo, GPT-4 and GPT-4o.
+
+                                                                                             7330
+                                             Frequency Analysis                                            Likelihood Analysis
+                                   1.0                         Figurative                      1.0
+                                                               Literal
+                                   0.8                         Overall                         0.8
+
+
+
+
+                Performance (F1)                                            Performance (F1)
+Llama 2 (7B)
+                                   0.6                                                         0.6
+
+                                   0.4                                                         0.4
+
+                                   0.2                                                         0.2           Figurative
+                                                                                                             Literal
+                                   0.0                                                         0.0           Overall
+                                         0    25000 50000 75000 100000                               150     125     100    75      50   25
+                                                   Frequency                                                       Log Likelihood
+                                   1.0                                                         1.0
+
+                                   0.8                                                         0.8
+
+
+
+
+                Performance (F1)                                            Performance (F1)
+Llama 2 (13B)
+                                   0.6                                                         0.6
+
+                                   0.4                                                         0.4
+
+                                   0.2                         Figurative                      0.2           Figurative
+                                                               Literal                                       Literal
+                                   0.0                         Overall                         0.0           Overall
+                                         0    25000 50000 75000 100000                               150     125     100    75      50   25
+                                                   Frequency                                                       Log Likelihood
+                                   1.0                                                         1.0
+
+                                   0.8                                                         0.8
+
+
+
+
+                Performance (F1)                                            Performance (F1)
+Llama 3 (8B)
+                                   0.6                                                         0.6
+
+                                   0.4                                                         0.4
+
+                                   0.2                         Figurative                      0.2           Figurative
+                                                               Literal                                       Literal
+                                   0.0                         Overall                         0.0           Overall
+                                         0    25000 50000 75000 100000                               150     125     100   75       50   25
+                                                   Frequency                                                       Log Likelihood
+         Figure 8: Visualisations of the frequency and likelihood. Smaller Llama models only.
+
+
+
+
+                                                                   7331
+                                             Frequency Analysis                                           Likelihood Analysis
+                                   1.0                             Figurative                      1.0        Figurative
+                                                                   Literal                                    Literal
+                                   0.8                             Overall                         0.8        Overall
+
+
+
+
+                Performance (F1)                                                Performance (F1)
+Flan-T5 Small                      0.6                                                             0.6
+
+                                   0.4                                                             0.4
+
+                                   0.2                                                             0.2
+
+                                   0.0                                                             0.0
+                                         0     25000 50000 75000 100000                                  20      15        10      5   0
+                                                   Frequency                                                      Log Likelihood
+                                   1.0                                                             1.0
+
+                                   0.8                                                             0.8
+
+
+
+
+                Performance (F1)                                                Performance (F1)
+Flan-T5 Large                      0.6                                                             0.6
+
+                                   0.4                                                             0.4
+
+                                   0.2                             Figurative                      0.2        Figurative
+                                                                   Literal                                    Literal
+                                   0.0                             Overall                         0.0        Overall
+                                         0     25000 50000 75000 100000                                  20      15        10      5   0
+                                                   Frequency                                                      Log Likelihood
+                                   1.0                                                             1.0
+
+                                   0.8                                                             0.8
+
+
+
+
+                Performance (F1)                                                Performance (F1)
+Flan-T5 XL                         0.6                                                             0.6
+
+                                   0.4                                                             0.4
+
+                                   0.2                             Figurative                      0.2        Figurative
+                                                                   Literal                                    Literal
+                                   0.0                             Overall                         0.0        Overall
+                                         0     25000 50000 75000 100000                                  20      15        10      5   0
+                                                   Frequency                                                      Log Likelihood
+                                   1.0                                                             1.0
+
+                                   0.8                                                             0.8
+
+
+
+
+                Performance (F1)                                                Performance (F1)
+Flan-T5 XXL                        0.6                                                             0.6
+
+                                   0.4                                                             0.4
+
+                                   0.2                Figurative                                   0.2        Figurative
+                                                      Literal                                                 Literal
+                                   0.0                Overall                                      0.0        Overall
+                                         0     25000 50000 75000 100000                                  20      15        10      5   0
+                                                   Frequency                                                      Log Likelihood
+   Figure 9: Visualisations of the frequency and likelihood analysis. Flan-T5 models only.
+
+
+
+                                                                      7332
+
