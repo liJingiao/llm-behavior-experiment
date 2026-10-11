@@ -1,34 +1,39 @@
-# Selected papers without model adjustment
+# LLM心理学与行为科学入选文章
 
-本目录是项目当前筛选结果中的独立文章库，只包含模型调整专项审计结果为 `NO_HOLD` 的文章。
+本目录保存118篇通过统一筛选标准的文章。它不是单纯的“无微调论文库”：所有文章同时满足来源与日期、T0、T1和E1—E4。
 
-## 内容
+完整标准只有一份：[`provenance/selection_criteria.md`](provenance/selection_criteria.md)。
 
-- 文章：118篇
-- PDF：`papers/article_001.pdf`—`papers/article_118.pdf`
-- 全文文本：`texts/article_001.txt`—`texts/article_118.txt`
-- 人类可读目录：`SELECTED_ARTICLES.md`
-- 新旧编号映射：`NUMBER_MAPPING.csv`
-- 结构化元数据：`selected_articles.csv`、`selected_articles.jsonl`
-- 文件哈希：`SHA256SUMS`
-- 筛选口径：`provenance/selection_policy.md`
-- 全文修复记录：`provenance/fulltext_repair_record.md`
-- 发布验证：`validation.json`
+## 统一标准
 
-## “无模型调整”的含义
+- **T0：文本可执行。**正式实验的模型输入、输出和计分可以用文本或确定性的离散结构稳定执行。
+- **T1：不要求训练或参数更新。**正式复现不要求自行预训练、微调、LoRA、RL、知识编辑，或训练必需的分类器、probe、回归头、reward model等学习组件。
+- **E1—E4：心理学与行为科学资格。**LLM是相关行为实验主体；研究的是明确的心理学／行为科学问题；构念与实验可重建；结果可以解释行为规律。
 
-纳入文章的正式实验可以使用现成模型/API，以及 prompt、system prompt、in-context examples、解码、采样、RAG、工具调用或不更新权重的推理期干预；但不要求作者进行预训练、继续预训练、SFT、LoRA、adapter、soft prompt、RLHF/DPO/PPO/GRPO、知识编辑，或训练正式实验必需的分类器、probe、回归头、reward model与RL代理。
+Prompt、system prompt、few-shot／in-context examples、解码、采样、RAG、工具调用、不更新权重的推理期干预，以及普通统计分析或认知模型拟合，不视为训练或微调。
 
-普通统计分析、回归及认知模型拟合不被视为调整被测神经模型。
+## 当前集合
 
-## 编号和追溯
+- 入选：118篇；
+- 来源内容候选：170篇；
+- 其中52篇因正式实验需要训练、微调、参数更新或必要学习组件而未进入本集合；
+- PDF和全文文本均为独立普通文件，不是符号链接或替身文件；
+- 本集合编号为`article_001`—`article_118`。
 
-本目录使用独立连续编号001—118。`source_selected_number`及`NUMBER_MAPPING.csv`保留它们在170篇来源selected集合中的原编号；稳定内部ID没有改变。
+## 文件
 
-## 状态边界
+- `papers/`：118篇PDF；
+- `texts/`：118份全文文本；
+- `SELECTED_ARTICLES.md`：人类可读目录；
+- `selected_articles.csv`、`selected_articles.jsonl`：结构化清单；
+- `NUMBER_MAPPING.csv`：本集合编号与来源集合编号的对应关系；
+- `SHA256SUMS`：PDF和文本的SHA-256；
+- `provenance/selection_criteria.md`：唯一筛选标准；
+- `provenance/fulltext_repair_record.md`：两份全文文件的修复记录；
+- `summary.json`、`validation.json`：集合摘要与校验结果。
 
-这是内容筛选和模型调整审计后的文章集合。个别条目的截止日前正式版本资格仍可能保留在元数据的 `formal_date_status` 中，不能把内容纳入自动解释为所有形式资格均已最终确认。
+## 编号与边界
 
-## 文件性质
+本目录按入选顺序重新连续编号。来源集合编号保存在`source_selected_number`和`NUMBER_MAPPING.csv`中，稳定内部ID未改变。
 
-这里的PDF和文本均为普通独立文件，不是符号链接。`SHA256SUMS`和`validation.json`用于验证文件完整性。
+目录名`selected_no_model_adjustment`为发布时沿用的技术路径；判断文章是否合格时，以v1.6统一标准全文为准，而不是仅看目录名。
