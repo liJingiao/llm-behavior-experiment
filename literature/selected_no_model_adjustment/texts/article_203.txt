@@ -1,0 +1,1670 @@
+Position: Theory of Mind Benchmarks are Broken for Large Language Models
+
+
+      Matthew Riemer 1 2 3 Zahra Ashktorab 1 Djallel Bouneffouf 1 Payel Das 1 Miao Liu 1 Justin D. Weisz 1
+                                             Murray Campbell 1
+
+
+                            Abstract                               of mind (Bubeck et al., 2023; Kosinski, 2023; Ma et al.,
+                                                                   2023; Street et al., 2024; Strachan et al., 2024). Although
+      Our paper argues that the majority of theory of              this course of action seems logical, it is important to recog-
+      mind benchmarks are broken because of their in-              nize that AI has a tendency to over optimize for its training
+      ability to directly test how large language mod-             objectives in a manner that is quite alien to the way the hu-
+      els (LLMs) adapt to new partners. This problem               man brain works. For example, Bubeck et al. (2023) tout the
+      stems from the fact that theory of mind bench-               performance of LLMs on human theory of mind tests, but
+      marks for LLMs are overwhelmingly inspired by                they note a noticeable lack of “process consistency” in LLM
+      the methods used to test theory of mind in hu-               explanations: LLMs can come up with compelling explana-
+      mans and fall victim to a fallacy of attributing             tions for what they do that have very little to do with their
+      human-like qualities to AI agents. We expect that            actual reasoning process. We must therefore proceed with
+      humans will engage in a consistent reasoning pro-            caution about our conclusions when we evaluate LLMs in
+      cess across various questions about a situation, but         ways that do not directly align with our objectives. When we
+      this is known to not be the case for current LLMs.           evaluate humans, we typically focus on what we call in this
+      Most theory of mind benchmarks only measure                  paper literal theory of mind, which is their ability to predict
+      what we call literal theory of mind: the ability             the behavior of other agents. As noted by Ma et al. (2023),
+      to predict the behavior of others. However, this             this concept encompasses various abstractions including ac-
+      type of metric is only informative when agents               tions, intentions, beliefs, percepts, desires, knowledge, and
+      exhibit self-consistent reasoning. Thus, we intro-           emotions. However, with humans we take for granted that
+      duce the concept of functional theory of mind: the           the ability to predict the behavior of other agents will be con-
+      ability to adapt to agents in-context following a            sistently applied within their own reasoning process when
+      rational response to their behavior. We find that            determining their own behavior. The main insight of our
+      many open source LLMs are capable of displaying              paper is that this form of process consistency cannot be taken
+      strong literal theory of mind capabilities, but seem         for granted when evaluating LLMs.
+      to struggle with functional theory of mind – even
+      with exceedingly simple partner policies. Sim-               Our position is: Current LLM theory of mind bench-
+      ply put, strong literal theory of mind performance           marks are broken because they only measure literal the-
+      does not necessarily imply strong functional the-            ory of mind (Definition 2.1) rather than functional theory
+      ory of mind performance or vice versa. Achieving             of mind (Definition 2.2), which misses a key aspect of eval-
+      functional theory of mind, particularly over long            uating an agent’s ability to choose appropriate actions
+      interaction horizons with a partner, is a signifi-           based on the behavior of another agent. In Section 4 we
+      cant challenge deserving a prominent role in any             demonstrate simple, concrete cases where prominent open
+      meaningful LLM theory of mind evaluation.                    source LLMs display strong literal theory of mind perfor-
+                                                                   mance that is illusory in nature because it does not also lead
+                                                                   to strong functional theory of mind performance. Our results
+                                                                   serve as a case study to highlight the misleading nature of
+1. Introduction
+                                                                   most LLM theory of mind benchmarks even when we do
+Many recent papers that evaluate theory of mind in LLMs            find that agents achieve impressive performance.
+have been inspired by how humans are evaluated for theory          Recently, generative AI, particularly in the form of LLM
+  1               2     3
+    IBM Research Mila Université de Montréal. Correspondence       assistants, has been deployed as a tool for a growing variety
+to: Matthew Riemer <mdriemer@us.ibm.com>.                          of real-world use cases where the LLM must interact with a
+                                                                   diverse set of people performing a diverse set of tasks. As
+Proceedings of the 42𝑛𝑑 International Conference on Machine        typically deployed today, these LLMs are only interacting
+Learning, Vancouver, Canada. PMLR 267, 2025. Copyright 2025
+by the author(s).                                                  with users at inference time due to the significant computa-
+
+                                                               1
+                        Position: Theory of Mind Benchmarks are Broken for Large Language Models
+
+tional cost of continuing to train these large models in the          actions, but there would be little excuse for not winning
+context of individual users. As a result, LLMs must learn to          a high percentage of the 100 rounds. What we found is
+adapt their behavior to users in-context based on recorded            that a vanilla application of common open source LLMs
+interaction histories. Indeed, a similar scenario of growing          resulted in a policy that chose each action “Rock,” “Paper,”
+importance involves LLMs interacting with other AI agents             and “Scissor” roughly evenly. This result is interesting be-
+through an agentic framework (Shavit et al., 2023). Our               cause it is actually the famous Nash equilibrium solution
+work is inspired by the work of Akata et al. (2023) to lever-         for this game. However, this solution optimizes the worst
+age canonical repeated games from behavioral game theory              case return across any possible opponent. To act in this
+as a way to asses the adaptation ability of LLMs across a             way against an opponent that always plays “Rock” for 100
+full spectrum of incentive structures. Unfortunately, we              consecutive rounds actually demonstrates a profound lack of
+find significant deficiencies in the ability of prominent open        theory of mind. But it should be emphasized that this LLM
+source LLMs to adapt to new partners in-context, providing            agent does actually display a high-level of literal theory of
+a sobering analysis of the ability of LLMs to reliably adapt          mind. Indeed, it only takes so many rounds of seeing the
+without continual training of the model weights themselves.           other agent take the “Rock” action before the LLM is able
+                                                                      to predict it will keep doing so. The problem is that this
+The term “theory of mind” is used in a variety of different
+                                                                      prediction has nothing to do with its own chosen course of
+ways across different bodies of literature. We use the term as
+                                                                      behavior. We believe this is an important insight for the AI
+an idiomatic description of behavior, although it can also be
+                                                                      community to grapple with when measuring theory of mind
+interpreted more literally to mean there is an actual artifact
+                                                                      in agents, and we formalize the concept of functional theory
+called a “theory of mind” that depicts an explicit descrip-
+                                                                      of mind to accurately describe this often lacking capability.
+tion or model of an agent’s mental state. Literal theory of
+mind can then alternatively be considered as theory of mind
+prediction, and it is possible to achieve optimal precision           2. Two Types of Theory of Mind Between
+without forming an explicit description of an agent’s mental             Multi-Agent LLM Policies
+state. For example, a model may be conditioning on a vari-
+able that is perfectly correlated with the variables another          The Environment. The interaction process between multi-
+agent is actually considering. The literature on theory of            ple agents is often formalized as a stochastic game (Shapley,
+mind in machine learning is generally unconcerned about               1953) or rather a Markov game in the fully observable setting
+this distinction. If this prediction ability is achieved, it is       (Littman, 1994). For generality in this work, we consider
+not of practical consequence if there actually is a theory            the setting of partially observable stochastic games (POSGs)
+of mind model. Likewise, functional theory of mind can                (Kuhn, 1953) that generalize POMDPs (Kaelbling et al.,
+alternatively be considered to be theory of mind reason-              1998) and MDPs (Puterman, 1994) to the multi-agent and
+ing. Our assertion is that functional theory of mind is what          decentralized setting. A POSG can be defined as the tuple
+the AI research community should be focused on creating               < , , ,  , ,  , 𝑂, 𝑇 >. Here  is a finite set of agents,
+and evaluating. Notice that this goal requires the ability to          is a finite set of global states, and  = ×𝑖 𝑖 is the set of
+adapt to other agents, but does not necessarily require that          joint actions across agents 𝑖 ∈ .  ∶  × ↦  is the state
+the agent has an explicit theory of mind model. If we are             transition function based on the joint actions across agents,
+describing a capability, it is important to focus on the prob-        and  = ×𝑖∈ 𝑖 is the joint reward function with reward
+lem it solves, which must be disentangled from the solution           function 𝑖 ∶  × ↦ ℝ for each agent 𝑖 ∈ .  = ×𝑖  𝑖 is
+method. To define the capability of theory of mind in such a          the joint set of observations with  𝑖 denoting a finite set of
+way that an explicit theory of mind model is needed would             observations for each agent. 𝑂 ∶ ↦  is the function that
+only make sense if there were kinds of behaviors express-             produces agent observations based on the state. Finally, 𝑇
+ible with model-based approaches that are not expressible             is the horizon of interactions before termination.
+with model-free approaches. However, we know that these               Agent Interaction. We can now consider environment in-
+algorithm classes have the same expressiveness – at least in          teraction at each step from the perspective of a given focal
+the case of reinforcement learning (Sutton & Barto, 2018).            agent 𝑖 ∈  where we will use −𝑖 ∶=  ⧵𝑖 to denote set of all
+The position of our paper was inspired by an unexpected               other agents. At step 𝑡 agent 𝑖 takes action 𝑎𝑖𝑡 and the other
+result in our early experiments. We considered the incred-            agents take a joint action 𝒂−𝑡 𝑖 yielding a transition from 𝑠𝑡
+ibly simple scenario of an LLM agent playing the classic              to 𝑠𝑡+1 with probability  (𝑠𝑡+1 |𝑠𝑡 , 𝒂𝒕 ) where 𝒂𝒕 = {𝑎𝑖𝑡 , 𝒂−𝑡 𝑖 }.
+game Rock, Paper, Scissors against an agent that always               The agent then receives its own observation of this state
+plays the action “Rock” for 100 consecutive rounds. The               𝑥𝑖𝑡+1 and reward 𝑟𝑖𝑡 . In the environments we consider in
+optimal course of action is for the LLM to respond with               this paper it is assumed that 𝑥𝑖𝑡+1 also contains information
+the counter to this action “Paper” as much as possible. It            about the actions of the other agents at the previous step
+would be reasonable for an agent to take a few exploratory            𝒂−𝑡 𝑖 . However, this need not always be the case. In such a
+
+
+                                                                  2
+                             Position: Theory of Mind Benchmarks are Broken for Large Language Models
+
+POMDP, each agent’s policy 𝑎𝑖𝑡 ∼ 𝜋 𝑖 (ℎ𝑡 ) generates its action                function 𝔻 and abstraction mapping function 𝜙 to keep the
+stochastically based on its own interaction history ℎ𝑖𝑡 where                  definition as broad as possible and encompass as much as
+ℎ𝑖𝑡 ∶= {𝑥𝑖1 , 𝑎𝑖1 , 𝑟𝑖1 , ..., 𝑥𝑖𝑡 }. Note that policies being defined         we can of the existing literature on theory of mind. Primi-
+in this way subsumes the common case where part of the                         tive actions can definitely be directly considered (as we do
+history is discarded for computational or memory efficiency.                   in this paper). In this case, 𝜙 is the identity mapping and
+                                                                               𝔻 is set to a percent error metric. 𝜙 can also be straight-
+LLM History Representations. As we are interested in
+                                                                               forwardly set to various temporal abstractions of actions
+evaluating LLMs for this problem it is additionally assumed
+                                                                               given sufficient history length 𝑇 . Moreover, latent features
+that this history representation ℎ𝑖𝑡 must be encoded in text
+                                                                               that impact the behavior of agents such as intentions, be-
+(i.e. LLM tokens). This implies that there must be a function
+                                                                               liefs, percepts, desires, knowledge, and emotions can also
+that we have direct access to converting the observations 𝑥𝑖𝑡 ,
+                                                                               be considered as alternative for 𝜙 – as an inverse mapping
+actions 𝑎𝑖𝑡 , and rewards 𝑟𝑖𝑡 to the form of LLM token repre-
+                                                                               must exist. However, the agent’s actions alone may not pro-
+sentations. Moreover, it is important to note that we are inter-
+                                                                               vide enough information, for example, to fully determine
+ested in learning generalist policies across tasks with LLMs.
+                                                                               an agent’s emotional state, we can only judge the theory of
+As a result, following the protocol of Akata et al. (2023), it
+                                                                               mind performance of an agent in terms of the information
+can also be useful to include any known information about
+                                                                               provided. This does not serve as meaningful limitation of
+the environment tuple < , , ,  , ,  , 𝑂, 𝑇 > to the
+                                                                               this definition because Bayesian reasoning is generally the
+agent to promote rapid adaptation to new tasks.
+                                                                               desired outcome in the presence of lack of information.
+2.1. Disentangling Literal Theory of Mind from                                 One obvious issue with Definition 2.1 is that it is a function
+     Functional Theory of Mind Evaluation                                      of a theory of mind model 𝝅̂ −𝒊 , which is not even necessarily
+                                                                               needed to express the policy of an agent 𝜋 𝑖 . For cases where
+The goal of any individual agent 𝑖 interacting in an environ-                  the value of 𝝅̂ −𝒊 is decoupled from the reasoning involved
+                                          ∗
+ment for 𝑇 steps is to learn a policy 𝜋 𝑖 that maximizes its                   in 𝜋 𝑖 , it is of particular importance to consider a functional
+expected reward given the policies of the other agents in the                  metric of the degree to which the policy 𝜋 𝑖 is catered to the
+environment 𝝅 −𝒊 starting from state 𝑠1 :                                      particular other agent policies 𝝅 −𝒊 . We can define this metric
+                               [ 𝑇                ]
+                ∗               ∑                                              in terms of the 𝑇 -step regret incurred by 𝜋 𝑖 .
+             𝜋 𝑖 = arg max 𝔼        𝑟𝑖𝑡 |𝑠1 , 𝝅 −𝒊 .
+                             𝜋𝑖           𝑡=1                                     Definition 2.2 (T-Step Functional Theory of Mind Re-
+                                                ∗
+Because the best course of action 𝜋 𝑖 is critically dependent                     gret). The 𝑇 step regret from start state 𝑠1 of policy 𝜋 𝑖
+on the policies of the other agents 𝝅 −𝒊 , it is common for                       that receives individual rewards 𝑟𝑖1 , ..., 𝑟𝑖𝑇 when playing
+agents to directly learn a model of the other agent’s policies                    with policy 𝝅 −𝒊 in comparison to the optimal policy
+𝝅̂ −𝒊 in decentralized settings. This is analogous to model-                         ∗
+                                                                                  𝜋 𝑖 that plays the optimal 𝑇 -step response to policy
+based RL (Sutton & Barto, 2018; Brafman & Tennenholtz,                                                        ∗        ∗
+                                                                                  𝝅 and receives rewards 𝑟𝑖1 , ..., 𝑟𝑖𝑇 :
+                                                                                    −𝒊
+
+2002; Schrittwieser et al., 2020) and is useful for stabilizing
+                                                                                                                                ∑
+                                                                                                                                𝑇
+learning (Lowe et al., 2017). However, it is worth noting                                ΔFunctional (𝑠1 , 𝜋 𝑖 , 𝜋 −𝑖 , 𝑇 ) =
+                                                                                                                                         ∗
+                                                                                                                                      (𝑟𝑖𝑡 − 𝑟𝑖𝑡 ).
+that it is not a strict requirement for representing a policy                                                                   𝑡=1
+    ∗
+𝜋 𝑖 that is optimal in functionality (Sutton, 1991). That
+said, it is tempting to consider when using LLMs as it can                     Definition 2.21 provides us with a functional metric for mea-
+be generated by simply prompting the model with a token                        suring theory of mind in the presence of other agents param-
+representation of the interaction history ℎ𝑗𝑡 for 𝑗 ∈ −𝒊. We                   eterized by 𝝅 −𝒊 . However, it is still worth considering when
+can then model performance of any particular approximate                       the conclusions from this metric will be much different than
+literal theory of mind model using Definition 2.1.                             conclusions from a literal theory of mind metric following
+   Definition 2.1 (𝑇 -Step Literal Theory of Mind Loss).                       Definition 2.1. To do this we must define a new policy 𝜋ToM     𝑖
+
+   The loss from start state 𝑠1 with respect to a joint policy                 that is directly based on the literal theory of mind model pre-
+   𝝅 −𝒊 that generates 𝑇 actions 𝒂−𝟏𝒊 , ..., 𝒂−𝒊
+                                              𝑻
+                                                 of its approxi-               diction 𝝅̂ −𝒊 such that behavior is chosen to be a rational max-
+   mation 𝝅̂ −𝒊 that generates 𝑇 actions 𝒂̂ −𝟏𝒊 , ..., 𝒂̂ −𝑻𝒊 is:              imization of the action-value function. In our experiments
+                                                                               we simulate such a policy utilizing ground truth knowledge
+         Literal (𝑠1 ,𝝅̂ −𝒊 , 𝝅 −𝒊 , 𝑇 ) =                                    of the payoff structure and use ΔToM (𝑠1 , 𝝅̂ −𝒊 , 𝜋 −𝑖 , 𝑇 ) to de-
+                       𝔻(𝜙(𝒂−𝟏𝒊 , ..., 𝒂−𝑻𝒊 ), 𝜙(𝒂̂ −𝟏𝒊 , ..., 𝒂̂ −𝑻𝒊 ))       note the regret of such a policy. ΔToM thus represents the
+                                                                               best regret that can be possibly achieved by faithfully fol-
+   where 𝔻 is some distance function and 𝜙 is some ab-                         lowing the predictions of our theory of mind model under
+   straction mapping function over actions.                                       1
+                                                                                    The regret Δ can also be considered a form of loss for consis-
+                                                                               tency with Definition 2.1. We chose this notation, rather than , to
+We phrase Definition 2.1 in terms of an abstract distance                      stay consistent with the common notation for each in the literature.
+
+                                                                           3
+                               Position: Theory of Mind Benchmarks are Broken for Large Language Models
+
+the assumption that the predictions are correct.                                       et al. (2023) (see Figure 1). Our prompting strategy for the
+                                                                                       theory of mind model is detailed in Figure 2. The horizon
+Interesting Tasks for Theory of Mind. Definition 2.2 also
+                                                                                       of interaction is 𝑇 = 100 steps against a randomly chosen
+provides us with a natural way to characterize how interest-
+                                                                                       fixed single action policy i.e. always Rock, always Paper,
+ing a task is for showcasing theory of mind. Specifically,
+                                                                                       or always Scissors. Note that this interaction horizon is 10x
+the task definition must include distributions over the joint
+                                                                                       longer than prior work (Akata et al., 2023) as we want to
+policies of the other agents 𝑝(𝝅 −𝒊 ) and start states 𝑝(𝑠1 ). We
+                                                                                       make sure behavior converges. 95% confidence intervals
+can then consider an expectation over two joint policies
+                                                                                       of the mean estimate across opponent policies are provided.
+𝝅 ′−𝒊 , 𝝅 ′′−𝒊 ∼ 𝑝(𝝅 −𝒊 ) drawn from the distribution and define
+                                                                                       See Appendix C for further details.
+𝜋 ′∗ as the optimal response to 𝝅 ′−𝒊 . The metric would then be
+𝔼𝑠∼𝑝(𝑠1 ),𝝅 ′−𝒊 ,𝝅 ′′−𝒊 ∼𝑝(𝝅 −𝒊 ) [ΔFunctional (𝑠, 𝜋 ′∗ , 𝝅 ′′−𝒊 , 𝑇 )∕𝑇 ]. This                    Functional Theory of Mind Gap
+metric requires that the task itself highlights the need to
+adapt to the specific policies of the other agents. For exam-                              Throughout Table 1 we see a massive gap between
+ple, notice that for Rock, Paper, Scissors against arbitrary                               the regret based on a rational response to the theory
+one action policies, as described in Section 1, this metric                                of mind model ΔToM with accuracy ToM % and the
+evaluates to a significant 1.0 expected regret per step when                               functional regret achieved in practice ΔFunctional .
+the reward for wins is +1, 0 for ties, and −1 for losses.
+                                                                                       We also implemented a simple tabular model that performs
+Metrics for Our Experiments. In our experiments, we aim                                efficient exploration following the classic RMax algorithm
+to get a holistic view of both the literal theory of mind and                          (Brafman & Tennenholtz, 2002) for near optimal worst case
+functional theory of mind performance of each LLM and                                  sample efficiency driven by optimistic Q-Learning (Watkins,
+prompting strategy. We report the accuracy of the literal                              1989) with the actions at the last time step treated as the
+theory of mind predictions with respect to individual actions                          state representation. The tabular theory of mind model is
+as ToM %. We also report the regret per step functionally                              based on a simple frequency count based prediction using
+achieved by each policy as ΔFunctional ∕𝑇 . Finally, to get a                          the same state representation. It is clear that no LLM model
+clearer picture of the difference between the literal theory                           gets even close to the performance of the tabular model in
+of mind performance and functional theory of mind perfor-                              terms of functional theory of mind performance – although
+mance, we report ΔToM ∕𝑇 the regret per step of the rational                           some come close in terms of their literal theory of mind per-
+policy based on the literal theory of mind model.                                      formance. We find that Mixtral outperforms the LLAMA-2
+Accumulated Reward vs. Regret. In the experiments of our                               family and we will thus subsequently include experiments
+paper, the games are simple enough that it is easy to compute                          with LLAMA-3 (which performs better). However, it is also
+the reward rate of the optimal policy. However, in most cases                          interesting to see the trends within the LLAMA-2 family of
+with complex interactions the optimal policy is unknown or                             models. Bigger models seem to get better performance and
+even unknowable. In these cases, the accumulated reward is                             models with instruction tuning (labeled as “Chat” models)
+commonly used in place of regret. This is also a valid metric                          tend to get worse literal theory of mind performance, but
+of functional theory of mind as it only differs from the regret                        better functional theory of mind performance. This is an
+by a constant factor based on the accumulated reward of                                intuitive result as instruction tuning further prioritizes inter-
+the optimal policy. The advantage of using regret, when                                active decision making and takes the model further from its
+possible, is to directly keep track of the relative optimality.                        original language modeling objective that is key to predict-
+                                                                                       ing what will come next in a sequence of interactions.
+2.2. Initial Results
+We begin by conducting experiments on the Rock, Paper,                                 3. Overview of Existing Benchmarks
+Scissor domain as discussed in Section 1. Our goal here is                             Frameworks for Machine Theory of Mind. In the field
+to conduct an experiment that is as simple as possible so                              of multi-agent reinforcement learning, theory of mind is
+that we can clearly disentangle literal theory of mind from                            generally interpreted as the ability to directly predict the
+functional theory of mind without additional conflating fac-                           behavior (i.e. the actions) that another agent will take (Lowe
+tors. LLAMA-2 had previously been found to achieve strong                              et al., 2017; Rabinowitz et al., 2018). However, there can
+performance on repeated matrix games (Lorè & Heydari,                                  be a number of different ways to abstractly represent this
+2023), so we considered initial experiments with the full                              behavior (Ma et al., 2023). For example, abstraction can
+LLAMA-2 family (Touvron et al., 2023) as well as the com-                              be applied in the temporal dimension representing behav-
+petitive Falcon 40B (Almazrouei et al., 2023) and Mixtral                              ior as a composition of hierarchical skills (Sutton et al.,
+models (Jiang et al., 2024). Our results are provided in Table                         1999; Bacon et al., 2017; Riemer et al., 2018b; 2020; Allen
+1. Our prompting strategy for the LLM policy 𝜋 𝑖 follows                               et al., 2020; Abdulhai et al., 2021) or goals (Schaul et al.,
+what was established for repeated matrix games by Akata                                2015; Andrychowicz et al., 2017; Yang et al., 2018; Kim
+
+                                                                                   4
+                         Position: Theory of Mind Benchmarks are Broken for Large Language Models
+
+                              LLM Model                     ΔFunctional ∕𝑇        ΔToM ∕𝑇        ToM %
+                              Tabular                      0.083 ± 0.004       0.039 ± 0.006    97.4 ± 0.4
+                              LLAMA-2 70B Chat             0.857 ± 0.142       0.119 ± 0.006    92.1 ± 0.4
+                              LLAMA-2 70B                  0.971 ± 0.067       0.048 ± 0.003    96.8 ± 0.2
+                              LLAMA-2 13B Chat             0.891 ± 0.173       0.095 ± 0.006    93.7 ± 0.4
+                              LLAMA-2 13B                  1.015 ± 0.044       0.049 ± 0.003    96.7 ± 0.2
+                              LLAMA-2 7B Chat              0.904 ± 0.151       0.085 ± 0.004    94.3 ± 0.3
+                              LLAMA-2 7B                   0.972 ± 0.039       0.066 ± 0.004    95.6 ± 0.3
+                              Falcon 40B                   0.973 ± 0.040       0.056 ± 0.005    96.2 ± 0.3
+                              Mixtral 8x7B Instruct v1     0.542 ± 0.070       0.050 ± 0.005    96.7 ± 0.3
+
+                    Table 1: Initial results for Rock, Paper, Scissors against simple single action policies.
+
+et al., 2019a;b). Abstraction can also be applied at the agent           for beginner programmers (Nguyen et al., 2024).
+level in order to represent the abstract actions of groups
+                                                                         Behavioral Game Theory with LLMs. Our analysis of
+(Memarian et al., 2022; Touzel et al., 2024). Moreover, as
+                                                                         functional theory of mind in LLMs closely follows work
+showcased by the games Hanabi (Bard et al., 2020; Nekoei
+                                                                         considering LLMs in the context of behavioral game theory.
+et al., 2021; Malloy et al., 2021a; Nekoei et al., 2023) and
+                                                                         However, this work has not featured contextualization of
+Poker (Ganzfried & Sandholm, 2015; Brown & Sandholm,
+                                                                         literal theory of mind performance and is not included as an
+2019), theory of mind can be directly related to inferring re-
+                                                                         aspect of popular benchmarks focusing on measuring literal
+cursive beliefs about unobserved information or knowledge
+                                                                         theory of mind. Our paper builds off the work of Akata
+(Moreno et al., 2021). We consider the efficacy of predic-
+                                                                         et al. (2023) who considered LLMs playing the Prisoner’s
+tions of all of these representations of behavior as examples
+                                                                         Dilemma and Battle of Sexes. However, we focus on per-
+of measuring literal theory of mind (Definition 2.1). How-
+                                                                         formance playing with simple policies rather than playing
+ever, it has been recently recognized in the human-computer
+                                                                         with other LLMs. LLMs will generally tend to generate
+interaction (HCI) literature that we must go even further to
+                                                                         in-distribution interaction histories when they play them-
+achieve mutual theory of mind for better collaboration with
+                                                                         selves, so we also find it more interesting to focus on very
+humans (Wang & Goel, 2022; Zhang et al., 2024). In this
+                                                                         simple relatively out of distribution partner policies. For the
+framework, the mutual shaping of mental representations as
+                                                                         Battle of Sexes game, Akata et al. (2023) found that GPT-4
+well as the functional goal of improved performance on tasks
+                                                                         only could adapt the canonical human-like alternating policy
+are emphasized. We are inspired by this aspirational goal in
+                                                                         when using a special form of social cognition prompting that
+our paper, leading us to define a functional measurement of
+                                                                         considers its own predictions of the actions of others (similar
+theory of mind performance (Definition 2.2).
+                                                                         to “perspective taking” prompting (Xu et al., 2024)). We
+Measuring LLM Theory of Mind. While a number of                          also tried this approach in our setting and did not find it to be
+recent studies have touted superior human-level LLM the-                 an adequate fix the issues that LLMs experience. The ability
+ory of mind capabilities, to the best of our knowledge these             for LLMs to play Rock, Paper, Scissors was previously con-
+tasks have always center around passive question answering               sidered by Fan et al. (2024) and the ability for LLMs to play
+(Bubeck et al., 2023; Strachan et al., 2024; Kosinski, 2023;             the Prisoner’s Dilemma was previously considered by Lorè
+Street et al., 2024) as typified by the classic Sally-Anne false-        & Heydari (2023), but not in the context of theory of mind.
+belief test (Baron-Cohen et al., 1985). LLMs have also been
+                                                                         What We are Advocating For. Our main insight is that
+successfully employed to simulate a diversity of personas
+                                                                         benchmarks need an interactive component where the theory
+(Park et al., 2024; Ha et al., 2024), trust behaviors (Xie et al.,
+                                                                         of mind reasoning performance of LLMs can be assessed
+2024), or even for macro-economic simulations (Li et al.,
+                                                                         separately from predictions about literal theory of mind.
+2023). However, these tasks all lack interactivity and only re-
+                                                                         Games such as Codenames (Bills et al., 2025), Hanabi (Bard
+flect strong performance at literal theory of mind (Definition
+                                                                         et al., 2020), Taboo (Ashktorab et al., 2020), and Wave-
+2.1). On the other hand, Kim et al. (2023) found that LLMs
+                                                                         length (Morrison et al., 2025) are good examples of games
+perform poorly when subjected to multiple question types
+                                                                         that would score highly in terms of the relevance metric we
+that demand the same consistent underlying reasoning. This
+                                                                         proposed in Section 2. In Appendix A, we describe how
+finding is in the same spirit and complimentary to the finding
+                                                                         literal and functional theory of mind could be measured in
+of our paper as well as the finding that LLMs lack process
+                                                                         each of these games. In our experiments, we focus on simple
+consistency (Bubeck et al., 2023). Moreover, LLMs have
+                                                                         matrix games in which it is even easier to disentangle these
+been found to fail at important interactive applications such
+                                                                         concepts and control for conflating factors.
+as adaptive eduction for users of diverse age or education
+levels (Rooein et al., 2023) and providing coding assistance
+
+
+                                                                     5
+                        Position: Theory of Mind Benchmarks are Broken for Large Language Models
+
+4. Further Analysis: Difficulties in Achieving                        nally, we consider Social Prompting as proposed for IBS
+   Functional Theory of Mind                                          by Akata et al. (2023) where the LLM first generates a pre-
+                                                                      diction of the other agent’s action and then conditions its
+In this section, we attempt to gain a better understanding of         reasoning based on that action. This approach is detailed in
+the surprising result in Section 2.2. Rocks, Paper, Scissors          Figure 18 with the variant using QA prompting for the ac-
+(RPS) is a canonical competitive game – as can be seen by             tion prediction (Figure 5) being called Social QA Prompting
+the payoff table in Figure 5. We also wanted to evaluate              and the one using LM Prompting for the action prediction
+our models on a canonical cooperative game, for which we              (Figure 3) being called Social LM Prompting.
+chose the Iterated Battle of Sexes (IBS) following Akata
+et al. (2023) with payoffs detailed in Figure 6. Once again           Our results applying these strategies to Mixtral 8x7B Instruct
+following Akata et al. (2023), we also evaluate our models            v1 are included in Table 2. We also provide comprehensive
+on the famous Iterated Prisoner’s Dilemma (IPD) mixed                 results in Appendix C.2 including for the LLAMA-2 70B
+incentive game with payoffs detailed in Figure 7. We opted to         Chat and LLAMA-3 70B Instruct models (Table 8) and
+test each model on the full spectrum of incentive structures to       Mistral Large 2 (Table 9). We find that LM Prompting
+rule out explanations for performance lacking in competitive          always achieves the best literal theory of mind performance.
+games such as an intrinsic altruism bias in LLMs (as has              Adding the QA format seems to make literal theory of mind
+been previously suggested by Leng & Yuan (2023)).                     a lot worse by taking the input distribution further from the
+                                                                      LLM task and closer to the kind of processing needed for
+4.1. Different Prompting Strategies                                   actual decision making. The gap between functional theory
+                                                                      of mind and literal theory of mind performance is predictably
+We consider three high-level classes of prompting strategies          smaller in this case. CoT Prompting has an inconsistent
+in order to provide a comprehensive evaluation.                       effect on literal theory of mind and always appears to make
+                                                                      the functional theory of mind performance better than vanilla
+Generic Strategies: We will henceforth call the prompting
+                                                                      QA Prompting. Reflexion and Plans+Insights also seem to
+strategy used in Section 2.2 LM Prompting (see Figure 1)
+                                                                      improve on QA prompting in terms of functional theory of
+where the probability of each action in the action space is
+                                                                      mind performance, although we find that they do not quite
+explicitly drawn from the model to generate the next action
+                                                                      match the performance of generic CoT prompting.
+via next token prediction. See Figure 2 for the literal theory
+of mind version of the prompt. In QA Prompting (Figures
+4 and 5), decision making is posed as a question answering               Gap Remains with Literal Theory of Mind Inputs
+problem where the LLM keeps generating stochastic outputs                 In Table 2 even when the literal theory of mind pre-
+until they are in the desired format and action space vocabu-             dictions are given as input, the LLM does not per-
+lary. This is implemented as a step along the way to Chain                form effective rational reasoning with this input.
+of Thought (CoT) reasoning (Wei et al., 2022) that we refer
+to as CoT Prompting (Figures 6 and 7) in which the LLM
+must generate a reasoning process and its own answer based            Perhaps the most interesting case is Social Prompting, which
+on that reasoning process in the correct format.                      seems consistently helpful regardless of the method of literal
+                                                                      theory of mind prompting. However, a large gap between
+Strategies for In-Context RL: We also wanted to consider              functional theory of mind and literal theory of mind remains
+prompting strategies in the literature specifically targeted at       even with Social Prompting. This is counterintuitive be-
+adapting LLMs in context to maximize reward. Fish et al.              cause the literal theory of mind model is directly provided
+(2024) introduced Plans + Insights Prompting as a way to              as an input. It appears that the LLM still does not generate
+promote coordination between LLM agents based on GPT-                 rational responses to these predicted actions. Note that the
+4 by having the agents also generate text related to plans            discrepancy in the LM Prompting ToM % comes from the
+and insights and not just actions at each step while feeding          need to prompt before agent’s action is generated for Social
+in these generated plans and insights an input at the next            Prompting (Figure 3) while prompting after the action is
+step (see Figures 8 and 9). The idea is to be helpful in              generated (Figure 2) is more effective when possible.
+promoting consistent strategies across LLM calls. We also
+consider Reflexion Prompting (Shinn et al., 2024), which is           4.2. Reasoning Over Long Contexts
+a method for performing so-called verbal RL in-context by
+keeping a memory of reflections updated each time feedback            Due to the surprising result of Social Prompting still ex-
+is received from the environment. We provide example                  periencing a significant functional theory of mind gap, we
+prompts in Figures 10, 11, and 12 and consider memory                 wanted to understand more about the difficulty these LLMs
+sizes between 1 and 3 (we always report the best value).              may experience when reasoning over a long context. We
+                                                                      now consider the LLAMA-3 70B Instruct model (Dubey
+Strategies Explicitly Considering Theory of Mind: Fi-
+                                                                      et al., 2024) for its superior performance over long context
+
+                                                                  6
+                         Position: Theory of Mind Benchmarks are Broken for Large Language Models
+
+                             Prompting          Game      ΔFunctional ∕𝑇        ΔToM ∕𝑇         ToM %
+                             LM                 RPS      0.542 ± 0.070       0.050 ± 0.005    96.7 ± 0.3
+                             QA                 RPS      0.881 ± 0.117       0.606 ± 0.043    59.6 ± 2.9
+                             CoT                RPS      0.648 ± 0.042       0.998 ± 0.020    33.5 ± 1.4
+                             Plans + Insights   RPS      0.705 ± 0.058       0.443 ± 0.041    70.5 ± 2.7
+                             Reflexion          RPS      0.759 ± 0.033       0.530 ± 0.042    64.7 ± 2.8
+                             Social QA          RPS      0.676 ± 0.058       0.619 ± 0.045    58.7 ± 3.0
+                             Social LM          RPS      0.643 ± 0.058       0.119 ± 0.038    92.0 ± 2.5
+                             LM                 IBS      2.055 ± 0.391       0.216 ± 0.026    97.3 ± 0.4
+                             QA                 IBS      2.518 ± 0.422       1.818 ± 0.259    75.9 ± 4.0
+                             CoT                IBS      2.169 ± 0.107       1.659 ± 0.095    79.8 ± 1.4
+                             Plans + Insights   IBS      2.806 ± 0.279       1.800 ± 0.274    75.5 ± 4.1
+                             Reflexion          IBS      2.590 ± 0.179       1.726 ± 0.270    77.9 ± 4.2
+                             Social QA          IBS      2.557 ± 0.451       2.190 ± 0.383    70.3 ± 5.7
+                             Social LM          IBS      2.082 ± 0.329       0.182 ± 0.057    97.4 ± 0.8
+                             LM                 IPD      0.949 ± 0.142       0.098 ± 0.029    97.8 ± 0.5
+                             QA                 IPD      2.365 ± 0.179       1.342 ± 0.177    68.8 ± 2.7
+                             CoT                IPD      0.955 ± 0.115       1.105 ± 0.041    60.6 ± 4.5
+                             Plans + Insights   IPD      1.379 ± 0.180       1.169 ± 0.195    72.3 ± 3.2
+                             Reflexion          IPD      1.403 ± 0.156       1.207 ± 0.209    69.5 ± 2.9
+                             Social QA          IPD      1.569 ± 0.132       1.338 ± 0.234    68.2 ± 3.9
+                             Social LM          IPD      1.098 ± 0.089       0.110 ± 0.037    97.4 ± 0.8
+
+Table 2: Comparing literal and functional metrics across prompting strategies on Rock, Paper, Scissors (RPS), Iterated Battle
+of Sexes (IBS), and the Iterated Prisoner’s Dilemma (IPD) for Mixtral 8x7B Instruct v1 playing with single action partners.
+
+tasks. We also add Oracle Prompting where the actual action            formance and the payoff table is not, implying the LLM must
+the partner will take (and not just a prediction) is directly          strugle to effectively reason about the payoffs. For IPD the
+provided as input (Figure 15). As well as Oracle + Max                 combo of both the payoff table and interaction history is de-
+Prompting where maximizing the reward in response to their             structive such that it does much better with either in isolation.
+action is further emphasized. We additionally consider a               Seeing that the difficulty of reasoning over long contexts is at
+variant where the interaction history or the payoffs are re-           the core of the issue, we also tried a popular approach called
+moved from the prompt. Finally, we added a variant of CoT              System 2 Attention (S2A) (Weston & Sukhbaatar, 2023) to
+Prompting where three in-context examples of ideal thought             summarize the payoffs and history before sending it to either
+processes are provided (Figure 13) that we call CoT 3-Shot.            QA or CoT Prompting (Figures 16 and 17). S2A adds some
+                                                                       value to CoT for IPD, but it is not as good as CoT for RPS
+In Table 3 we provide the regret per step of each prompt-
+                                                                       and IBS. Still no LLM matches tabular performance.
+ing strategy across the three games. LLAMA-3 seems to
+consistently outperform LLAMA-2, but even still Social                 Deeper Analysis. We have conducted a number of exper-
+Prompting does not close the gap with the tabular model.               iments that we do not have space to recap in detail within
+Meanwhile, CoT leads to big improvements sometimes, but                the main text. In Appendix C.3 we validate the generality
+is inconsistent, making performance worse for same cases.              of our findings regarding functional theory of mind perfor-
+                                                                       mance across open source models including LLAMA-3 70B
+            Gap Remains with Oracle Inputs                             Instruct, Mixtral 8x7B Instruct v1, and Mistral Large 2 when
+    In Table 3 even when the actual actions and pay-                   paired with more dynamic tit-for-tat style partner policies.
+    off structure are given as input, the LLM does not                 Additionally, in Appendix C.4 we look at the role of in-
+    perform effective rational reasoning with this input.              ductive bias in the action representation on performance of
+                                                                       LLAMA-3 70B Instruct and Mistral Large 2 models. We
+                                                                       find that more inductive bias is helpful with a small number
+Indeed, it is surprising to see that Oracle consistently per-          of interactions, but could lead to poor long-term behavior
+forms worse than the tabular RMax model that is learned                that does not converge with respect to the partner’s policy.
+from scratch without access to the payoff table or knowledge
+                                                                       Reasoning Models. As our results suggest that achieving
+of the other agent’s policy. This speaks to a difficulty reason-
+                                                                       functional theory of mind seems related to reasoning over
+ing over the long contexts of this task. Incentivising max-
+                                                                       long interaction histories, it is natural to question how the
+imization in the prompt definitely improves performance,
+                                                                       recent emergence of trained chain of thought reasoning mod-
+but does not change the overall picture.
+                                                                       els with verifiable rewards such as DeepSeek-R1 (Shao et al.,
+For RPS and IBS the interaction history seems vital for per-
+
+                                                                   7
+                       Position: Theory of Mind Benchmarks are Broken for Large Language Models
+
+                           Prompting                     RPS               IBS              IPD
+                           Tabular                  0.083 ± 0.004     0.211 ± 0.012    0.086 ± 0.009
+                           QA                       0.444 ± 0.107     1.391 ± 0.283    0.996 ± 0.133
+                           CoT                      0.213 ± 0.015     2.475 ± 0.208    0.892 ± 0.210
+                           CoT + 3-Shot             0.121 ± 0.017     0.526 ± 0.081    2.773 ± 0.730
+                           S2A                      0.224 ± 0.027     1.855 ± 0.314    0.808 ± 0.192
+                           S2A + CoT                0.234 ± 0.014     2.030 ± 0.287    0.679 ± 0.137
+                           Social QA                0.256 ± 0.017     1.613 ± 0.163    0.550 ± 0.071
+                           Social LM                0.378 ± 0.052     3.437 ± 0.154    0.803 ± 0.097
+                           Plans + Insights         0.173 ± 0.026     2.405 ± 0.216    0.711 ± 0.114
+                           Reflexion                0.465 ± 0.021     3.348 ± 0.105    1.076 ± 0.139
+                           Oracle                   0.238 ± 0.046     1.343 ± 0.146    0.839 ± 0.056
+                           Oracle + Max             0.153 ± 0.014     0.785 ± 0.072    0.767 ± 0.100
+                           Oracle +Max -History     1.275 ± 0.152     2.060 ± 0.079    0.206 ± 0.018
+                           Oracle +Max -Payoffs     0.103 ± 0.015     0.883 ± 0.097    0.241 ± 0.046
+
+Table 3: Ablating long-context reasoning in terms of ΔFunctional ∕𝑇 for LLAMA-3 70B Instruct across Rock, Paper, Scissors
+(RPS), Iterated Battle of Sexes (IBS), and the Iterated Prisoner’s Dilemma (IPD) when playing with single action partners.
+
+
+2024) has impacted theory of mind in these models. In Table         their ultimate goal (Littman et al., 2001; Wang & Sandholm,
+4 we compare the performance of the DeepSeek-R1-Distill-            2002; Greenwald et al., 2003; Zinkevich et al., 2005; 2007).
+Qwen-32B with the Tabular RMax baseline when using the              In some ways game theoretic solutions are opposite to solu-
+canonical action names for each game. We do indeed see              tions that are found with theory of mind because they focus
+the strongest functional theory of mind performance that we         on performance against worst case or optimal partners rather
+have seen from an LLM thus far when playing with single             than the partners agents they are actually paired with. Like-
+action partners. It is competitive with or even exceeding           wise, they focus on eliminating the exploitability of solutions
+the performance of RMax in all games with single action             by other agents as opposed to maximizing expected return in
+partners. That said, performance is not as consistent with          the context of the actual policies of these agents. Proponents
+tit-for-tat style dynamic partners. Notably, we also see a          of the game theoretic approach will readily acknowledge
+bizarre and unique trend in which a rational response to            that theory of mind is more descriptive of the way that hu-
+its literal theory of mind predictions is consistently much         mans tend to act (Colman, 2003; Larson, 2004; Owen, 2013).
+poorer than the actual behavior generated in the cases when         The argument is rather that game theory is prescriptive of
+the functional theory of mind performance is impressive.            the way that AI agents should ideally act. We believe that
+                                                                    there is indeed some validity to this point and acknowledge
+         Functional ToM without Literal ToM                         that in a closed system in which all involved agents are AI,
+   When the trained reasoning model in Table 4 demon-               this is the optimal case. However, this does not hold as
+   strates strong functional theory of mind, it puzzlingly          the community moves towards increasingly real-world use
+   exceeds its literal theory of mind capabilities.                 cases in which AI must interact with humans or AI agents
+                                                                    that behave sub-optimally. These use cases are the norm for
+                                                                    LLMs and are the setting in which researchers are interested
+These results serve to strengthen our case that functional          in measuring LLM theory of mind capabilities. Here there
+theory of mind and literal theory of mind performance do            is a gap between the expected reward achievable with the
+not directly imply each other. They also provoke interesting        theory of mind solution that optimizes for the expected case
+questions about the prediction capabilities that may be lost        and the game theoretic solution that optimizes for the worst
+during the training of reasoning models.                            case. Moreover, this gap should only get larger as the agent
+                                                                    interacts with more humans. We definitely acknowledge that
+5. Alternative Views                                                what society will end up preferring depends on the alignment
+                                                                    of incentive structures. Humans will probably prefer theory
+In this section, we take some time to discuss and refute            of mind solutions when their relationship with the agent is
+important alternative views to the position of our paper.           mostly collaborative, but will not want to be exploited when
+We should embrace game theory, not theory of mind.                  their relationship with the agent is mostly adversarial. We
+This is perhaps the most prominent alternative view to our          strongly support instituting guardrails in these cases and
+paper that was already highlighted in our Rock, Paper, Scis-        believe that this makes it even more important to measure
+sors example. Many papers in the multi-agent RL literature          functional theory of mind performance to understand the
+consider finding a game theoretic equilibrium solution as           extent of exploitation by AI models. We provide further
+
+                                                               8
+                        Position: Theory of Mind Benchmarks are Broken for Large Language Models
+
+               Model                        Game     Partner             ΔFunctional ∕𝑇     ΔToM ∕𝑇        ToM %
+               Tabular                      RPS      Single Action      0.083 ± 0.004     0.039 ± 0.006   97.4 ± 0.4
+               DeepSeek-R1 Distilled 32B    RPS      Single Action      0.074 ± 0.009     0.544 ± 0.126   63.7 ± 8.4
+               Tabular                      RPS      Tit-For-Tat        0.224 ± 0.007     0.105 ± 0.000   93.0 ± 0.0
+               DeepSeek-R1 Distilled 32B    RPS      Tit-For-Tat        0.906 ± 0.041     0.921 ± 0.029   38.6 ± 2.0
+               Tabular                      IBS      Single Action      0.211 ± 0.012     0.088 ± 0.020   98.7 ± 0.3
+               DeepSeek-R1 Distilled 32B    IBS      Single Action      0.126 ± 0.045     0.233 ± 0.078   97.2 ± 0.8
+               Tabular                      IBS      Tit-For-Tat        0.468 ± 0.031     0.162 ± 0.005   98.1 ± 0.1
+               DeepSeek-R1 Distilled 32B    IBS      Tit-For-Tat        0.045 ± 0.011     0.466 ± 0.065   94.5 ± 0.8
+               Tabular                      IPD      Single Action      0.086 ± 0.009     0.071 ± 0.015   98.6 ± 0.3
+               DeepSeek-R1 Distilled 32B    IPD      Single Action      0.121 ± 0.014     0.360 ± 0.111   83.1 ± 5.8
+               Tabular                      IPD      Tit-For-Tat        0.248 ± 0.005     0.070 ± 0.000   98.0 ± 0.0
+               DeepSeek-R1 Distilled 32B    IPD      Tit-For-Tat        4.789 ± 0.061     0.945 ± 0.139   88.9 ± 1.6
+
+Table 4: Comparing literal and functional metrics on Rock, Paper, Scissors (RPS), Iterated Battle of Sexes (IBS), and the
+Iterated Prisoner’s Dilemma (IPD) for DeepSeek-R1-Distill-Qwen-32B playing with single action partners.
+
+detail about the connection between functional theory of             theory of mind capabilities do not imply functional theory
+mind and relevant equilibria concepts in Appendix B.                 of mind capabilities and thus highlight the importance of
+                                                                     directly measuring functional theory of mind. Most promi-
+Literal theory of mind is paramount for insights related
+                                                                     nent LLM based services today also do not actually tune the
+applications. For some applications, we only desire that
+                                                                     model weights separately for each user and rely on in-context
+AI agents provide us with insights, which we will use to
+                                                                     learning. The likely reason for this is partly about hardware
+make decisions. For these applications, we do not wish
+                                                                     related restrictions and partly about the difficulty of per-
+to provide the AI with the agency to make these decisions
+                                                                     forming reliable continual learning. See Appendix B for a
+for us. There are indeed very important use cases of this
+                                                                     detailed discussion of connections to continual learning.
+type for which literal theory of mind would be a sufficient
+capability without functional theory of mind. Generally,             The “predict-then-optimize” perspective. Our paper is
+these applications are most helpful when the AI has access to        also related to the end-to-end predict-and-optimize and two-
+more information than the human pertaining to the situation.         stage predict-then-optimize literature (Elmachtoub & Grigas,
+However, often times the amount of agency we decide to give          2022). End-to-end approaches that jointly optimize predic-
+to an AI depends on its expected reliability in making actual        tion and decision-making often outperform two-stage ap-
+decisions. In this paper we argue that functional theory of          proaches where prediction is performed independently from
+mind serves as a necessary test for deciding if AI is ready          optimization because not all prediction errors are equally
+to receive this agency and that literal theory of mind on its        consequential for the final decision quality. This perspective
+own is not reliable for assessing this performance. It is also       nicely highlights how analyzing literal theory of mind can
+important to note that in most applications where we do not          lead to misleading conclusions about true functional theory
+provide AI with the agency to act, it would still be useful to       of mind performance, even with ideal self-consistent models.
+humans to have the AI provide an action recommendation.
+The word “broken” is too strong. It can be argued that be-           6. Conclusion
+cause there are many ways to measure literal theory of mind,
+                                                                     In this paper, we have argued that existing theory of mind
+adding functional theory of mind is a just single additional
+                                                                     benchmarks are broken because they measure literal the-
+aspect within a comprehensive theory of mind evaluation.
+                                                                     ory of mind (Definition 2.1), and not functional theory of
+However, we think “broken” is an appropriate term here
+                                                                     mind (Definition 2.2), which is what we typically actually
+because functional theory of mind is what we really care
+                                                                     care about in multi-agent social contexts. In Section 4 and
+about for applications where we give the AI agency to act,
+                                                                     Appendix C we provided comprehensive evidence that func-
+and we have found that deploying an LLM in this setting
+                                                                     tional theory of mind performance can be quite poor even
+simply based on its literal theory of mind performance can
+                                                                     when literal theory of mind performance is good and vice
+be misleading to a potentially dangerous extent.
+                                                                     versa. Our analysis considers LLMs playing simple matrix
+Functional theory of mind is easy with fine-tuning. RL               games with very simple partners to underscore this point.
+style fine-tuning would easily solve the functional theory of        This position paper serves as a call to action to develop suit-
+mind problem displayed in our matrix game based experi-              ably complex LLM theory of mind benchmarks that directly
+ments as highlighted with simple tabular models. However,            measure functional theory of mind when acting with partners
+our experiments still demonstrate a case where LLM literal           from different personas and social contexts.
+
+
+                                                                 9
+                        Position: Theory of Mind Benchmarks are Broken for Large Language Models
+
+Acknowledgements                                                      Baron-Cohen, S., Leslie, A. M., and Frith, U. Does the
+                                                                        autistic child have a “theory of mind”? Cognition, 21(1):
+MR acknowledges support from the Canada Excellence Re-                  37–46, 1985.
+search Chairs (CERC) Program. We are grateful for the
+valuable feedback we received from the ICML 2025 review-              Barto, A. G. and Dietterich, T. G. Reinforcement learning
+ers, which led to substantial improvements to our manuscript.           and its relationship to supervised learning. Handbook of
+Finally, we would like to thank Tim Klinger and Francesca               Learning and Approximate Dynamic Programming, pp.
+Rossi for their valuable feedback regarding the use of the              45–63, 2004.
+term “theory of mind” in other fields that helped shape the
+                                                                      Bashivan, P., Schrimpf, M., Ajemian, R., Rish, I., Riemer,
+way we position our view in Section 1.
+                                                                        M., and Tu, Y. Continual learning with self-organizing
+                                                                        maps. arXiv preprint arXiv:1904.09330, 2019.
+References
+                                                                      Bills, J., Archibald, C., and Blaylock, D. Improving coop-
+Abdulhai, M., Kim, D.-K., Riemer, M., Liu, M., Tesauro,                 eration in language games with bayesian inference and
+  G., and How, J. P. Context-specific representation                    the cognitive hierarchy. In Proceedings of the AAAI Con-
+  abstraction for deep option learning. arXiv preprint                  ference on Artificial Intelligence, volume 39, pp. 13658–
+  arXiv:2109.09876, 2021.                                               13666, 2025.
+Akata, E., Schulz, L., Coda-Forno, J., Oh, S. J., Bethge,             Binz, M. and Schulz, E. Using cognitive psychology to
+  M., and Schulz, E. Playing repeated games with large                  understand gpt-3. Proceedings of the National Academy
+  language models. arXiv preprint arXiv:2305.16867, 2023.               of Sciences, 120(6):e2218523120, 2023.
+Akiba, T., Shing, M., Tang, Y., Sun, Q., and Ha, D. Evo-              Brafman, R. I. and Tennenholtz, M. R-max-a general poly-
+  lutionary optimization of model merging recipes. arXiv                nomial time algorithm for near-optimal reinforcement
+  preprint arXiv:2403.13187, 2024.                                      learning. Journal of Machine Learning Research, 3(Oct):
+                                                                        213–231, 2002.
+Allen, C., Katz, M., Klinger, T., Konidaris, G., Riemer,
+  M., and Tesauro, G. Efficient black-box planning us-                Brown, N. and Sandholm, T. Superhuman ai for multiplayer
+  ing macro-actions with focused effects. arXiv preprint                poker. Science, 365(6456):885–890, 2019.
+  arXiv:2004.13242, 2020.
+                                                                      Bubeck, S., Chandrasekaran, V., Eldan, R., Gehrke, J.,
+Almazrouei, E., Alobeidli, H., Alshamsi, A., Cappelli, A.,              Horvitz, E., Kamar, E., Lee, P., Lee, Y. T., Li, Y.,
+  Cojocaru, R., Debbah, M., Goffinet, É., Hesslow, D., Lau-             Lundberg, S., et al. Sparks of artificial general intelli-
+  nay, J., Malartic, Q., et al. The falcon series of open lan-          gence: Early experiments with gpt-4. arXiv preprint
+  guage models. arXiv preprint arXiv:2311.16867, 2023.                  arXiv:2303.12712, 2023.
+
+Andrychowicz, M., Wolski, F., Ray, A., Schneider, J., Fong,           Cases, I., Rosenbaum, C., Riemer, M., Geiger, A., Klinger,
+  R., Welinder, P., McGrew, B., Tobin, J., Pieter Abbeel, O.,           T., Tamkin, A., Li, O., Agarwal, S., Greene, J. D., Juraf-
+  and Zaremba, W. Hindsight experience replay. Advances                 sky, D., et al. Recursive routing networks: Learning to
+  in neural information processing systems, 30, 2017.                   compose modules for language understanding. In Pro-
+                                                                        ceedings of the 2019 Conference of the North American
+Ashktorab, Z., Liao, Q. V., Dugan, C., Johnson, J., Pan, Q.,            Chapter of the Association for Computational Linguis-
+  Zhang, W., Kumaravel, S., and Campbell, M. Human-ai                   tics: Human Language Technologies, Volume 1 (Long
+  collaboration in a cooperative game setting: Measuring                and Short Papers), pp. 3631–3648, 2019.
+  social perception and outcomes. Proceedings of the ACM
+  on Human-Computer Interaction, 4(CSCW2):1–20, 2020.                 Chang, M. B., Gupta, A., Levine, S., and Griffiths, T. L.
+                                                                        Automatically composing representation transformations
+Axelrod, R. More effective choice in the prisoner’s dilemma.            as a means for generalization. 2019.
+  Journal of conflict resolution, 24(3):379–403, 1980.
+                                                                      Colman, A. M. Cooperation, psychological game theory, and
+Bacon, P.-L., Harb, J., and Precup, D. The option-critic                limitations of rationality in social interaction. Behavioral
+  architecture. In Thirty-First AAAI Conference on Artificial           and brain sciences, 26(2):139–153, 2003.
+  Intelligence, 2017.
+                                                                      Das, P., Wadhawan, K., Chang, O., Sercu, T., Santos,
+Bard, N., Foerster, J. N., Chandar, S., Burch, N., Lanctot,             C. D., Riemer, M., Chenthamarakshan, V., Padhi, I., and
+  M., Song, H. F., Parisotto, E., Dumoulin, V., Moitra, S.,             Mojsilovic, A. Pepcvae: Semi-supervised targeted de-
+  Hughes, E., et al. The hanabi challenge: A new frontier               sign of antimicrobial peptide sequences. arXiv preprint
+  for ai research. Artificial Intelligence, 280:103216, 2020.           arXiv:1810.07743, 2018.
+
+                                                                 10
+                        Position: Theory of Mind Benchmarks are Broken for Large Language Models
+
+Dettmers, T., Pagnoni, A., Holtzman, A., and Zettlemoyer, L.          Jiang, A. Q., Sablayrolles, A., Roux, A., Mensch, A., Savary,
+  Qlora: Efficient finetuning of quantized llms. Advances                B., Bamford, C., Chaplot, D. S., Casas, D. d. l., Hanna,
+  in Neural Information Processing Systems, 36, 2024.                    E. B., Bressand, F., et al. Mixtral of experts. arXiv
+                                                                         preprint arXiv:2401.04088, 2024.
+Dognin, P., Rios, J., Luss, R., Padhi, I., Riemer, M. D.,
+  Liu, M., Sattigeri, P., Nagireddy, M., Varshney, K. R.,             Kaelbling, L. P., Littman, M. L., and Cassandra, A. R. Plan-
+  and Bouneffouf, D. Contextual moral value align-                      ning and acting in partially observable stochastic domains.
+  ment through context-based aggregation. arXiv preprint                Artificial intelligence, 101(1-2):99–134, 1998.
+  arXiv:2403.12805, 2024.
+                                                                      Kaplan, J., McCandlish, S., Henighan, T., Brown, T. B.,
+Dubey, A., Jauhri, A., Pandey, A., Kadian, A., Al-Dahle,                Chess, B., Child, R., Gray, S., Radford, A., Wu, J., and
+ A., Letman, A., Mathur, A., Schelten, A., Yang, A., Fan,               Amodei, D. Scaling laws for neural language models.
+ A., et al. The llama 3 herd of models. arXiv preprint                  arXiv preprint arXiv:2001.08361, 2020.
+  arXiv:2407.21783, 2024.                                             Khabiri, E., Riemer, M., Heath III, F. F., and Hull, R. Do-
+                                                                        main scoping for subject matter experts. In 2015 AAAI
+Elmachtoub, A. N. and Grigas, P. Smart “predict, then
+                                                                       Fall Symposium Series, 2015.
+  optimize”. Management Science, 68(1):9–26, 2022.
+                                                                      Khetarpal, K., Riemer, M., Rish, I., and Precup, D. To-
+Fan, C., Chen, J., Jin, Y., and He, H. Can large language              wards continual reinforcement learning: A review and
+  models serve as rational players in game theory? a sys-               perspectives. arXiv preprint arXiv:2012.13490, 2020.
+  tematic analysis. In Proceedings of the AAAI Conference
+  on Artificial Intelligence, volume 38, pp. 17960–17967,             Kim, D.-K., Liu, M., Omidshafiei, S., Lopez-Cot, S., Riemer,
+  2024.                                                                 M., Habibi, G., Tesauro, G., Mourad, S., Campbell, M.,
+                                                                        and How, J. P. Learning hierarchical teaching policies
+Fish, S., Gonczarowski, Y. A., and Shorrer, R. I. Algorith-             for cooperative agents. arXiv preprint arXiv:1903.03216,
+  mic collusion by large language models. arXiv preprint                2019a.
+  arXiv:2404.00806, 2024.
+                                                                      Kim, D.-K., Liu, M., Omidshafiei, S., Lopez-Cot, S., Riemer,
+Ganzfried, S. and Sandholm, T. Safe opponent exploita-                  M., Tesauro, G., Campbell, M., Mourad, S., Habibi, G.,
+  tion. ACM Transactions on Economics and Computation                   and How, J. P. Heterogeneous knowledge transfer via hier-
+ (TEAC), 3(2):1–28, 2015.                                               archical teaching in cooperative multiagent reinforcement
+                                                                        learning. 2019b.
+Greenwald, A., Hall, K., Serrano, R., et al. Correlated q-
+  learning. In ICML, volume 3, pp. 242–249, 2003.                     Kim, D. K., Liu, M., Riemer, M. D., Sun, C., Abdulhai, M.,
+                                                                        Habibi, G., Lopez-Cot, S., Tesauro, G., and How, J. A
+Ha, J., Jeon, H., Han, D., Seo, J., and Oh, C. Clochat: Under-          policy gradient algorithm for learning to learn in multia-
+  standing how people customize, interact, and experience               gent reinforcement learning. In International Conference
+  personas in large language models. In Proceedings of                  on Machine Learning, pp. 5541–5550. PMLR, 2021.
+  the CHI Conference on Human Factors in Computing
+                                                                      Kim, D.-K., Riemer, M., Liu, M., Foerster, J., Everett, M.,
+  Systems, pp. 1–24, 2024.
+                                                                        Sun, C., Tesauro, G., and How, J. P. Influencing long-
+Heath, F. F., Hull, R., Khabiri, E., Riemer, M., Sukaviriya,            term behavior in multiagent reinforcement learning. Ad-
+  N., and Vaculín, R. Alexandria: Extensible framework                  vances in Neural Information Processing Systems, 35:
+  for rapid exploration of social media. In 2015 IEEE In-               18808–18821, 2022a.
+  ternational Congress on Big Data, pp. 483–490. IEEE,                Kim, D.-K., Riemer, M., Liu, M., Foerster, J. N., Tesauro,
+  2015.                                                                 G., and How, J. P. Game-theoretical perspectives on
+                                                                        active equilibria: A preferred solution concept over nash
+Hu, E. J., Shen, Y., Wallis, P., Allen-Zhu, Z., Li, Y., Wang,
+                                                                        equilibria. arXiv preprint arXiv:2210.16175, 2022b.
+  S., Wang, L., and Chen, W. Lora: Low-rank adaptation of
+  large language models. arXiv preprint arXiv:2106.09685,             Kim, H., Sclar, M., Zhou, X., Bras, R. L., Kim, G., Choi,
+  2021.                                                                 Y., and Sap, M. Fantom: A benchmark for stress-testing
+                                                                        machine theory of mind in interactions. arXiv preprint
+Ilharco, G., Ribeiro, M. T., Wortsman, M., Gururangan, S.,              arXiv:2310.15421, 2023.
+   Schmidt, L., Hajishirzi, H., and Farhadi, A. Editing mod-
+   els with task arithmetic. arXiv preprint arXiv:2212.04089,         Kirkpatrick, J., Pascanu, R., Rabinowitz, N., Veness, J., Des-
+   2022.                                                                jardins, G., Rusu, A. A., Milan, K., Quan, J., Ramalho, T.,
+
+                                                                 11
+                        Position: Theory of Mind Benchmarks are Broken for Large Language Models
+
+  Grabska-Barwinska, A., et al. Overcoming catastrophic              Ma, Z., Sansom, J., Peng, R., and Chai, J. Towards a holistic
+  forgetting in neural networks. Proceedings of the national          landscape of situated theory of mind in large language
+  academy of sciences, 114(13):3521–3526, 2017.                       models. arXiv preprint arXiv:2310.19619, 2023.
+
+Klinger, T., Adjodah, D., Marois, V., Joseph, J., Riemer,            Malloy, T., Klinger, T., Liu, M., Riemer, M., Tesauro, G.,
+  M., Pentland, A. S., and Campbell, M. A study of com-               and Sims, C. R. Consolidation via policy information
+  positional generalization in neural models, 2020. URL               regularization in deep rl for multi-agent games. arXiv
+  https://arxiv.org/abs/2006.09437.                                   preprint arXiv:2011.11517, 2020a.
+
+Kosinski, M. Theory of mind may have spontaneously                   Malloy, T., Sims, C. R., Klinger, T., Liu, M., Riemer, M.,
+  emerged in large language models. arXiv preprint                    and Tesauro, G. Deep rl with information constrained
+  arXiv:2302.02083, 4:169, 2023.                                      policies: Generalization in continuous control. arXiv
+                                                                      preprint arXiv:2010.04646, 2020b.
+Kostas, J., Nota, C., and Thomas, P. Asynchronous coa-
+  gent networks. In III, H. D. and Singh, A. (eds.), Pro-            Malloy, T., Klinger, T., Liu, M., Tesauro, G., Riemer, M.,
+  ceedings of the 37th International Conference on Ma-                and Sims, C. R. Rl generalization in a theory of mind
+  chine Learning, volume 119 of Proceedings of Machine                game through a sleep metaphor (student abstract). In Pro-
+ Learning Research, pp. 5426–5435. PMLR, 13–18 Jul                    ceedings of the AAAI Conference on Artificial Intelligence,
+  2020. URL https://proceedings.mlr.press/                            volume 35, pp. 15841–15842, 2021a.
+ v119/kostas20a.html.
+                                                                     Malloy, T., Sims, C. R., Klinger, T., Liu, M., Riemer, M.,
+Kuhn, H. W. Extensive games and the problem of infor-                 and Tesauro, G. Capacity-limited decentralized actor-
+  mation. Contributions to the Theory of Games, 2(28):                critic for multi-agent games. In 2021 IEEE Conference
+ 193–216, 1953.                                                       on Games (CoG), pp. 1–8. IEEE, 2021b.
+
+Larson, K. Mechanism design for computationally limited              Malloy, T., Liu, M., Riemer, M. D., Klinger, T., Tesauro,
+  agents. Carnegie Mellon University, 2004.                           G., and Sims, C. R. Learning in factored domains with
+                                                                      information-constrained visual representations. arXiv
+Leng, Y. and Yuan, Y. Do llm agents exhibit social behavior?          preprint arXiv:2303.17508, 2023.
+  arXiv preprint arXiv:2312.15198, 2023.
+                                                                     Memarian, A., Touzel, M. P., Riemer, M., Bhati, R., and
+Li, N., Gao, C., Li, Y., and Liao, Q. Large language model-           Rish, I. Summarizing societies: Agent abstraction in
+  empowered agents for simulating macroeconomic activi-               multi-agent reinforcement learning. In From Cells to
+  ties. Available at SSRN 4606937, 2023.                              Societies: Collective Learning across Scales, 2022.
+Li, Z. and Hoiem, D. Learning without forgetting. IEEE               Moreno, P., Hughes, E., McKee, K. R., Pires, B. A., and
+  transactions on pattern analysis and machine intelligence,          Weber, T. Neural recursive belief states in multi-agent
+  40(12):2935–2947, 2017.                                             reinforcement learning. arXiv preprint arXiv:2102.02274,
+                                                                      2021.
+Littman, M. L. Markov games as a framework for multi-
+  agent reinforcement learning. In Proceedings of the                Morrison, K., Ashktorab, Z., Gonzalez, G. E., Bouneffouf,
+  Eleventh International Conference on International Con-             D., and Weisz, J. Establishing the cooperative game wave-
+  ference on Machine Learning, ICML’94, pp. 157–163.                  length as a testbed to explore mutual theory of mind. In
+  Morgan Kaufmann Publishers Inc., 1994. ISBN 1-55860-                AAAI Conference on Artificial Intelligence, 2025.
+  335-2. URL http://dl.acm.org/citation.
+  cfm?id=3091574.3091594.                                            Nekoei, H., Badrinaaraayanan, A., Courville, A., and Chan-
+                                                                       dar, S. Continuous coordination as a realistic scenario for
+Littman, M. L. et al. Friend-or-foe q-learning in general-sum          lifelong learning. In International Conference on Machine
+  games. In ICML, volume 1, pp. 322–328, 2001.                         Learning, pp. 8016–8024. PMLR, 2021.
+Lorè, N. and Heydari, B. Strategic behavior of large language        Nekoei, H., Zhao, X., Rajendran, J., Liu, M., and Chandar,
+  models: Game structure vs. contextual framing. arXiv                 S. Towards few-shot coordination: Revisiting ad-hoc
+  preprint arXiv:2309.05898, 2023.                                     teamplay challenge in the game of hanabi. In Conference
+                                                                       on Lifelong Learning Agents, pp. 861–877. PMLR, 2023.
+Lowe, R., Tamar, A., Harb, J., Pieter Abbeel, O., and Mor-
+  datch, I. Multi-agent actor-critic for mixed cooperative-          Nguyen, S., Babe, H. M., Zi, Y., Guha, A., Anderson, C. J.,
+  competitive environments. Advances in neural informa-                and Feldman, M. Q. How beginning programmers and
+  tion processing systems, 30, 2017.                                   code llms (mis) read each other. In Proceedings of the CHI
+
+                                                                12
+                         Position: Theory of Mind Benchmarks are Broken for Large Language Models
+
+  Conference on Human Factors in Computing Systems, pp.                 Riemer, M., Cases, I., Ajemian, R., Liu, M., Rish, I., Tu, Y.,
+  1–26, 2024.                                                             and Tesauro, G. Learning to learn without forgetting by
+                                                                          maximizing transfer and minimizing interference. arXiv
+Normandin, F., Golemo, F., Ostapenko, O., Rodriguez, P.,                  preprint arXiv:1810.11910, 2018a.
+  Riemer, M. D., Hurtado, J., Khetarpal, K., Lindeborg,
+  R., Cecchi, L., Lesort, T., et al. Sequoia: A software                Riemer, M., Liu, M., and Tesauro, G. Learning abstract op-
+  framework to unify continual learning research. arXiv                   tions. Advances in neural information processing systems,
+  preprint arXiv:2108.01005, 2021.                                        31, 2018b.
+Omidshafiei, S., Kim, D.-K., Liu, M., Tesauro, G., Riemer,              Riemer, M., Klinger, T., Bouneffouf, D., and Franceschini,
+ M., Amato, C., Campbell, M., and How, J. P. Learning                     M. Scalable recollections for continual lifelong learn-
+ to teach in cooperative multiagent reinforcement learn-                  ing. In Proceedings of the AAAI Conference on Artificial
+ ing. In Proceedings of the AAAI conference on artificial                 Intelligence, volume 33, pp. 1352–1359, 2019.
+ intelligence, volume 33, pp. 6128–6136, 2019.
+                                                                        Riemer, M., Cases, I., Rosenbaum, C., Liu, M., and Tesauro,
+Owen, G. Game theory. Emerald Group Publishing, 2013.                     G. On the role of weight sharing during deep option
+                                                                          learning. In Proceedings of the AAAI Conference on
+Padhi, I., Dognin, P., Rios, J., Luss, R., Achintalwar, S.,
+                                                                          Artificial Intelligence, volume 34, pp. 5519–5526, 2020.
+  Riemer, M., Liu, M., Sattigeri, P., Nagireddy, M., Varsh-
+  ney, K. R., et al. Comvas: Contextual moral values align-             Riemer, M., Raparthy, S. C., Cases, I., Subbaraj, G., Touzel,
+  ment system. Proceedings of the International Joint Con-                M. P., and Rish, I. Continual learning in environments
+  ference on Artificial Intelligence, 2024.                               with polynomial mixing times. Advances in Neural Infor-
+Park, J. S., Zou, C. Q., Shaw, A., Hill, B. M., Cai, C., Morris,          mation Processing Systems, 2022.
+  M. R., Willer, R., Liang, P., and Bernstein, M. S. Gener-             Riemer, M., Khetarpal, K., Rajendran, J., and Chandar, S.
+  ative agent simulations of 1,000 people. arXiv preprint                 Balancing context length and mixing times for reinforce-
+  arXiv:2411.10109, 2024.                                                 ment learning at scale. In The Thirty-eighth Annual Con-
+Puterman, M. Markov decision processes. 1994. Jhon Wiley                  ference on Neural Information Processing Systems, 2024a.
+  & Sons, New Jersey, 1994.                                             Riemer, M., Subbaraj, G., Berseth, G., and Rish, I. En-
+Rabinowitz, N., Perbet, F., Song, F., Zhang, C., Eslami,                  abling realtime reinforcement learning at scale with stag-
+  S. A., and Botvinick, M. Machine theory of mind. In                     gered asynchronous inference, 2024b. URL https:
+  International conference on machine learning, pp. 4218–                 //arxiv.org/abs/2412.14355.
+  4227. PMLR, 2018.                                                     Riemer, M., Subbaraj, G., Berseth, G., and Rish, I. Real-
+Riemer, M. Distributed computing in social media analytics.               time reinforcement learning: Towards rapid asynchronous
+  Distributed Computing in Big Data Analytics: Concepts,                  deployment of large models. In ICML 2024 Workshop:
+  Technologies and Applications, pp. 121–135, 2017.                       Aligning Reinforcement Learning Experimentalists and
+                                                                          Theorists, 2024c.
+Riemer, M., Krasikov, S., and Srinivasan, H. A deep learn-
+  ing and knowledge transfer based architecture for social              Rooein, D., Curry, A. C., and Hovy, D. Know your audience:
+  media user characteristic determination. In Proceedings                 Do llms adapt to different age and education levels? arXiv
+  of the third International Workshop on Natural Language                 preprint arXiv:2312.02065, 2023.
+  Processing for Social Media, pp. 39–47, 2015.
+                                                                        Rosenbaum, C., Klinger, T., and Riemer, M. Routing net-
+Riemer, M., Vempaty, A., Calmon, F., Heath, F., Hull, R.,                 works: Adaptive selection of non-linear functions for
+  and Khabiri, E. Correcting forecasts with multifactor                   multi-task learning. In International Conference on Learn-
+  neural attention. In International Conference on Machine                ing Representations. International Conference on Learn-
+  Learning, pp. 3010–3019. PMLR, 2016.                                    ing Representations, ICLR, 2018.
+
+Riemer, M., Franceschini, M., Bouneffouf, D., and Klinger,              Rosenbaum, C., Cases, I., Riemer, M., Geiger, A., Karttunen,
+  T. Generative knowledge distillation for general purpose                L., Greene, J. D., Jurafsky, D., and Potts, C. Dispatched
+  function compression. NIPS 2017 Workshop on Teaching                    routing networks. Technical report, 2019a.
+  Machines, Robots, and Humans, 5:30, 2017a.
+                                                                        Rosenbaum, C., Cases, I., Riemer, M., and Klinger, T. Rout-
+Riemer, M., Khabiri, E., and Goodwin, R. Representation                   ing networks and the challenges of modular and compo-
+  stability as a regularizer for improved text analytics trans-           sitional computation. arXiv preprint arXiv:1904.12774,
+  fer learning. arXiv preprint arXiv:1704.03617, 2017b.                   2019b.
+
+                                                                   13
+                        Position: Theory of Mind Benchmarks are Broken for Large Language Models
+
+Schaul, T., Horgan, D., Gregor, K., and Silver, D. Universal          Thakkar, M., More, Y., Fournier, Q., Riemer, M., Chen,
+  value function approximators. In International conference             P.-Y., Zouaq, A., Das, P., and Chandar, S. Combining do-
+  on machine learning, pp. 1312–1320. PMLR, 2015.                       main and alignment vectors to achieve better knowledge-
+                                                                        safety trade-offs in llms. arXiv preprint arXiv:2411.06824,
+Schrittwieser, J., Antonoglou, I., Hubert, T., Simonyan, K.,
+                                                                        2024b.
+  Sifre, L., Schmitt, S., Guez, A., Lockhart, E., Hassabis,
+  D., Graepel, T., et al. Mastering atari, go, chess and shogi        Thomas, P. S. Policy gradient coagent networks. In
+  by planning with a learned model. Nature, 588(7839):                  Shawe-Taylor, J., Zemel, R., Bartlett, P., Pereira, F., and
+  604–609, 2020.                                                        Weinberger, K. (eds.), Advances in Neural Information
+                                                                        Processing Systems, volume 24. Curran Associates, Inc.,
+Shao, Z., Wang, P., Zhu, Q., Xu, R., Song, J., Bi, X., Zhang,
+                                                                        2011. URL https://proceedings.neurips.
+  H., Zhang, M., Li, Y., Wu, Y., et al. Deepseekmath:
+                                                                        cc/paper_files/paper/2011/file/
+  Pushing the limits of mathematical reasoning in open
+                                                                        1e6e0a04d20f50967c64dac2d639a577-Paper.
+  language models. arXiv preprint arXiv:2402.03300, 2024.
+                                                                        pdf.
+Shapley, L. S. Stochastic games. Proceedings of the National
+  Academy of Sciences, 39(10):1095–1100, 1953. ISSN                   Touvron, H., Martin, L., Stone, K., Albert, P., Almahairi,
+  0027-8424. doi: 10.1073/pnas.39.10.1095. URL https:                   A., Babaei, Y., Bashlykov, N., Batra, S., Bhargava, P.,
+  //www.pnas.org/content/39/10/1095.                                    Bhosale, S., et al. Llama 2: Open foundation and fine-
+                                                                        tuned chat models. arXiv preprint arXiv:2307.09288,
+Shavit, Y., Agarwal, S., Brundage, M., Adler, S., O’Keefe,              2023.
+  C., Campbell, R., Lee, T., Mishkin, P., Eloundou, T.,
+  Hickey, A., et al. Practices for governing agentic ai sys-          Touzel, M. P., Memarian, A., Riemer, M., Mircea, A.,
+  tems. arXiv preprint, 2023.                                           Williams, A. R., Ahlstrand, E., Lehnert, L., Bhati, R.,
+                                                                        Dumas, G., and Rish, I. Scalable approaches for a theory
+Shinn, N., Cassano, F., Gopinath, A., Narasimhan, K., and               of many minds. In Agentic Markets Workshop at ICML
+  Yao, S. Reflexion: Language agents with verbal reinforce-             2024, 2024.
+  ment learning. Advances in Neural Information Process-
+  ing Systems, 36, 2024.                                              Wang, Q. and Goel, A. K. Mutual theory of mind for human-
+                                                                       ai communication. arXiv preprint arXiv:2210.03842,
+Strachan, J. W., Albergo, D., Borghini, G., Pansardi, O.,
+                                                                       2022.
+  Scaliti, E., Gupta, S., Saxena, K., Rufo, A., Panzeri, S.,
+  Manzi, G., et al. Testing theory of mind in large language          Wang, X. and Sandholm, T. Reinforcement learning to
+  models and humans. Nature Human Behaviour, pp. 1–11,                 play an optimal nash equilibrium in team markov games.
+  2024.                                                                Advances in neural information processing systems, 15,
+Street, W., Siy, J. O., Keeling, G., Baranes, A., Barnett, B.,         2002.
+   McKibben, M., Kanyere, T., Lentz, A., Dunbar, R. I., et al.        Watkins, C. J. C. H. Learning from delayed rewards. 1989.
+   Llms achieve adult human performance on higher-order
+   theory of mind tasks. arXiv preprint arXiv:2405.18870,             Wei, J., Wang, X., Schuurmans, D., Bosma, M., Xia, F., Chi,
+   2024.                                                               E., Le, Q. V., Zhou, D., et al. Chain-of-thought prompting
+                                                                       elicits reasoning in large language models. Advances in
+Sutton, R. S. Dyna, an integrated architecture for learning,
+                                                                       neural information processing systems, 35:24824–24837,
+  planning, and reacting. ACM Sigart Bulletin, 2(4):160–
+                                                                       2022.
+  163, 1991.
+Sutton, R. S. and Barto, A. G. Reinforcement learning: An             Weston, J. and Sukhbaatar, S.   System 2 attention
+  introduction. 2018.                                                  (is something you might need too). arXiv preprint
+                                                                       arXiv:2311.11829, 2023.
+Sutton, R. S., Precup, D., and Singh, S. Between mdps
+  and semi-mdps: A framework for temporal abstraction in              Xie, C., Chen, C., Jia, F., Ye, Z., Shu, K., Bibi, A., Hu,
+  reinforcement learning. Artificial intelligence, 112(1-2):            Z., Torr, P., Ghanem, B., and Li, G. Can large language
+  181–211, 1999.                                                        model agents simulate human trust behaviors? arXiv
+                                                                        preprint arXiv:2402.04559, 2024.
+Thakkar, M., Fournier, Q., Riemer, M. D., Chen, P.-Y.,
+  Zouaq, A., Das, P., and Chandar, S. A deep dive                     Xu, R., Zhou, Z., Zhang, T., Qi, Z., Yao, S., Xu, K., Xu, W.,
+  into the trade-offs of parameter-efficient preference align-          and Qiu, H. Walking in others’ shoes: How perspective-
+  ment techniques, 2024a. URL https://arxiv.org/                        taking guides large language models in reducing toxicity
+  abs/2406.04879.                                                       and bias. arXiv preprint arXiv:2407.15366, 2024.
+
+                                                                 14
+                       Position: Theory of Mind Benchmarks are Broken for Large Language Models
+
+Yadav, P., Tam, D., Choshen, L., Raffel, C. A., and Bansal,
+  M. Ties-merging: Resolving interference when merg-
+  ing models. Advances in Neural Information Processing
+  Systems, 36, 2024.
+Yang, J., Nakhaei, A., Isele, D., Fujimura, K., and Zha,
+  H. Cm3: Cooperative multi-goal multi-stage multi-agent
+  reinforcement learning. arXiv preprint arXiv:1809.05188,
+  2018.
+Zhang, S., Wang, X., Zhang, W., Chen, Y., Gao, L., Wang,
+  D., Zhang, W., Wang, X., and Wen, Y. Mutual theory of
+  mind in human-ai collaboration: An empirical study with
+  llm-driven ai agents in a real-time shared workspace task.
+  arXiv preprint arXiv:2409.08811, 2024.
+Zini, M. S., Pedramfar, M., Riemer, M., Moradipari, A.,
+  and Liu, M. Coagent networks revisited. arXiv preprint
+  arXiv:2001.10474, 2020.
+Zinkevich, M., Greenwald, A., and Littman, M. Cyclic equi-
+  libria in markov games. Advances in neural information
+  processing systems, 18, 2005.
+Zinkevich, M., Johanson, M., Bowling, M., and Piccione, C.
+  Regret minimization in games with incomplete informa-
+  tion. Advances in neural information processing systems,
+  20, 2007.
+
+
+
+
+                                                               15
+                        Position: Theory of Mind Benchmarks are Broken for Large Language Models
+
+A. Literal Theory of Mind and Functional Theory of Mind in Popular Theory of Mind Games
+In this section, we provide an explanation of how literal theory of mind and functional theory of mind materialize in popular
+theory of mind focused games. We refer the reader to the cited papers for full descriptions of how each game is played.
+Codenames (Bills et al., 2025). In Codenames, literal theory of mind could naturally be measured in terms of guesses by the
+guesser about the board-card assignments. These assignment can be retrieved from some transformation of the actions that
+the clue giver would take in different game states following Definition 2.1. Functional theory of mind would be the guesser’s
+regret with respect to the actual team performance on the game following Definition 2.2, which also includes an aspect of
+reasoning on top of a literal theory of mind model. For example, given the context of the game, guessers may decide to save
+certain guesses for later to avoid the potential negative consequences of guessing wrong and potentially gifting the other
+team an opportunity. We argue in this paper, that it is quite possible that a Codenames agent could perform well in terms of
+literal theory of mind on this kind of theory of mind task while simultaneously struggling to turn that into a rational strategy,
+displaying poor functional theory of mind as a result.
+Hanabi (Bard et al., 2020). In Hanabi, literal theory of mind could be measured in terms of each agent’s belief about what
+their own cards are. This belief can be retrieved from some transformation of the actions that other agents took in different
+game states following Definition 2.1. Functional theory of mind would be the regret with respect to the team score actually
+achieved at the end of the game. Thus achieving functional theory of mind requires reasoning on top of the theory of mind
+model regarding how the agent’s cards effects the best actions for the agent to take at various points in the game. It is once
+again quite possible that a Hanabi agent could perform well in terms of literal theory of mind on this kind of theory of mind
+task while simultaneously struggling to turn that into a rational strategy in response.
+Taboo (Ashktorab et al., 2020). In Taboo, literal theory of mind could be measured in terms of the clue giver’s understanding
+of the strength of word associations for the particular guesser they are playing with. These associations can be retrieved
+from some transformation of the actions that the guesser has taken in different previous situations following Definition 2.1
+(inside of or outside of the context of the game). Functional theory of mind would be the regret with respect to the team
+score actually achieved at the end of the game. This again requires additional reasoning on top of the literal theory of mind
+model, particularly because of the banned list of words that the clue giver cannot say. Thus the clue giver may be inefficient
+in their search through the space of association strengths even if they have a strong literal theory of mind model.
+Wavelength (Morrison et al., 2025). In Wavelength, literal theory of mind could be measured similarly to Taboo in terms
+of understanding the strength of word associations for the particular partner they are playing with. These associations can
+be retrieved from some transformation of the actions that the guesser has taken in different previous situations following
+Definition 2.1 (inside of or outside of the context of the game). Functional theory of mind would again be the regret with
+respect to the team score actually achieved at the end of the game. The additional reasoning required in this case for achieving
+functional theory of mind is an understanding of how the other agent thinks about the spectrum dial calibration. Thus the
+agent can still guess wrong regarding the spectrum even if have a perfect understanding of the other agent’s associations
+regarding the clue phrase.
+
+B. Connections to Equilibria Concepts, Continual Learning, and Potential Applications
+Functional Theory of Mind Objective vs. Equilibria. The distinction between each agent maximizing their own objective
+with no control over the optimality of other agents and an equilibria is discussed in detail in (Kim et al., 2022a). In the
+terminology of that paper, each agent can maximize their search over self-stable periodic distributions of states and rewards,
+but it only can be considered an equilibria if every agent in the environment simultaneously achieves an optimal policy
+with respect to its context. Depending on the dynamism of the LLM policies, different classes of equilibria concepts may
+occur including Nash, Cyclic, Correlated, or Active variants (Kim et al., 2022b). In practice, the functional theory of mind
+objective with in-context learning matches that of a multi-agent meta-learning policy in order to adapt to an encountered
+distribution of other agents as in (Kim et al., 2021).
+In-Context Learning vs. Continual Learning. In a multi-agent environment, the environment is nonstationary from the
+perspective of each agent if the policies of the other agents it interacts with are changing or learning over time (Littman,
+1994). As a result, the setting of rapid adaptation to new agents in our paper can be considered a special case of continual
+RL (see Proposition 3 of Khetarpal et al. (2020)). Proposition 2 of Khetarpal et al. (2020) established that all continual
+RL problems can be modeled as partial observable problems with agents conditioned on the full interaction history. So,
+in principle, in-context learning over sufficiently long context representations with sufficiently expressive neural networks
+
+                                                              16
+                        Position: Theory of Mind Benchmarks are Broken for Large Language Models
+
+can be considered a general solution to continual learning problems. However, it remains to be seen if it is possible to see
+in-context behaviors resembling continual learning strategies like reservoir sampling replay buffers (Riemer et al., 2018a) or
+scalable memory efficient approximate buffers (Riemer et al., 2017a; 2019; Bashivan et al., 2019). It would be interesting
+to also consider policy changes from step to step and their degree of correspondence with older models similar to work
+leveraging knowledge distillation for continual learning (Li & Hoiem, 2017; Riemer et al., 2017b; Kirkpatrick et al., 2017).
+Intuitively, chain of thought reasoning may be beneficial because of its similarity with continual learning approaches that can
+select which layers to process at inference time (Rosenbaum et al., 2018; Cases et al., 2019; Chang et al., 2019; Rosenbaum
+et al., 2019a), see (Rosenbaum et al., 2019b) for a survey of approaches. More generally, this adaptive computation problem
+can be formalized within the coagent networks framework (Thomas, 2011; Kostas et al., 2020; Zini et al., 2020). That said,
+the compositional generalization needed for utilizing these models in practice makes achieving real-world success very
+challenging (Klinger et al., 2020), potentially making LLM style training a more viable strategy for learning this composition.
+That said, a word of caution comes from recent theoretical insights about the difficulty of efficiently evaluating models with
+large context lengths (Riemer et al., 2024a) acting in complex environments (Riemer et al., 2022). This could be a leading
+reason for the poor performance we are currently seeing with LLMs. Ultimately, there are many potentially interesting
+continual learning settings that should be considered for a comprehensive evaluation (Normandin et al., 2021), which we
+leave to future work.
+Alternatives to Continual Training. While our work highlights the limitations of using in-context learning for continual
+learning with current LLMs, full fine-tuning or continual training can be quite expensive in the context of LLMs – especially
+when it must be done for each end user. However, more computationally efficient alternatives like parameter efficient tuning
+(Hu et al., 2021; Dettmers et al., 2024; Thakkar et al., 2024a) or model merging (Ilharco et al., 2022; Yadav et al., 2024;
+Akiba et al., 2024; Thakkar et al., 2024b) may constitute a more economical middle ground. We leave exploration of the
+comparative efficacy of these strategies to future work. It is important to note that neural scaling laws only demonstrate
+generalization improvements with bigger model sizes when there is access to as much data as needed (Kaplan et al., 2020).
+In fact, capacity limits have been found to enhance generalization for RL (Malloy et al., 2020b; 2023) and multi-agent RL
+(Malloy et al., 2020a; 2021b;a) in the limited data regime. Smaller models also may be necessary to maintain performance in
+realtime environments that are sufficiently stochastic (Riemer et al., 2024c;b). As such, it may make more sense to consider
+smaller LLMs if we plan on doing user specific finetuning or auxiliary objectives we would like to maintain like moral
+values (Padhi et al., 2024; Dognin et al., 2024).
+Applicability Beyond Multi-agent RL. In this paper, we focused on multi-agent RL environments because of our use of this
+formalism in Definitions 2.1 and 2.2. However, the principles discussed in this paper should apply to many practical domains
+that are not typically modeled using RL such as biomedical applications (Das et al., 2018), making decisions based on
+conversation topics across the internet (Riemer et al., 2015; Heath et al., 2015; Riemer, 2017; Khabiri et al., 2015), learning
+what information to teach other models (Omidshafiei et al., 2019), and making decisions based on incoming internet data
+(Riemer et al., 2016). These problems can generally be considered a special case of the RL formalism (Barto & Dietterich,
+2004).
+
+C. Experiment Details
+For our experiments we ran each LLM model using the Watsonx API playing a sequence of 100 step episodes with selected
+policies for the other agents over the course of 24 hours or a maximum of 100 episodes. Every model was evaluated for at
+least 30 episodes and confidence intervals are based on the actual sample size considered for each LLM model. The payoff
+tables used for each game are provided in Tables 5, 6, and 7. We also considered the following representations for each
+action as indicated in the main text:
+
+  • RPS
+       – action0 : 𝑅, 𝐽 , 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 , Rock, Pasta
+       – action1 : 𝑃 , 𝐹 , 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 , Paper, Rice
+       – action2 : 𝑆, 𝐵, 𝐵𝐵𝐵𝐵𝐵𝐵𝐵𝐵𝐵𝐵𝐵𝐵𝐵𝐵𝐵𝐵𝐵𝐵𝐵𝐵𝐵, Scissors, Bread
+  • IBS
+       – action0 : 𝐽 , 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 , Fight, Pasta
+       – action1 : 𝐹 , 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 , Ballet, Rice
+
+                                                              17
+                        Position: Theory of Mind Benchmarks are Broken for Large Language Models
+
+                                                                        Partner
+                                                           action0      action1        action2
+                                              action0       (0, 0)     (−1, +1)       (+1, −1)
+                                       You
+                                              action1     (+1, −1)       (0, 0)       (−1, +1)
+                                              action2     (−1, +1)     (+1, −1)         (0, 0)
+
+                                      Table 5: Rock, Paper, Scissors (RPS) Payoff Table
+
+                                                                         Partner
+                                                                   action0 action1
+                                                        action0    (10, 7)     (0, 0)
+                                               You
+                                                        action1     (0, 0)    (7, 10)
+
+                                      Table 6: Iterated Batte of Sexes (IBS) Payoff Table
+
+
+  • IPD
+       – action0 : 𝐽 , 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 𝐽 , Cooperate, Pasta
+       – action1 : 𝐹 , 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 𝐹 , Defect, Rice
+
+In Tables 1 and 2, the names 𝑅, 𝑃 , and 𝑆 are used for action0 , action1 , and action2 respectively as we only consider the RPS
+game. The LLAMA-2 70B Chat model is also quantized for runtime efficiency. In Tables 3 and 10 the names 𝐽 , 𝐹 , and 𝐵
+are used for action0 , action1 , and action2 respectively to promote consistency with the action spaces also used in IBS and
+IPD.
+
+C.1. Example Prompts
+In this section, we provide example prompts for each prompting type. In all cases, we tailor our provided example to the
+Iterated Battle of Sexes (IBS) with actions 𝐽 and 𝐹 in which the agent happens to be playing round 5 of 100. There is a
+slight change in terminology for Rock, Paper, Scissors (RPS) where it is said that the agents “receive a score of +1/0/-1”
+rather than that they “win 10/8/7/5/0 points”. This is just to accommodate for a negative scale of rewards in this game as we
+did not feel having the reward as always positive would properly reflect the incentive structure of the game to the LLMs.
+
+C.2. Additional Details on Experiments with Single Action Partners
+The best memory size for Reflexion was 1 for RPS, IBS, and IPD in Table 2. In Table 3, the best memory sizes for Reflexion
+was 1 for RPS and IBS, but it was 3 for IPD.
+We provide comprehensive results to augment the analysis of Table 2 in Tables 8 and 9.
+
+C.3. Additional Experiments with Simple Adaptive Partners
+Our main aim is to build towards LLMs that display mutual theory of mind capabilities (Wang & Goel, 2022) in which
+theory of mind is used to foster coordination behavior between agents. As such, the single action agents may not be realistic
+as they do not shift their actions in response to the LLM agent’s actions. In Table 10 we test the prompting strategies we
+have considered previously, but now playing with tit for tat style strategies (Axelrod, 1980) made famous for the efficacy in
+
+
+                                                                         Partner
+                                                                   action0 action1
+                                                        action0     (8, 8)    (0, 10)
+                                               You
+                                                        action1    (10, 0)     (5, 5)
+
+                                  Table 7: Iterated Prisoner’s Dilemma (IPD) Payoff Table
+
+                                                                  18
+                       Position: Theory of Mind Benchmarks are Broken for Large Language Models
+
+
+
+
+Figure 1: LM Prompting Example. The LLM is given this prompt for each action for the respective game action0 , action1 ,
+and action2 (for RPS only) and we compare its probabilities computed for the token representation of the actions to determine
+which action it selects.
+
+
+
+
+Figure 2: LM Literal Theory of Mind Prompting - Agent First. The LLM is given this prompt for each action that
+its partner will take for the respective game action0 , action1 , and action2 (for RPS only) and we compare its probabilities
+computed for the token representation of the actions to determine which action prediction it selects.
+
+
+
+
+Figure 3: LM Literal Theory of Mind Prompting - Partner First. The LLM is given this prompt for each action that
+its partner will take for the respective game action0 , action1 , and action2 (for RPS only) and we compare its probabilities
+computed for the token representation of the actions to determine which action prediction it selects.
+
+
+
+                                                             19
+                       Position: Theory of Mind Benchmarks are Broken for Large Language Models
+
+
+
+
+Figure 4: QA Prompting. The LLM is given this prompt and generates an answer with stochastic decoding. If the provided
+response matches the template and includes an action from the action list, the response is accepted. If not, we query the
+LLM for more stochastic responses until the criteria is satisfied. Failures were relatively uncommon.
+
+
+
+
+Figure 5: QA Literal Theory of Mind Prompting. The LLM is given this prompt and generates an answer with stochastic
+decoding. If the provided response matches the template and includes an action from the action list, the response is accepted.
+If not, we query the LLM for more stochastic responses until the criteria is satisfied. Failures were relatively uncommon.
+
+
+
+
+Figure 6: CoT Prompting. The LLM is given this prompt and generates an answer with stochastic decoding. If the provided
+response matches the template and includes an action from the action list, the response is accepted. If not, we query the
+LLM for more stochastic responses until the criteria is satisfied. Failures were relatively uncommon.
+
+
+                                                             20
+                       Position: Theory of Mind Benchmarks are Broken for Large Language Models
+
+
+
+
+Figure 7: CoT Literal Theory of Mind Prompting. The LLM is given this prompt and generates an answer with stochastic
+decoding. If the provided response matches the template and includes an action from the action list, the response is accepted.
+If not, we query the LLM for more stochastic responses until the criteria is satisfied. Failures were relatively uncommon.
+
+
+
+
+Figure 8: Plans+Insights Prompting. The LLM is given this prompt and generates an answer with stochastic decoding. If
+the provided response matches the template and includes an action from the action list, the response is accepted. If not, we
+query the LLM for more stochastic responses until the criteria is satisfied. Failures were relatively uncommon.
+
+
+
+
+Figure 9: Plans+Insights Literal Theory of Mind Prompting. The LLM is given this prompt and generates an answer
+with stochastic decoding. If the provided response matches the template and includes an action from the action list, the
+response is accepted. If not, we query the LLM for more stochastic responses until the criteria is satisfied. Failures were
+relatively uncommon.
+
+                                                             21
+                        Position: Theory of Mind Benchmarks are Broken for Large Language Models
+
+
+
+
+Figure 10: Reflection Module Prompting for Reflexion Prompting. The plan output from this prompt fills in the most
+recent memory for the Reflexion prompts in Figures 11 and 12.
+
+
+
+
+Figure 11: Reflexion Prompting (3 Memories). The LLM is given this prompt and generates an answer with stochastic
+decoding. If the provided response matches the template and includes an action from the action list, the response is accepted.
+If not, we query the LLM for more stochastic responses until the criteria is satisfied. Failures were relatively uncommon.
+
+
+
+
+Figure 12: Reflexion Literal Theory of Mind Prompting (3 Memories). The LLM is given this prompt and generates an
+answer with stochastic decoding. If the provided response matches the template and includes an action from the action list,
+the response is accepted. If not, we query the LLM for more stochastic responses until the criteria is satisfied. Failures were
+relatively uncommon.
+
+                                                              22
+                       Position: Theory of Mind Benchmarks are Broken for Large Language Models
+
+
+
+
+Figure 13: CoT 3-Shot Prompting. The LLM is given this prompt and generates an answer with stochastic decoding. If the
+provided response matches the template and includes an action from the action list, the response is accepted. If not, we
+query the LLM for more stochastic responses until the criteria is satisfied. Failures were relatively uncommon. The provided
+examples were customized to the actions space and payoff structure of each of the three games.
+
+
+
+
+Figure 14: Oracle Prompting. The provided action that the other agent will choose is true ’oracle’ knowledge in all cases.
+The LLM is given this prompt and generates an answer with stochastic decoding. If the provided response matches the
+template and includes an action from the action list, the response is accepted. If not, we query the LLM for more stochastic
+responses until the criteria is satisfied. Failures were relatively uncommon.
+
+
+
+
+                                                            23
+                      Position: Theory of Mind Benchmarks are Broken for Large Language Models
+
+
+
+
+Figure 15: Oracle Prompting Emphasizing Maximization. The provided action that the other agent will choose is true
+’oracle’ knowledge in all cases. The LLM is given this prompt and generates an answer with stochastic decoding. If the
+provided response matches the template and includes an action from the action list, the response is accepted. If not, we
+query the LLM for more stochastic responses until the criteria is satisfied. Failures were relatively uncommon. The only
+difference with Figure 15 in the emphasis on maximizing reward in response to the other agent’s action.
+
+
+
+
+Figure 16: S2A Prompting. We accept the LLM’s output for this prompt in all cases. This output replaces the rules and
+history in the subsequent QA or CoT prompt.
+
+
+
+
+Figure 17: S2A Literal Theory of Mind Prompting. We accept the LLM’s output for this prompt in all cases. This output
+replaces the rules and history in the subsequent QA or CoT prompt.
+
+
+
+                                                          24
+                       Position: Theory of Mind Benchmarks are Broken for Large Language Models
+
+
+
+
+          Model                       Prompting           Game      ΔFunctional ∕𝑇      ΔToM ∕𝑇         ToM %
+          LLAMA-2 70B Chat            LM                  RPS      0.857 ± 0.142     0.119 ± 0.006    92.1 ± 0.4
+          LLAMA-2 70B Chat            QA                  RPS      1.123 ± 0.236     0.743 ± 0.106    50.5 ± 7.1
+          LLAMA-2 70B Chat            CoT                 RPS      0.928 ± 0.133     0.776 ± 0.081    48.3 ± 5.4
+          LLAMA-3 70B Instruct        QA                  RPS      0.444 ± 0.107     0.414 ± 0.027    72.4 ± 1.8
+          LLAMA-3 70B Instruct        CoT                 RPS      0.213 ± 0.015     0.911 ± 0.031    39.3 ± 2.1
+          LLAMA-3 70B Instruct        CoT + 3-Shot        RPS      0.121 ± 0.017     0.747 ± 0.042    50.2 ± 2.8
+          LLAMA-3 70B Instruct        S2A                 RPS      0.224 ± 0.027     0.209 ± 0.031    86.1 ± 2.0
+          LLAMA-3 70B Instruct        S2A + CoT           RPS      0.234 ± 0.014     0.278 ± 0.025    81.4 ± 1.6
+          LLAMA-3 70B Instruct        Social QA           RPS      0.256 ± 0.017     0.548 ± 0.032    63.5 ± 2.1
+          LLAMA-3 70B Instruct        Social LM           RPS      0.378 ± 0.052     0.109 ± 0.023    93.1 ± 1.5
+          LLAMA-3 70B Instruct        Plans + Insights    RPS      0.173 ± 0.026     0.178 ± 0.015    88.2 ± 1.0
+          LLAMA-3 70B Instruct        Reflexion           RPS      0.465 ± 0.021     0.273 ± 0.019    81.8 ± 1.3
+          LLAMA-2 70B Chat            LM                  IBS      2.316 ± 0.817     0.496 ± 0.038    94.4 ± 0.4
+          LLAMA-2 70B Chat            QA                  IBS      2.570 ± 0.833     2.401 ± 0.480    68.8 ± 7.6
+          LLAMA-2 70B Chat            CoT                 IBS      3.367 ± 0.149     2.301 ± 0.120    71.9 ± 2.3
+          LLAMA-3 70B Instruct        QA                  IBS      1.391 ± 0.283     1.247 ± 0.141    84.6 ± 2.3
+          LLAMA-3 70B Instruct        CoT                 IBS      2.475 ± 0.208     1.835 ± 0.128    77.7 ± 2.4
+          LLAMA-3 70B Instruct        CoT + 3-Shot        IBS      0.526 ± 0.081     0.997 ± 0.106    88.3 ± 1.4
+          LLAMA-3 70B Instruct        S2A                 IBS      1.855 ± 0.314     1.156 ± 0.175    85.3 ± 2.9
+          LLAMA-3 70B Instruct        S2A + CoT           IBS      2.030 ± 0.287     1.300 ± 0.104    83.9 ± 1.9
+          LLAMA-3 70B Instruct        Social QA           IBS      1.613 ± 0.163     1.138 ± 0.104    85.1 ± 1.7
+          LLAMA-3 70B Instruct        Social LM           IBS      3.437 ± 0.154     0.795 ± 0.043    88.9 ± 2.4
+          LLAMA-3 70B Instruct        Plans + Insights    IBS      2.405 ± 0.216     0.756 ± 0.097    90.6 ± 1.5
+          LLAMA-3 70B Instruct        Reflexion           IBS      3.348 ± 0.105     1.117 ± 0.127    85.5 ± 2.1
+          LLAMA-2 70B Chat            LM                  IPD      2.889 ± 0.422     0.220 ± 0.034    93.5 ± 0.3
+          LLAMA-2 70B Chat            QA                  IPD      3.025 ± 0.383     1.665 ± 0.430    61.5 ± 7.1
+          LLAMA-2 70B Chat            CoT                 IPD      1.839 ± 0.289     1.393 ± 0.166    63.8 ± 1.6
+          LLAMA-3 70B Instruct        QA                  IPD      0.996 ± 0.133     0.690 ± 0.053    82.3 ± 3.0
+          LLAMA-3 70B Instruct        CoT                 IPD      0.892 ± 0.210     0.834 ± 0.056    72.7 ± 3.2
+          LLAMA-3 70B Instruct        CoT + 3-Shot        IPD      2.773 ± 0.730     0.524 ± 0.061    83.8 ± 2.3
+          LLAMA-3 70B Instruct        S2A                 IPD      0.808 ± 0.192     0.662 ± 0.200    84.6 ± 3.3
+          LLAMA-3 70B Instruct        S2A + CoT           IPD      0.679 ± 0.137     0.639 ± 0.106    83.1 ± 1.4
+          LLAMA-3 70B Instruct        Social QA           IPD      0.550 ± 0.071     0.638 ± 0.036    78.0 ± 2.0
+          LLAMA-3 70B Instruct        Social LM           IPD      0.803 ± 0.097     0.394 ± 0.065    87.8 ± 2.2
+          LLAMA-3 70B Instruct        Plans + Insights    IPD      0.711 ± 0.114     0.499 ± 0.070    86.7 ± 1.0
+          LLAMA-3 70B Instruct        Reflexion           IPD      1.076 ± 0.139     0.428 ± 0.055    86.8 ± 0.9
+
+
+Table 8: Comparing literal and functional metrics across prompting strategies on Rock, Paper, Scissors (RPS), Iterated Battle
+of Sexes (IBS), and the Iterated Prisoner’s Dilemma (IPD) for LLAMA-2 70B Chat and LLAMA-3 70B Instruct playing
+with single action partners.
+
+
+
+
+                                                             25
+                        Position: Theory of Mind Benchmarks are Broken for Large Language Models
+
+
+
+
+Figure 18: Social Prompting. The actions that it is predicted that the other player will choose is the actual output of a prior
+application of literal theory of mind oriented prompt to the same LLM model. If the provided response matches the template
+and includes an action from the action list, the response is accepted. If not, we query the LLM for more stochastic responses
+until the criteria is satisfied. Failures were relatively uncommon.
+
+
+
+
+                 Model               Prompting      Game      ΔFunctional ∕𝑇      ΔToM ∕𝑇          ToM %
+                 Mistral Large 2     QA             RPS      0.181 ± 0.013     0.133 ± 0.01      91.1 ± 0.7
+                 Mistral Large 2     S2A            RPS      0.177 ± 0.015     0.134 ± 0.015     91.1 ± 1.0
+                 Mistral Large 2     S2A + CoT      RPS      0.127 ± 0.012     0.259 ± 0.017     82.8 ± 1.1
+                 Mistral Large 2     Social QA      RPS      0.126 ± 0.008     0.081 ± 0.006     94.6 ± 0.4
+                 Mistral Large 2     Reflexion      RPS      0.156 ± 0.009     0.050 ± 0.005     96.7 ± 0.3
+                 Mistral Large 2     QA             IBS      1.955 ± 0.103     0.575 ± 0.055     93.5 ± 0.5
+                 Mistral Large 2     S2A            IBS      0.923 ± 0.094     0.497 ± 0.051     94.2 ± 0.6
+                 Mistral Large 2     S2A + CoT      IBS      0.498 ± 0.091     0.300 ± 0.049     96.3 ± 0.7
+                 Mistral Large 2     Social QA      IBS      1.724 ± 0.132      0.42 ± 0.036     95.0 ± 0.4
+                 Mistral Large 2     Reflexion      IBS      1.076 ± 0.058     0.342 ± 0.031     96.0 ± 0.4
+                 Mistral Large 2     QA             IPD      0.688 ± 0.045      0.27 ± 0.019     90.4 ± 1.0
+                 Mistral Large 2     S2A            IPD      0.631 ± 0.052     0.275 ± 0.042     92.3 ± 0.7
+                 Mistral Large 2     S2A + CoT      IPD      0.385 ± 0.037     0.255 ± 0.027     91.1 ± 1.1
+                 Mistral Large 2     Social QA      IPD      0.585 ± 0.062     0.243 ± 0.018     91.2 ± 1.1
+                 Mistral Large 2     Reflexion      IPD      0.619 ± 0.033     0.171 ± 0.016     94.5 ± 0.5
+
+
+Table 9: Comparing literal and functional metrics across prompting strategies on Rock, Paper, Scissors (RPS), Iterated Battle
+of Sexes (IBS), and the Iterated Prisoner’s Dilemma (IPD) for Mistral Large 2 playing with single action partners.
+
+
+
+
+                                                              26
+                        Position: Theory of Mind Benchmarks are Broken for Large Language Models
+
+              Model                        Prompting                RPS               IBS               IPD
+              Tabular                      N/A                0.211 ± 0.007      0.468 ± 0.031     0.248 ± 0.005
+              Mixtral 8x7b Instruct v1     QA                 1.224 ± 0.025      1.484 ± 0.109     1.074 ± 0.086
+              Mixtral 8x7b Instruct v1     CoT                1.052 ± 0.026      4.654 ± 0.222     2.604 ± 0.038
+              Mixtral 8x7b Instruct v1     CoT + 3-Shot       1.067 ± 0.016      2.590 ± 0.190     1.796 ± 0.113
+              Mixtral 8x7b Instruct v1     S2A                1.065 ± 0.021      1.627 ± 0.167     2.002 ± 0.099
+              Mixtral 8x7b Instruct v1     S2A + CoT          0.994 ± 0.026      3.640 ± 0.418     2.675 ± 0.051
+              Mixtral 8x7b Instruct v1     Social LM          1.304 ± 0.020      1.257 ± 0.100     1.674 ± 0.135
+              Mixtral 8x7b Instruct v1     Plans/Insights*    1.538 ± 0.023      2.313 ± 0.195     1.791 ± 0.112
+              Mixtral 8x7b Instruct v1     Reflexion 1         1.03 ± 0.023      4.169 ± 0.255     2.383 ± 0.059
+              Mixtral 8x7b Instruct v1     Reflexion 3        1.076 ± 0.015      3.951 ± 0.235     2.213 ± 0.064
+              Mistral Large 2              QA                 1.064 ± 0.018      2.167 ± 0.131     2.581 ± 0.048
+              Mistral Large 2              CoT                1.007 ± 0.014      0.223 ± 0.074     2.657 ± 0.030
+              Mistral Large 2              CoT + 3-Shot       0.999 ± 0.016      0.032 ± 0.023     0.417 ± 0.154
+              Mistral Large 2              S2A                1.018 ± 0.027      1.009 ± 0.129     0.454 ± 0.193
+              Mistral Large 2              S2A + CoT          1.029 ± 0.025      0.663 ± 0.231     2.586 ± 0.132
+              Mistral Large 2              Social LM          0.903 ± 0.020      2.021 ± 0.197     2.668 ± 0.021
+              Mistral Large 2              Plans/Insights*    1.330 ± 0.021      0.089 ± 0.051     0.717 ± 0.140
+              Mistral Large 2              Reflexion 1        0.987 ± 0.016      2.311 ± 0.152     2.544 ± 0.049
+              Mistral Large 2              Reflexion 3        1.037 ± 0.020      1.772 ± 0.166     2.449 ± 0.065
+              LLAMA-3 70B Instruct         QA                 1.174 ± 0.023      1.377 ± 0.110     2.770 ± 0.041
+              LLAMA-3 70B Instruct         CoT                1.029 ± 0.019      4.468 ± 0.176     2.761 ± 0.023
+              LLAMA-3 70B Instruct         CoT + 3-Shot       0.968 ± 0.020      3.065 ± 0.237     2.565 ± 0.066
+              LLAMA-3 70B Instruct         S2A                1.025 ± 0.026      2.100 ± 0.149     2.606 ± 0.060
+              LLAMA-3 70B Instruct         S2A + CoT          1.047 ± 0.048      2.938 ± 0.258     2.740 ± 0.031
+              LLAMA-3 70B Instruct         Social LM          1.112 ± 0.023      2.448 ± 0.335     2.759 ± 0.012
+              LLAMA-3 70B Instruct         Plans/Insights*    1.389 ± 0.051      3.127 ± 0.229     2.547 ± 0.056
+              LLAMA-3 70B Instruct         Reflexion 1        0.953 ± 0.023      5.758 ± 0.152      2.57 ± 0.031
+              LLAMA-3 70B Instruct         Reflexion 3        1.003 ± 0.016      5.531 ± 0.105     2.442 ± 0.029
+
+Table 10: Comparing LLM models and prompting strategies when playing with tit for tat style strategies for the other agent
+across Rock, Paper, Scissors (RPS), Iterated Battle of Sexes (IBS), and the Iterated Prisoner’s Dilemma (IPD).
+
+
+IPD. Analogously, in RPS we always play the best response to the other agent’s action at the last step and in IBS we always
+play the same action that the other agent did at the last step. We also add the very strong Mistral Large 2 model to match
+LLAMA-3 models but within the Mistral family. In most cases the LLMs perform quite poorly. All models are again much
+worse than the tabular model with the exception of CoT Prompting for Mistral Large 2 playing IBS. In this case, it even
+outperforms RMax with 3 examples, which makes sense given the payoff table it knows and the examples it is given which
+RMax does not receive. However, this model is inconsistent and, for example, does not perform well at RPS. Interestingly,
+CoT prompting seems to hurt the LLAMA-3 and Mixtral models. Social Prompting also doesn’t seem to really provide
+benefits, which makes sense because the literal ToM performance falls off quite a bit in this setting.
+
+C.4. Additional Experiments on Action Space Inductive Bias
+The Good and Bad of Inductive Bias. So far we have used the neutral action representations 𝐽 , 𝐹 , and 𝐵 to avoid
+contamination following prior work (Binz & Schulz, 2023; Akata et al., 2023). However, it is interesting given our results
+so far to get a better sense of the degree that prior knowledge in the LLMs impacts performance and the choice of action
+representation is great way for us to control the extent that this knowledge is evoked. For the best performing models
+LLAMA-3 70B Instruct and Mistral Large 2, we conduct experiments for all three games playing with both single action and
+tit for tat style partners. We provide comprehensive results for functional theory of mind performance in Figures 20, 22, 24,
+26, 28, 30, 32, 34, 36, 38, 40, and 42, and for literal theory of mind performance in Figures 21, 23, 25, 27, 29, 31, 33, 35, 37,
+39, 41, and 43. Here we compare neutral actions with the actual canonical action names for the game, the neutral actions
+
+                                                               27
+                       Position: Theory of Mind Benchmarks are Broken for Large Language Models
+
+
+
+
+Figure 19: IPD Regret for Mistral Large 2 with a Tit for Tat Partner Across Action Types. We compare performance
+across action spaces with the Tabular RMax algorithm to test the influence of different levels of inductive bias.
+
+
+with 20 repetitions to take up a longer portion of the context, and nonsense word actions (see Appendix C). We generally
+find that both LLM models experience systematic bias that prevents them from converging to optimal performance as the
+number of interactions grow. Indeed, only LLAMA-3 playing IBS with tit for tat partners (Figure 28) seems on the road to
+slow convergence. Meanwhile, literal theory of mind seems to be converging in a greater number of settings (Figures 29, 33,
+35, and 37). We find that real actions often help with functional theory of mind performance early in the interaction stream
+while becoming harmful for converged performance as interaction goes on (Figures 19, 20, 26, 30, 32, and 36).
+
+                                                Impact of Inductive Bias
+   As exemplified by Figure 19, inductive bias can be helpful with a limited number of interactions while also hurting
+   convergence in the long-term.
+
+
+
+
+                                                            28
+                       Position: Theory of Mind Benchmarks are Broken for Large Language Models
+
+
+
+
+Figure 20: RPS Regret for LLAMA-3 70B Instruct with a Single Action Partner Across Action Types. We compare
+performance across action spaces with the Tabular RMax algorithm to test the influence of different levels of inductive bias.
+
+
+
+
+Figure 21: RPS ToM % for LLAMA-3 70B Instruct with a Single Action Partner Across Action Types. We compare
+accuracy across action spaces with a Tabular counting algorithm to test the influence of different levels of inductive bias.
+
+
+
+
+                                                             29
+                       Position: Theory of Mind Benchmarks are Broken for Large Language Models
+
+
+
+
+Figure 22: IBS Regret for LLAMA-3 70B Instruct with a Single Action Partner Across Action Types. We compare
+performance across action spaces with the Tabular RMax algorithm to test the influence of different levels of inductive bias.
+
+
+
+
+Figure 23: IBS ToM % for LLAMA-3 70B Instruct with a Single Action Partner Across Action Types. We compare
+accuracy across action spaces with a Tabular counting algorithm to test the influence of different levels of inductive bias.
+
+
+
+
+                                                             30
+                       Position: Theory of Mind Benchmarks are Broken for Large Language Models
+
+
+
+
+Figure 24: IPD Regret for LLAMA-3 70B Instruct with a Single Action Partner Across Action Types. We compare
+performance across action spaces with the Tabular RMax algorithm to test the influence of different levels of inductive bias.
+
+
+
+
+Figure 25: IPD ToM % for LLAMA-3 70B Instruct with a Single Action Partner Across Action Types. We compare
+accuracy across action spaces with a Tabular counting algorithm to test the influence of different levels of inductive bias.
+
+
+
+
+                                                             31
+                       Position: Theory of Mind Benchmarks are Broken for Large Language Models
+
+
+
+
+Figure 26: RPS Regret for LLAMA-3 70B Instruct with a Tit for Tat Partner Across Action Types. We compare
+performance across action spaces with the Tabular RMax algorithm to test the influence of different levels of inductive bias.
+
+
+
+
+Figure 27: RPS ToM % for LLAMA-3 70B Instruct with a Tit for Tat Partner Across Action Types. We compare
+accuracy across action spaces with a Tabular counting algorithm to test the influence of different levels of inductive bias.
+
+
+
+
+                                                             32
+                       Position: Theory of Mind Benchmarks are Broken for Large Language Models
+
+
+
+
+Figure 28: IBS Regret for LLAMA-3 70B Instruct with a Tit for Tat Partner Across Action Types. We compare
+performance across action spaces with the Tabular RMax algorithm to test the influence of different levels of inductive bias.
+
+
+
+
+Figure 29: IBS ToM % for LLAMA-3 70B Instruct with a Tit for Tat Partner Across Action Types. We compare
+accuracy across action spaces with a Tabular counting algorithm to test the influence of different levels of inductive bias.
+
+
+
+
+                                                             33
+                       Position: Theory of Mind Benchmarks are Broken for Large Language Models
+
+
+
+
+Figure 30: IPD Regret for LLAMA-3 70B Instruct with a Tit for Tat Partner Across Action Types. We compare
+performance across action spaces with the Tabular RMax algorithm to test the influence of different levels of inductive bias.
+
+
+
+
+Figure 31: IPD ToM % for LLAMA-3 70B Instruct with a Tit for Tat Partner Across Action Types. We compare
+accuracy across action spaces with a Tabular counting algorithm to test the influence of different levels of inductive bias.
+
+
+
+
+                                                             34
+                     Position: Theory of Mind Benchmarks are Broken for Large Language Models
+
+
+
+
+Figure 32: RPS Regret for Mistral Large 2 with a Single Action Partner Across Action Types. We compare performance
+across action spaces with the Tabular RMax algorithm to test the influence of different levels of inductive bias.
+
+
+
+
+Figure 33: RPS ToM % for Mistral Large 2 with a Single Action Partner Across Action Types. We compare accuracy
+across action spaces with a Tabular counting algorithm to test the influence of different levels of inductive bias.
+
+
+
+
+                                                        35
+                     Position: Theory of Mind Benchmarks are Broken for Large Language Models
+
+
+
+
+Figure 34: IBS Regret for Mistral Large 2 with a Single Action Partner Across Action Types. We compare performance
+across action spaces with the Tabular RMax algorithm to test the influence of different levels of inductive bias.
+
+
+
+
+Figure 35: IBS ToM % for Mistral Large 2 with a Single Action Partner Across Action Types. We compare accuracy
+across action spaces with a Tabular counting algorithm to test the influence of different levels of inductive bias.
+
+
+
+
+                                                        36
+                     Position: Theory of Mind Benchmarks are Broken for Large Language Models
+
+
+
+
+Figure 36: IPD Regret for Mistral Large 2 with a Single Action Partner Across Action Types. We compare performance
+across action spaces with the Tabular RMax algorithm to test the influence of different levels of inductive bias.
+
+
+
+
+Figure 37: IPD ToM % for Mistral Large 2 with a Single Action Partner Across Action Types. We compare accuracy
+across action spaces with a Tabular counting algorithm to test the influence of different levels of inductive bias.
+
+
+
+
+                                                        37
+                     Position: Theory of Mind Benchmarks are Broken for Large Language Models
+
+
+
+
+Figure 38: RPS Regret for Mistral Large 2 with a Tit for Tat Partner Across Action Types. We compare performance
+across action spaces with the Tabular RMax algorithm to test the influence of different levels of inductive bias.
+
+
+
+
+Figure 39: RPS ToM % for Mistral Large 2 with a Tit for Tat Partner Across Action Types. We compare accuracy
+across action spaces with a Tabular counting algorithm to test the influence of different levels of inductive bias.
+
+
+
+
+                                                        38
+                     Position: Theory of Mind Benchmarks are Broken for Large Language Models
+
+
+
+
+Figure 40: IBS Regret for Mistral Large 2 with a Tit for Tat Partner Across Action Types. We compare performance
+across action spaces with the Tabular RMax algorithm to test the influence of different levels of inductive bias.
+
+
+
+
+Figure 41: IBS ToM % for Mistral Large 2 with a Tit for Tat Partner Across Action Types. We compare accuracy across
+action spaces with a Tabular counting algorithm to test the influence of different levels of inductive bias.
+
+
+
+
+                                                        39
+                     Position: Theory of Mind Benchmarks are Broken for Large Language Models
+
+
+
+
+Figure 42: IPD Regret for Mistral Large 2 with a Tit for Tat Partner Across Action Types. We compare performance
+across action spaces with the Tabular RMax algorithm to test the influence of different levels of inductive bias.
+
+
+
+
+Figure 43: IPD ToM % for Mistral Large 2 with a Tit for Tat Partner Across Action Types. We compare accuracy
+across action spaces with a Tabular counting algorithm to test the influence of different levels of inductive bias.
+
+
+
+
+                                                        40
+

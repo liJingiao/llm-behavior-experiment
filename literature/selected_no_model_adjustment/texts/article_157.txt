@@ -1,0 +1,1895 @@
+  RULEBREAKERS: Challenging LLMs at the Crossroads between Formal
+               Logic and Human-like Reasoning
+
+
+                                    Jason Chan 1 Robert Gaizauskas 1 Zhixue Zhao 1
+
+
+                         Abstract
+                                                                                         A or B.                      Not A.
+
+     Formal logic enables computers to reason in nat-
+     ural language by representing sentences in sym-
+                                                                                            Not B.
+     bolic forms and applying rules to derive conclu-
+     sions. However, in what our study characterizes
+     as “rulebreaker” scenarios, this method can lead
+                                                                         Anne is either in Stockholm or               Anne is in 
+
+     to conclusions that are typically not inferred or ac-
+                                                                                                                      Stockholm.
+     cepted by humans given their common sense and                       somewhere in Sweden.
+
+     factual knowledge. Inspired by works in cogni-
+     tive science, we create RULEBREAKERS, the                                 Anne is not in Sweden.
+     first dataset for rigorously evaluating the ability of
+     large language models (LLMs) to recognize and
+     respond to rulebreakers (versus non-rulebreakers)                Figure 1. An example adapted from Johnson-Laird (1983): rigidly
+     in a knowledge-informed and human-like manner.                   applying logical rules (top) to premises (left) in natural language
+     Evaluating seven LLMs, we find that most models                  can result in conclusions (right) that humans would not typically
+     achieve mediocre accuracy on RULEBREAK-                          draw or accept, given their common sense and factual knowledge.
+     ERS and exhibit some tendency to over-rigidly
+     apply logical rules, unlike what is expected from                symbolic forms (in a process known as semantic parsing)
+     typical human reasoners. Further analysis sug-                   and then applying a set of pre-defined rules to evaluate or
+     gests that this apparent failure is potentially asso-            derive new conclusions (Kamath & Das, 2019; Saparov &
+     ciated with the models’ poor utilization of their                Mitchell, 2022; Olausson et al., 2023, etc.). For example, in
+     world knowledge and their attention distribution                 a system using propositional logic (Barker-Plummer et al.,
+     patterns. Whilst revealing a limitation of current               2011), sentences are converted into atomic propositions
+     LLMs, our study also provides a timely counter-                  (“A”, “B”) optionally connected by one or more of the five
+     balance to a growing body of recent works that                   connectives (“not” (¬), “and” (∧), “or” (∨), “if. . . then”(→),
+     propose methods relying on formal logic to im-                                           →)). Given two premises, “Anne is ei-
+                                                                      “...if and only if...” (←
+     prove LLMs’ general reasoning capabilities, high-                ther in Stockholm or somewhere in Germany” and “Anne is
+     lighting their risk of further increasing divergence             not in Germany”, we can convert them symbolically into A
+     between LLMs and human-like reasoning.                           ∨ B and ¬B respectively. We can then apply the disjunctive
+                                                                      syllogism rule (for all propositions P and Q, P ∨ Q, ¬Q ∴
+                                                                      P) to correctly conclude that A i.e. “Anne is in Stockholm”.
+                                                                      However, as argued in some cognitive science literature
+1. Introduction                                                       (Johnson-Laird, 2010, Ragni & Johnson-Laird, 2018, Khem-
+Formal logic has numerous applications in mathematics and             lani & Johnson-Laird, 2019, etc.), this method of reasoning
+computer science (Zach, 2024). In natural language process-           purely based on logical form and rules is fundamentally
+ing (NLP), it enables computers to perform reasoning with             different from how humans typically reason with natural lan-
+natural language sentences by first converting them into              guage statements. A key problem is that this approach can
+                                                                      lead to conclusions which factually contradict the premises
+   1
+     University of Sheffield, Sheffield, UK. Correspondence to:       and which humans typically do not draw provided that they
+Zhixue Zhao <zhixue.zhao@sheffield.ac.uk>.                            recognize this factual contradiction. Drawing on exam-
+Proceedings of the 42 nd International Conference on Machine          ples adapted from Johnson-Laird (1983) such as Figure 1,
+Learning, Vancouver, Canada. PMLR 267, 2025. Copyright 2025           suppose we are told that “Anne is either in Stockholm or
+by the author(s).                                                     somewhere in Sweden” (A ∨ B) but we find out in fact that
+
+                                                                  1
+         RULEBREAKERS: Challenging LLMs at the Crossroads between Formal Logic and Human-like Reasoning
+
+“Anne is not in Sweden” (¬B). Simply applying the disjunc-              mains unclear how they do so and whether their reasoning
+tive syllogism rule likewise would produce a conclusion that            processes are in any way comparable to those of humans.
+“Anne is in Stockholm” (A). But most readers, provided that             Our study contributes targeted insights to these questions by
+they know Stockholm is located in Sweden, are unlikely to               drawing on cognitive science expertise and assessing LLMs
+draw this conclusion. This is because, given our common                 on an under-explored category of reasoning problems.
+sense and factual knowledge about the world, we recognize
+                                                                        Moreover, a growing number of recent studies have pro-
+that the two premises are inconsistent with each other; and
+                                                                        posed methods that rely on formal logic to improve LLMs’
+that the proposed conclusion (”Anne is in Stockholm”) con-
+                                                                        reasoning capabilities and enable them to perform complex
+tradicts the second premise (”Anne is not in Sweden”) in fact
+                                                                        multi-step reasoning. Examples include using logical rules
+and should therefore be rejected. Similarly, suppose we are
+                                                                        to synthetically generate or augment training data (Wang
+told that “if Anne is in Sweden, then she is not in Stockholm”
+                                                                        et al., 2022; Morishita et al., 2024), incorporating logic-
+(A → ¬B) but we learn in fact that “Anne is in Stockholm”
+                                                                        based training metrics (Calanzone et al., 2024) or constraints
+(B). We would clearly also not just conclude that ”Anne is
+                                                                        during inference (Weir et al., 2024), and using LLMs to
+not in Sweden” (¬A) by applying the formal rule of modus
+                                                                        explicitly translate natural language statements into sym-
+tollens (for all propositions P and Q, P → Q, ¬Q ∴ ¬P)1 .
+                                                                        bolic forms which are then used for the models’ subsequent
+Our study characterizes each of these examples as a “rule-              reasoning steps (Xu et al., 2024) or processed by external
+breaker”: a set of natural language premises and conclusion             solvers (Pan et al., 2023; Olausson et al., 2023). Our study
+whereby the conclusion can be derived by applying logical               provides a timely and important counterbalance to these
+rules to the premises, but is typically not inferred or ac-             approaches by drawing attention to their potential pitfalls
+cepted by humans because, given their common sense and                  and trade-off in increasing divergence between LLMs and
+factual knowledge, it is inconsistent with the premises.                human-like reasoning.
+In cognitive science, existing studies (Johnson-Laird &                 Our contributions are summarized as follows:
+Byrne, 2002; Quelhas et al., 2010; Quelhas & Johnson-
+Laird, 2017) have found that, when human participants are                  • We develop RULEBREAKERS, a dataset comprising
+given the premises of rulebreakers similar to the examples                   25,600 instances, along with corresponding evaluation
+above, they indeed typically do not draw what they recog-                    metrics, designed to rigorously assess the reasoning ca-
+nize to be factually contradicting conclusions by rigidly ap-                pabilities of LLMs on rulebreakers, an under-explored
+plying a logical rule. By contrast, most participants do draw                category of reasoning problems in NLP.3
+the conclusion in what we call “non-rulebreaker” cases (i.e.
+when the conclusion is not inconsistent with the premises,                 • We are the first to conduct a comprehensive comparison
+given common sense and factual knowledge), even though                       across seven state-of-the-art LLMs, including GPT-4o,
+both the rulebreakers and non-rulebreakers have the same                     on rulebreakers at scale and find that, while LLMs
+surface structure (e.g. “A or B. Not B. Therefore, A.”). In                  show some capacity to distinguish rulebreakers from
+NLP, rulebreakers have received little attention, having only                non-rulebreakers when reasoning, their overall perfor-
+been acknowledged in theory (Bos & Markert, 2005; Kor-                       mance and responses are far from what we expect from
+man et al., 2018) but not systematically studied.                            typical human reasoners.
+
+Our study addresses this gap by creating RULEBREAK-                        • Our subsequent analysis indicates that the models’ fail-
+ERS, a large-scale dataset consisting of minimally differ-                   ure to recognize rulebreakers may be associated with
+ing rulebreaker and non-rulebreaker pairs, to rigorously                     two factors: the models’ familiarity with the relevant
+evaluate the reasoning behavior of large language models                     factual knowledge, and the relative importance they
+(LLMs). Specifically, we evaluate the extent to which LLMs                   assign to different parts of the premises, opening up
+can recognize and respond to both rulebreakers and non-                      promising directions for future investigation.
+rulebreakers in a way that we would expect typical human
+reasoners to do so, by rejecting conclusions in rulebreakers            2. Related Work
+but accepting those in non-rulebreakers.2
+                                                                        Problems with logic as basis of human reasoning. Exist-
+Recent studies have suggested that LLMs can perform tasks               ing work in cognitive science, particularly by proponents of
+that require reasoning abilities (see Section 2), but it re-            the mental model theory4 , have argued against the idea that
+   1
+    B is logically equivalent to ¬(¬B) in propositional logic
+                                                                        humans typically reason by identifying the logical form of
+   2
+    Our study refers to this specific reasoning behavior as being          3
+                                                                             We publicly release RULEBREAKERS at https://
+“human-like” and “knowledge-informed”, interchangeably, on the          github.com/jasonchanly/rulebreakers.
+basis of existing studies in cognitive science as discussed above          4
+                                                                             We refer interested readers to Johnson-Laird (1983) for the
+and further in Appendix A Table 5.                                      seminal text on this theory of how humans reason by constructing
+
+                                                                    2
+         RULEBREAKERS: Challenging LLMs at the Crossroads between Formal Logic and Human-like Reasoning
+
+natural language premises and then applying logical rules                  valid purely on the basis of form. In other words, they as-
+to produce a conclusion (Johnson-Laird, 2010; Khemlani                     sume that, given premises in the form of “if A, then B” and
+& Johnson-Laird, 2017, etc.). A key reason is that logi-                   “not B”, the conclusion “not A” is always correct regardless
+cal rules are defined based on connectives (such as “if ”,                 of what “A” and “B” symbolize in natural language. Instead,
+“and”, “or”) that are assumed to have fixed meanings and                   we assess whether LLMs can, like humans (as we argued in
+properties in formal logic; but in everyday language, the                  Section 1), take semantic content of premises into account
+interpretation of connectives varies significantly depending               when reasoning rather than just rigidly applying formal
+on the semantic content of sentences they connect (Johnson-                rules. This means using common sense and factual knowl-
+Laird & Byrne, 2002; Khemlani et al., 2018).5 Our study                    edge to recognize that conclusions in non-rulebreakers are
+is inspired by experimental work that has provided empir-                  correct (i.e. they are factually consistent with and follow
+ical support to these arguments (Johnson-Laird & Byrne,                    from the premises) whereas those in rulebreakers are not,
+2002; Quelhas et al., 2010; Quelhas & Johnson-Laird, 2017),                even though they might appear to have the same logical
+which find that human participants generally avoid drawing                 form such that the same rule seems to apply.
+conclusions that they recognize to be factually contradict-
+                                                                           Comparing human and LLM reasoning. Our study con-
+ing the premises, even where these conclusions might be
+                                                                           tributes to the growing interest evidenced by similar re-
+licenced by a purely formal application of logical rules
+                                                                           cent works in comparing LLMs’ reasoning behavior against
+to the premises.6 However, while these studies tested hu-
+                                                                           how humans typically reason according to theories and find-
+man participants on dozens of handcrafted rulebreakers, our
+                                                                           ings in cognitive science (Suri et al., 2024; Binz & Schulz,
+study designs rulebreaker templates by which we can sys-
+                                                                           2023; Castello et al., 2024; Mondorf & Plank, 2024a, etc.).
+tematically generate minimally differing rulebreaker and
+                                                                           Lampinen et al. (2024) found that LLMs exhibit some
+non-rulebreaker pairs at scale, enabling us to rigorously as-
+                                                                           human-like “content effect” in certain logical reasoning
+sess LLMs and control for their world knowledge, bias and
+                                                                           tasks, including the Wason selection task (Wason, 1968)
+sensitivity to prompt variations.
+                                                                           and assessing whether conclusions are valid in syllogisms
+Reasoning with LLMs. Reasoning has been characterized                      (arguments in the form of e.g. “All As are Bs. All Bs are
+as an emergent ability of LLMs (Wei et al., 2022a; Suzgun                  Cs. Therefore, all As are Cs.”). In other words, models
+et al., 2023) and a range of existing work has evaluated the               can be mistakenly affected by semantic content when rea-
+ability of LLMs to perform different types of reasoning,                   soning about problems where only the logical form should
+such as logical reasoning (see below), commonsense reason-                 be considered: they can be prone to judge conclusions that
+ing (Talmor et al., 2021; Bian et al., 2024) and mathematical              are true (or plausible) in the real world as logically valid,
+reasoning (Meadows et al., 2024; Ahn et al., 2024). Yu et al.              and conclusions that are false in the real world as invalid,
+(2024), Qiao et al. (2023), Sun et al. (2025), and Mondorf &               even where the underlying logical structure is the same in
+Plank (2024b) provide further overviews and taxonomies.                    both cases. This phenomenon is corroborated by subsequent
+                                                                           studies such as ProntoQA (Saparov & He, 2023) and Wu
+Our study is motivated in part by existing work which in-
+                                                                           et al. (2024), the latter finding that models tend to perform
+dicates that LLMs can generally perform logical reasoning
+                                                                           worse at logical reasoning the more the premises deviate
+using rules in propositional and first-order logic to some de-
+                                                                           from real-world knowledge. Similarly, Eisape et al. (2024)
+gree (Saparov et al., 2023; Han et al., 2024; Xu et al., 2025;
+                                                                           compares human and LLM behavior in reasoning about syl-
+Parmar et al., 2024), even though they may struggle with
+                                                                           logisms and found that models mimic some human biases
+applying particular rules (Parmar et al., 2024), identifying
+                                                                           including content effect and figural effect (i.e. judgments
+logical fallacies (Wan et al., 2024) and constructing long
+                                                                           being sensitive to the ordering of the premises and the terms
+inference chains (Saparov et al., 2023).
+                                                                           within each premise), although larger models exhibit less of
+However, our study and dataset has a fundamentally dif-                    these biases and reason in a more logical manner.
+ferent objective from these prior works, which all assess
+                                                                           Our work differs from the above in that our focus is not on
+whether LLMs can identify the underlying logical form of
+                                                                           formal logical reasoning problems that humans might
+natural language premises, regardless of their semantic con-
+                                                                           find difficult to answer correctly due to content effect or
+tent, and apply rules to derive conclusions that are logically
+                                                                           systematic biases. Rather, the rulebreakers we study are
+mental models of possibilities, but note that the specific mechanics       more general reasoning problems in natural language
+proposed by the theory itself are not integral to our current work.        that do in fact require models to consider the semantic
+    5
+      In cognitive science, this phenomenon of context-dependent           content of the sentences in order to answer correctly in
+interpretation is also known as the “modulation” of sentential
+connectives (Johnson-Laird & Byrne, 2002).
+                                                                           a knowledge-informed and human-like manner.
+    6
+      Appendix A Table 5 provides further details on these studies.        We discuss additional related works in Appendix A.
+In this sense, rulebreaker cases can also be considered as factual
+contradictions arising from over-rigid reasoning with formal logic.
+
+
+                                                                       3
+         RULEBREAKERS: Challenging LLMs at the Crossroads between Formal Logic and Human-like Reasoning
+
+
+Table 1. Example rulebreakers in the four templates used in our dataset, created by permuting premise-conclusion structures of two
+logical rules: MT and DS, and two kinds of entity pairs: geographical (country, city) and categorical (type, instance). Note that we create
+MT rulebreakers in a structure that is different but logically equivalent to the paradigm form “if P, then Q. Not Q. Therefore, not P.”
+
+                                Geographical (country, city)              Categorical (type, instance)
+ Modus tollens (MT)             Premises: If Anne is in Sweden,           Premises: If Anne plays some kind of brass instrument,
+                                then she is not in Stockholm.             then she does not play the trumpet.
+ Premises: If P, then not Q.    Anne is in Stockholm.                     Anne plays the trumpet.
+ Q.
+ Conclusion: Not P.             Conclusion: Anne is not in Sweden.        Conclusion: Anne does not play any kind of brass instrument.
+ Disjunctive syllogism (DS)     Premises: Anne is in either Stockholm     Premises: Anne plays either the trumpet
+                                or somewhere in Sweden.                   or some kind of brass instrument.
+ Premises: P or Q.              Anne is not in Sweden.                    Anne does not play any kind of brass instrument.
+ Not Q.
+ Conclusion: P.                 Conclusion: Anne is in Stockholm.         Conclusion: Anne plays the trumpet.
+
+3. RULEBREAKERS Dataset                                                      arts (8), and racket sports (5). In total, we have 91
+                                                                             (type, instance) pairs, listed in Appendix B.
+We create a dataset consisting of non-rulebreakers and rule-
+breakers in equal proportion. We generate rulebreakers
+                                                                        Verbs To fill in the template for creating RULEBREAK-
+using four templates as shown in Table 1. These templates
+                                                                        ERS instances, for country-city pairs, we permute each pair
+are created in relation to two logical rules (modus tollens
+                                                                        with six manually selected verbs (“is in”, “was born in”,
+(MT) and disjunctive syllogism (DS)), with placeholders to
+                                                                        “died in”, “will be visiting”, “had studied in”, “has been
+be filled with entity pairs, verbs and names-pronouns.
+                                                                        to”). Similarly, we permute each type-instance pair with
+                                                                        two manually selected verbs. Specifically, birds, insects,
+3.1. Creating Rulebreakers
+                                                                        and fish are permuted with “saw”/“caught”, the three kinds
+Logical rules RULEBREAKERS focuses on premise-                          of musical instruments with “plays”/“owns”, and martial
+conclusion structures relating to two rules in propositional            arts and racket sports with “is good at”/“is competing in”.
+logic that have been tested by prior work on human partici-
+pants (Johnson-Laird & Byrne, 2002; Quelhas et al., 2010;               Names-pronouns We further permute each of these entity
+Quelhas & Johnson-Laird, 2017). See Table 1 for examples                pair + verb combinations with five given names and corre-
+of rulebreakers with respect to these two rules.7                       sponding pronouns, randomly sampled without replacement
+                                                                        from a list of common first names worldwide8 .
+MT: for all propositions P and Q, “if P then Q” and “not Q”
+entails “not P” (P → Q, ¬Q ∴ ¬ P).
+                                                                        3.2. Creating Non-rulebreakers
+DS: for all propositions P and Q, “P or Q” and “not Q”
+entails “P” (P ∨ Q, ¬Q ∴ P).                                            We create a non-rulebreaker counterpart for each rulebreaker
+                                                                        by randomly replacing the country or type used in the
+                                                                        premises and conclusion with a different country or type,
+Entity pairs We include two groups of entity pairs:
+                                                                        respectively. For example, we create the following non-
+                                                                        rulebreaker by replacing “France” with “Germany”:
+   • Country and city (geographical pairs): We use a list of
+     current-day countries and their capital cities, obtained                Premises: If Anne is in FranceGermany, then she
+     by querying WikiData (Vrandečić & Krötzsch, 2014).                   is not in Paris. Anne is in Paris.
+     We filter out capitals that have the same name as their                 Conclusion: Anne is not in FranceGermany.
+     countries (e.g. Singapore) or are located in more than
+     one country, resulting in 183 (country, city) entity pairs.        In this case, the conclusion, which can be derived by apply-
+                                                                        ing MT, follows from and is consistent with the premises,
+   • Type and instance (categorical pairs): We extract 8                given common sense and factual knowledge about the world.
+     types of entities from ConceptNet (Speer et al., 2017)
+     and manually filter to ensure correctness: birds (20),             3.3. Dataset Summary
+     fish (13), insects (12), brass instruments (9), stringed
+     instruments (16), woodwind instruments (8), martial                In total, RULEBREAKERS consists of 12,800 rulebreak-
+                                                                        ers, created according to Section 3.1, with the breakdown
+   7
+    Appendix A Table 5 shows how the templates used in creating
+                                                                          8
+our RULEBREAKERS dataset correspond to specific examples                    https://github.com/sigpwned/popular-
+used in these prior experimental work.                                  names-by-country-dataset/
+
+                                                                    4
+         RULEBREAKERS: Challenging LLMs at the Crossroads between Formal Logic and Human-like Reasoning
+
+shown in Figure 2. We then create 12,800 non-rulebreakers                        positive over negative answers, it would yield a score of 0.
+per Section 3.2, bringing the combined number of rule-                           Accordingly, the baseline for random guessing is 0.25.
+breakers and non-rulebreakers in RULEBREAKERS to
+                                                                                 We also measure the rulebreaker-specific and non-
+25,600.9
+                                                                                 rulebreaker-specific accuracies (τDR and τDN ). These are
+                                                                                 defined as the proportion of correctly answered rulebreaker
+          2              183              6       5        10,980
+    logical forms x (country, city) 
+ x verbs x names = rulebreakers             and non-rulebreaker instances, respectively. Formally:
+                        pairs                                 +
+                                                        1,820
+                                                                                                           1 X
+          2      x        91        x 2 x 5 = rulebreakers                                         τDR =             JT (x)K                      (2)
+    logical forms (type, instance) 
+ verbs names                                                         |DR |
+                                                                                                               x∈D R
+                        pairs                               =
+                                             12,800 rulebreakers                                           1    X
+                                                                                                   τDN =    N
+                                                                                                                     JT (x)K                      (3)
+                                                                                                         |D |      N
+Figure 2. Statistical summary of rulebreakers in our dataset.                                                       x∈D
+
+
+3.4. Evaluation                                                                  Model confidence Inspired by Lampinen et al. (2024), to
+                                                                                 gain a more fine-grained understanding of a model’s behav-
+We measure a model’s ability to distinguish and respond to                       ior, we evaluate its “confidence” in responding to both rule-
+rulebreakers and non-rulebreakers in a human-like manner                         breakers and non-rulebreakers. Consider a scenario where
+in terms of (a) accuracy; and (b) model confidence.                              a model consistently outputs “yes” to both non-rulebreaker
+                                                                                 and rulebreaker prompts but its confidence levels in its “yes”
+In formal notation, let D represent the set of prompts used
+                                                                                 answers to non-rulebreakers are significantly higher com-
+in our experiment. Specifically, D comprises all instances
+                                                                                 pared to rulebreakers. In this case, despite achieving a paired
+in RULEBREAKERS, each permuted across 10 distinct
+                                                                                 accuracy of 0, the discrepancy in model confidence may still
+phrasing variations, as detailed in Section 4.2. We define
+                                                                                 indicate some underdeveloped latent ability to differentiate
+DR and DN as the sets of rulebreakers and non-rulebreakers
+                                                                                 between rulebreakers and non-rulebreakers.
+respectively within D, and Dpaired as the subset of DR ×
+DN such that for all (xR , xN ) ∈ Dpaired , xN is the non-                       For each prompt x in D, we compute the model’s confi-
+rulebreaker counterpart to xR , as described in 3.2.                             dence in either the word “yes” or “true” (depending on the
+                                                                                 answer options specified in x, as Section 4.2 will explain) by
+Accuracy We first define paired accuracy as the propor-                          extracting the output probabilities of tokens corresponding
+tion of all rulebreaker and non-rulebreaker prompt pairs                         to that word (e.g. “Yes”/“YES”/“yes”)11 . We refer to this
+(xR , xN ) in Dpaired where both parts of the pair are cor-                      value as the model’s confidence in a positive answer to a
+rectly answered by a model. Pairs are defined such that the                      given prompt x: p+ (x). Formally, where the answer options
+rulebreaker and non-rulebreaker counterparts differ only by                      specified in x are “yes”/“no”:
+country or type name.10 Thus, a pair is answered correctly                                                        X
+if and only if the model outputs “no” for the rulebreaker (i.e.                             p+ (x) =                              p(ŷ|x)         (4)
+rejecting the conclusion) and “yes” for the non-rulebreaker                                            ŷ∈{“Y es”,“yes”,“Y ES”}
+prompt (accepting the conclusion), or “false” and “true”
+respectively where we specify those as answer options per                        where p(ŷ|x) refers to the output probability the model
+Section 4.2. Formally, paired accuracy (τ ) is defined as:                       assigns to the token y given a prompt x. Likewise, where the
+                                                                                 specified answer options are “true”/“false”, p+ (x) is defined
+              1              X
+                                                                                 by the summed probabilities of “True”/“true”/“TRUE”.
+   τ=                                      JT (xR ) ∧ T (xN )K         (1)
+         |Dpaired |
+                      (xR ,xN )∈D paired                                         We aim to evaluate whether the model, on average, ex-
+                                                                                 hibits higher confidence when outputting “yes”/“true” for
+where T (x) is true if and only if the model outputs the cor-                    non-rulebreakers (a correct response) compared to when it
+rect answer to the prompt x. This paired accuracy metric is                      outputs “yes”/“true” for rulebreakers (an incorrect response).
+designed to reflect the core objective of our evaluation and                     To do this, we partition D into Dyes and Dno , which rep-
+control for any inherent biases in model responses. Specifi-                     resent the subsets of prompts in D where the model gives
+cally, if a model completely fails to distinguish between rule-                  positive (“yes”/“true”) and negative (“no”/“false”) answers,
+breakers and non-rulebreakers, e.g., if it outputs “yes”/“true”                  respectively. We then compute and compare Π+        and Π+   :
+                                                                                                                                 DN        DR
+for every instance in D because of a strong inherent bias for
+                                                                                                                            +
+                                                                                                        P
+   9
+      Appendix C lists the licenses of the various underlying datasets                                     x∈(D N ∩D yes ) p (x)
+                                                                                               Π+DN
+                                                                                                     =                                     (5)
+used in creating RULEBREAKERS as described above.                                                            |DN ∩ Dyes |
+   10
+      For example, “If Anne is in France, then she is not in Paris...”
+                                                                                    11
+(rulebreaker) and “If Anne is in Germany, then she is not in Paris...”                 This is to account for the issue of surface form competition as
+(non-rulebreaker) would constitute a pair.                                       highlighted in Holtzman et al. (2021).
+
+                                                                             5
+         RULEBREAKERS: Challenging LLMs at the Crossroads between Formal Logic and Human-like Reasoning
+                                             +
+                         P
+                            x∈(D R ∩D yes ) p (x)                         4.2. Prompting Setup
+               Π+
+                DR
+                   =                                           (6)
+                              |DR ∩ Dyes |
+                                                                          To account for LLMs’ sensitivity to prompt phrasing (Zhao
+                                                                          et al., 2021, Lu et al., 2022, Li et al., 2024), we present each
+                                                                          instance in RULEBREAKERS in 10 different variations,
+Ideally, models should have a Π+DN
+                                    as close to 1, and Π+
+                                                        DR                by permuting five basic phrasings:
+                          12
+as close to 0 as possible. We test for significance using
+Welch’s t-test (Welch, 1947), given that the sample sizes                   1. Does the Conclusion follow from the Premises?
+are likely to be unequal: a model might output “yes”/“true”                 2. Do the Premises entail the Conclusion?
+to more non-rulebreakers than to rulebreakers, i.e. |DN ∩                   3. Can the Conclusion be inferred from the Premises?
+Dyes | > |DR ∩ Dyes |, or vice versa.                                       4. Can the Conclusion be deduced from the Premises?
+                                                                            5. Do the Premises support the Conclusion?
+4. Experiment                                                             with two answer-option pairs to follow the main ques-
+                                                                          tion (“Answer Yes or No only.” or “Answer True or False
+4.1. Models                                                               only.”15 ). Section 5 reports the averaged results across these
+We limit our model selection to those that are (a) medium-                10 phrasing variations, with a breakdown shown in Ap-
+sized, due to computational constraints; (b) instruction-fine-            pendix F.
+tuned, so that their outputs are more likely to follow instruc-           We apply the chat template specific to each model, without
+tions in our prompts; and (c) open-sourced, to ensure access              including any system prompts. Example prompts used are in
+to their internal weights and hidden states for further analy-            Appendix G. Using the default configurations, we perform
+sis. Based on these criteria, we select six models from the               one forward pass on each prompt to extract the most proba-
+top of the Open LLM Leaderboard on Hugging Face at the                    ble output token and the output probability distribution.
+time of writing13 : Microsoft-Phi-3-mini-128k-Instruct and
+Microsoft-Phi-3-medium-128k-Instruct (Abdin et al., 2024),                For generalizability, we also conduct further experiments
+Meta-Llama-3-8B-Instruct and Meta-Llama-3-70B-Instruct                    with variations of this setup. These include adding instruc-
+(Dubey et al., 2024), Mistral-7B-Instruct-v0.3 (Jiang et al.,             tions and further modifying prompt/question phrasings (see
+2023), and Gemma-2-27b-it (Gemma Team et al., 2024).14                    Appendix H); and also prompting LLMs to generate a con-
+For comparison, we also conduct a limited evaluation of a                 clusion from the premises themselves instead of simply
+popular close-sourced model, GPT-4o (gpt-4o-2024-11-20)                   choosing whether or not to accept a given conclusion (see
+(OpenAI, 2024) on RULEBREAKERS, given that we do                          Appendix I).
+not have access to its full output probability distribution and
+internal states.                                                          4.3. Implementation
+To ensure the model’s failure to recognize rulebreakers is                For all open-sourced LLMs, we use the model version
+not due to a lack of knowledge about the entities involved,               hosted on Hugging Face (Wolf et al., 2020). All experi-
+we filter out those entity pairs which the model lacks rela-              ments are performed on NVIDIA A100 GPUs, with further
+tional knowledge of. For example, an LLM needs to know                    details in Appendix J. We access GPT-4o via API.16
+that the city is situated within its corresponding country to
+recognize when the conclusion is factually inconsistent with              5. Results
+the premises. Therefore, we prompt each of the seven LLMs
+with “Complete the sentence: [city] is in” for each (country,             5.1. Accuracy
+city) pair and “Complete the sentence: [instance] is a type
+                                                                          As shown in Figure 3, while a majority of LLMs achieve an
+of ” for each (type, instance) pair. Using pattern-matching,
+                                                                          overall paired accuracy above the baseline (0.25), only Meta-
+we identified 20 city names for which at least one model did
+                                                                          Llama-3-8B-Instruct achieves a paired accuracy greater than
+not produce the expected answer (e.g., some LLMs inter-
+                                                                          0.6, indicating substantial room for improvement for all
+pret “Georgetown” to refer to the university rather than the
+                                                                          LLMs’ reasoning capabilities. Notably, GPT-4o underper-
+capital city of Guyana). We exclude the subset of prompts
+                                                                          forms Phi-3-mini-128k-Instruct in paired accuracy and even
+in D containing any of these 20 city names. We perform
+                                                                          scores the lowest 0.0022 on the MT categorical-entity pairs
+a similar check for (type, instance) pairs (see Appendix E)
+                                                                          subset compared to all other models.
+but did not identify any instances that need filtering.
+                                                                            15
+   12                                                                          We rephrase true/false questions into this form: “Is it True or
+      Where a perfect model answers all rulebreakers correctly with
+                                                                          False that [the Conclusion follows from the Premises]?”
+”no”/”false”, |DR ∩ Dyes | = 0 and Π+   DR
+                                            is undefined.                   16
+   13                                                                          Unless specified otherwise, experiments with GPT-4o were
+      https://huggingface.co/spaces/open-llm-                             conducted in January 2025.
+leaderboard/open_llm_leaderboard
+   14
+      Further details on model size are provided in Appendix D.
+
+                                                                      6
+                           RULEBREAKERS: Challenging LLMs at the Crossroads between Formal Logic and Human-like Reasoning
+
+                             All                        MT, (country, city)         MT, (type, instance)                               Rulebreakers        Non-rulebreakers
+                             DS, (country, city)        DS, (type, instance)                                                 1
+                   1                                                                                                        0.9
+                  0.9                                                                                                       0.8
+                  0.8                                                                                                       0.7
+                  0.7
+
+
+                                                                                                                 Accuracy
+                                                                                                                            0.6
+
+
+
+
+Paired accuracy
+                  0.6                                                                                                       0.5
+                  0.5                                                                                                       0.4
+                  0.4                                                                                                       0.3
+                  0.3                                                                                                       0.2
+                  0.2                                                                                                       0.1
+                  0.1                                                                                                        0
+                                                                                                                                    Phi-3-      Phi-3-    Meta-Llama Meta-Llama   Mistral-    gemma-2-     gpt-4o-
+                   0                                                                                                              mini-128k-   medium-      -3-8B-    -3-70B-        7B-        27b-it   2024-11-20
+                          Phi-3-      Phi-3-    Meta-Llama Meta-Llama   Mistral-    gemma-2-     gpt-4o-
+                                                                                                                                   instruct     128k-      Instruct   Instruct    Instruct-     (27B)       (size
+                        mini-128k-   medium-      -3-8B-    -3-70B-        7B-        27b-it   2024-11-20
+                                                                                                                                     (4B)      instruct      (8B)      (70B)        v0.3                 unreported)
+                         instruct     128k-      Instruct   Instruct    Instruct-     (27B)       (size
+                                                                                                                                                (14B)                               (7B)
+                           (4B)      instruct      (8B)      (70B)        v0.3                 unreported)
+                                      (14B)                               (7B)
+                                                                                                                 Figure 4. Accuracy each LLM achieves on all rulebreakers (τDR )
+Figure 3. Paired accuracy achieved by each LLM (95% CI). The                                                     and non-rulebreakers (τDN ) in D (95% CI).
+overall paired accuracy achieved over all prompts is shown in
+red, while the paired accuracy with respect to different subsets                                                 rather than geographical entity pairs. As we will further
+of prompts are shown in other colours. Subsets of prompts are                                                    explore in Section 6, we conjecture that a model’s ability to
+defined with respect to the logical rule (MT or DS) and kind of                                                  recognize rulebreakers may be influenced by its “familiarity”
+entity pair used in each prompt, as set out earlier in Table 1.
+                                                                                                                 with entities mentioned in the prompts (this might be due
+Figure 4 shows that the poor-to-mediocre paired accuracy                                                         to e.g. specific city and country names having appeared
+results can be attributed primarily to the models’ poor per-                                                     less frequently in the models’ pre-training data than generic
+formance with respect to rulebreakers. On the one hand,                                                          nouns, e.g. “wasp”). Nonetheless, the fact that these trends
+all models perform well on non-rulebreakers, correctly pre-                                                      are far from universal suggests that model performance
+dicting that the conclusion follows from the premises in                                                         on RULEBREAKERS is driven by multiple competing
+these cases. Gemma-2-27b-it and GPT-4o, for example,                                                             factors, which highlights a challenge for further analysis.
+even achieve perfect scores. On the other hand, all models
+perform worse on rulebreaker prompts to various degrees.                                                         5.2. Model Confidence
+In particular, three models that perform particularly well
+                                                                                                                 As shown in Table 2, the value of Π+  DN
+                                                                                                                                                            is greater than Π+
+                                                                                                                                                                             DR
+on non-rulebreakers, Phi-3-mini-128k-Instruct, Gemma-2-
+                                                                                                                 for all models (p < 0.0001). That is, all models are on aver-
+27b-it and GPT-4o, also perform the worst on rulebreakers.
+                                                                                                                 age more confident in their positive answer (”yes”/”true”)
+This suggests that these models may indeed be exhibiting
+                                                                                                                 to non-rulebreakers (which is the correct answer) than in
+some degree of “over-generalizing” the two logical rules in
+                                                                                                                 their positive answer to rulebreakers (which is the incor-
+our study, MT and DS, rigidly applying these rules unlike
+                                                                                                                 rect answer). This suggests that all models in our study
+what is typically expected of knowledge-informed human
+                                                                                                                 possess a latent ability to distinguish rulebreakers from non-
+reasoners. In other words, while these models exhibit
+                                                                                                                 rulebreakers, even where this is not evident from evaluating
+reasoning behavior that appears highly logical and ro-
+                                                                                                                 models only based on their final output tokens. GPT-4o is
+bust against variations in semantic content, this same
+                                                                                                                 excluded from this analysis since our methodology (see Sec-
+trait also appears to undermine their ability to recog-
+                                                                                                                 tion 3.4) requires access to the probability of specific tokens
+nize when semantic content should in fact be taken into
+                                                                                                                 regardless of where they rank in the model’s predictions.
+account when reasoning.
+In light of these accuracy results, we also conduct further                                                      6. Analysis
+experiments to investigate how models that have been “en-
+hanced” using various logic-related methods (e.g. fine-                                                          This section investigates potential factors that contribute
+tuning on a logic dataset, integrating the model with an exter-                                                  to suboptimal performance of the LLMs. That is, we are
+nal symbolic solver) would perform on RULEBREAKERS                                                               interested in why distinguishing between rulebreakers and
+(see Appendix K).                                                                                                non-rulebreakers poses such a challenge to these models.
+ Furthermore, we see a high degree of variability in terms                                                       To correctly distinguish rulebreakers and non-rulebreakers,
+ of each model’s performance on different prompt subsets.                                                        intuitively, a model needs to meet two necessary but not
+ Generally, we observe that models achieve higher paired                                                         sufficient conditions: (1) accurate and confident knowledge
+ accuracy on the DS subsets compared to MT, and achieve                                                          of entities mentioned in the prompts, such as correctly asso-
+ higher paired accuracy on prompts containing categorical                                                        ciating a city with its country; and (2) sufficient attention to
+
+                                                                                                             7
+         RULEBREAKERS: Challenging LLMs at the Crossroads between Formal Logic and Human-like Reasoning
+
+
+Table 2. For each model, we compare the model’s mean confidence            Table 3. For each model, we extract its familiarity with the [city]
+(%) in a positive answer (”yes”/”true”) between (a) the subset of          entity mentioned in each prompt pair in Dpaired , and compute the
+rulebreaker prompts to which it outputs a positive answer (Π+
+                                                            DR
+                                                                );         mean (and std dev) corresponding to those prompt pairs the model
+and (b) the subset of non-rulebreaker prompts to which it outputs          answers incorrectly, against those it answers correctly.
+a positive answer (Π+ DN
+                         ). Std dev in brackets.                                                          C ORRECT           I NCORRECT
+  M ODEL                  Π+DR
+                                                Π+
+                                                 DN
+                                                                                                          PAIRS              PAIRS
+  P HI -3- MINI -128 K - 92.055 (8.857)         96.224 (2.738)              P HI -3- MINI -128 K -        0.906 (0.128)      0.872 (0.172)
+ INSTRUCT                                                                   I NSTRUCT
+ P HI -3- MEDIUM -        93.955 (11.699)      97.158 (8.763)               P HI -3- MEDIUM -128 K -      0.922 (0.089)      0.912 (0.104)
+ 128 K - INSTRUCT                                                           I NSTRUCT
+ M ETA -L LAMA -3-        77.202 (15.011)      90.457 (12.095)              L LAMA -3-8B-                 0.837 (0.187)      0.844 (0.189)
+ 8B-I NSTRUCT                                                               I NSTRUCT
+ M ETA -L LAMA -3-        96.336 (9.812)       99.950 (0.366)               L LAMA -3-70B-                0.959 (0.074)      0.949 (0.081)
+ 70B-I NSTRUCT                                                              I NSTRUCT
+ M ISTRAL -7B-            92.553 (12.863)      98.106 (6.925)               M ISTRAL -7B-                 0.977 (0.072)      0.969 (0.085)
+ I NSTRUCT- V 0.3                                                           I NSTRUCT- V 0.3
+ GEMMA -2-27 B - IT       97.992 (6.074)       99.996 (0.057)               G EMMA -2-27 B - IT           0.997 (0.032)      0.992 (0.048)
+                                                                            GPT-4 O                       0.909 (0.134)      0.914 (0.136)
+
+the “factual” part of the premises (e.g. “Anne is in Paris”)
+that implicitly contradicts the conclusion (e.g. “Anne is not              If our hypothesis (1) is correct, we would expect each model
+in France”) in case of rulebreakers.                                       to have a higher “familiarity” with respect to prompt pairs
+Accordingly, we propose two hypotheses: (1) failure to rec-                in its “recognized” group, i.e. those that the model has
+ognize rulebreakers is associated with the model’s lack of                 answered correctly, as compared to its “failed” group. As
+confidence in its knowledge of the entities involved17 ; and               shown in Table 3, this is the case for most LLMs, except
+(2) this failure is associated with insufficient attention given           for Meta-Llama-3-8B-Instruct and GPT-4o (Welch’s t-test
+to the factual premise. The intuition is that when a model is              p < 0.001). While Meta-Llama-3-8B-Instruct’s deviation
+not sufficiently “familiar” with the entities mentioned in the             from the predominant pattern might be explained by its
+prompt (i.e. sufficiently confident in its knowledge about                 relatively high sensitivity to prompt variations (as further
+the entities), then it will tend to treat these entities symbol-           discussed in Appendix F), we recognize however that this is
+ically and focus more on the surface form rather than the                  not the case for GPT-4o, which is one of the models least
+semantic content of the prompt, thereby overlooking the sig-               sensitive to prompt variations.
+nificance of the factual premise which implicitly contradicts              As an additional observation, when comparing overall fa-
+the conclusion in case of rulebreakers.18                                  miliarity levels across models, we see that simply being
+Is failure associated with the model’s lack of confidence in               familiar with entities does not guarantee that a model will
+its knowledge?                                                             perform well on RULEBREAKERS. A particular example
+                                                                           is Gemma-2-27b-it, which is on average more familiar with
+To answer this, we prompt each LLM with the instruction:                   entities in our dataset compared to all other models (in terms
+“Complete the sentence: [city] is in” for each city in RULE-               of both its “failed” and “recognized” groups) but is among
+BREAKERS that all LLMs have answered correctly as part                     the worst-performing models in terms of paired accuracy.
+of the filtering process in Section 4.1. We extract the output             This is also despite the perfect accuracy it has achieved on
+probability of the first token of the country name, which                  the non-rulebreaker subset of the prompts (see Section 5.1).
+we refer to as the model’s “familiarity” with the particular               When combined, the two observations aptly characterize
+(country, city). We compare each LLM’s mean “familiarity”                  the blind spot that our study has highlighted with LLMs’
+between prompt pairs in Dpaired the model recognizes                       reasoning: a model may excel at both retrieving factual
+against pairs the model fails , as shown in Table 3.19                     knowledge and applying rules in formal logic, yet fail
+                                                                           to recognize where rigidly applying these logical rules
+  17
+      This is inspired in part by Neeman et al. (2023) investigating       would produce conclusions that factually contradict the
+how models resolve conflict between in-context information and             premises.
+parametric knowledge.
+   18
+      Providing support to this intuition, Johnson-Laird & Byrne           We conduct a qualitative analysis on the most common
+(2002) found that human participants are also more likely not to           failure instances across models, observing further evidence
+draw factually inconsistent conclusions when given rulebreakers
+with familiar entities as opposed to unfamiliar ones.                      breaker, non-rulebreaker) pairs (permuting 6 verbs, 5 first names,
+   19
+      As per Section 3.1, each [city] is mentioned in 600 (rule-           2 logical forms and 10 prompt phrasing variations).
+
+                                                                       8
+         RULEBREAKERS: Challenging LLMs at the Crossroads between Formal Logic and Human-like Reasoning
+
+                                                                                 our hypothesis (1), the general though not universal pattern
+Table 4. Mean normalized score ratios (with sd) of each LLM.
+                                                                                 observed in attention distribution suggests that it is one of
+Paired accuracy (τ ) from Section 5.1 is displayed for analysis. The
+greater the ratio, the more the model attends to the factual context.            multiple competing factors influencing model performance
+                                                                                 on RULEBREAKERS, warranting further investigation in
+                                  S CORE RATIO         S CORE RATIO
+                                  ( INPUT × GRADIENT ) ( ATTENTION )
+                                                                     τ           future work.
+P HI -3- MINI -128 K - INSTRUCT   0.738 (0.204)        1.037 (0.124) 0.208
+P HI -3- MEDIUM -128 K - INSTRUCT 0.657 (0.156)        1.065 (0.534) 0.292       We conduct a further analysis experiment with respect to
+M ETA -L LAMA -3-8B-I NSTRUCT 0.814 (0.149)            1.829 (0.200) 0.609
+M ETA -L LAMA -3-70B-I NSTRUCT 0.827 (0.201)           1.618 (0.182) 0.497
+                                                                                 neuron activations and discuss our findings in Appendix N.
+M ISTRAL -7B-I NSTRUCT- V 0.3     0.740 (0.163)        1.397 (0.145) 0.476
+G EMMA -2-27 B - IT               0.787 (0.193)        1.558 (0.274) 0.071
+                                                                                 7. Conclusion
+of our hypothesis. Detailed discussion and examples are                          We present RULEBREAKERS, a large-scale dataset for
+provided in Appendix L.                                                          evaluating LLMs’ ability to reason with natural language in
+Is failure associated with the model overlooking the factual                     a knowledge-informed and human-like manner by utilizing
+information in the second premise?                                               common sense and factual knowledge rather than rigidly
+                                                                                 applying rules prescribed by formal logic. In particular,
+To answer this, we apply feature attribution methods (input                      our study of seven LLMs reveals a significant blind spot in
+× gradient (Simonyan et al., 2014) and attention (Bahdanau                       their ability to recognize and reject conclusions that can be
+et al., 2015))20 to assign an importance score to each token                     trivially derived using certain rules in propositional logic
+in a prompt. We then sum the importance score of tokens                          but are nonetheless factually inconsistent with the premises.
+within the second premise, and the first premise, separately.                    Whilst robust logical reasoning may be desirable in certain
+To ensure a fair comparison between the two, we normalize                        applications, our findings highlight the gap between this ap-
+the importance score by the number of tokens aggregated,                         proach to reasoning and how humans typically reason with
+since the second premise (e.g. “Anne is in Paris”) is always                     natural language in a knowledge-informed manner, drawing
+shorter than the first premise (e.g. “If Anne is in France,                      attention to an important trade-off in relying on logic-based
+then she is not in Paris.”). We then compute a “score ra-                        methods and constraints to improve LLMs’ general reason-
+tio” by dividing the normalized importance score of the                          ing capabilities.
+second premise by the normalized importance score of the
+first. Therefore, the lower the ratio, the less importance
+is assigned to the second premise (factual context) by the                       Acknowledgement
+model. For each model, we compute a score ratio averaged                         This work was supported by the UKRI AI Centre for Doc-
+across all prompts. GPT-4o is excluded since we do not have                      toral Training in Speech and Language Technologies (SLT)
+access to the model’s internal states or gradient information.                   and their Applications funded by UK Research and Innova-
+Our second hypothesis is that low paired accuracy is associ-                     tion [grant number EP/S023062/1]. For the purpose of open
+ated with insufficient attention a model assigns to the factual                  access, the author has applied a Creative Commons Attribu-
+information in the second premise. As shown in Table 4,                          tion (CC BY) licence to any Author Accepted Manuscript
+this appears to be the case when comparing Phi-3-medium-                         version arising. We acknowledge IT Services at The Uni-
+128k-instruct, Mistral-7B-Instruct-v0.3 and Meta-Llama-3-                        versity of Sheffield for the provision of services for High
+70B-Instruct: the greater the τ , the higher the score ratio,                    Performance Computing.
+indicating the greater attention to the second premise. The
+two models with the highest τ , Meta-Llama-3-8B-Instruct                         Impact Statement
+and Meta-Llama-3-70B-Instruct, also have the two highest
+score ratios. However, Gemma-2-27b-it notably has the                            This work advances our understanding of language models’
+third highest score ratio (whether computed by input × gra-                      reasoning capabilities, revealing critical implications for
+dient or attention) but exhibits the lowest τ by a substantial                   AI safety and system robustness. Our findings directly in-
+margin.21 These findings suggest that the relation between                       form the development of more reliable AI systems through
+failure and attention distribution is less clear-cut than ex-                    concrete metrics and benchmarks. These contributions are
+pected. Similar to the “familiarity” factor investigated in                      crucial as AI increasingly drives high-stake decisions where
+                                                                                 alignment with human reasoning processes and judgments
+  20
+      Input × gradient has been shown to be reasonably faithful                  is essential.
+across models and datasets (Zhao et al., 2022, Zhao & Aletras,
+2023). To compare, we also compute a separate score ratio using
+attention weights (Bahdanau et al., 2015). We implement both
+methods with inseq v0.7.0 (Sarti et al., 2023).
+   21
+      We also analyzed unnormalized score ratios (see Appendix M)
+but did not find any substantive deviation from these observations.
+
+                                                                             9
+        RULEBREAKERS: Challenging LLMs at the Crossroads between Formal Logic and Human-like Reasoning
+
+References                                                              tations, 2024. URL https://openreview.net/
+                                                                        forum?id=GPKTIktA0k.
+Abdin, M. I., Ade Jacobs, S., Awan, A. A., Aneja, J.,
+ Awadallah, A., Hassan Awadalla, H., Bach, N., Bahree,                Bian, N., Han, X., Sun, L., Lin, H., Lu, Y., He, B.,
+ A., Bakhtiari, A., Behl, H., Benhaim, A., Bilenko,                     Jiang, S., and Dong, B. ChatGPT is a knowledgeable
+  M., Bjorck, J., Bubeck, S., Cai, M., Mendes, C. C. T.,                but inexperienced solver: An investigation of common-
+  Chen, W., Chaudhary, V., Chopra, P., Giorno, A. D.,                   sense problem in large language models. In Calzolari,
+  de Rosa, G., Dixon, M., Eldan, R., Iter, D., Goswami, A.,             N., Kan, M.-Y., Hoste, V., Lenci, A., Sakti, S., and
+  Gunasekar, S., Haider, E., Hao, J., Hewett, R. J., Huynh,             Xue, N. (eds.), Proceedings of the 2024 Joint Interna-
+ J., Javaheripi, M., Jin, X., Kauffmann, P., Karampatziakis,            tional Conference on Computational Linguistics, Lan-
+  N., Kim, D., Khademi, M., Kurilenko, L., Lee, J. R.,                  guage Resources and Evaluation (LREC-COLING 2024),
+  Lee, Y. T., Li, Y., Liang, C., Liu, W., Lin, X. E., Lin, Z.,          pp. 3098–3110, Torino, Italia, May 2024. ELRA and
+  Madan, P., Mitra, A., Modi, H., Nguyen, A., Norick,                   ICCL. URL https://aclanthology.org/2024.
+  B., Patra, B., Perez-Becker, D., Portet, T., Pryzant, R.,             lrec-main.276/.
+  Qin, H., Radmilac, M., Rosset, C., Roy, S., Saarikivi, O.,
+  Saied, A., Salim, A., Santacroce, M., Shah, S., Shang,              Binz, M. and Schulz, E. Using cognitive psychology to
+  N., Sharma, H., Song, X., Ruwase, O., Wang, X., Ward,                 understand gpt-3. Proceedings of the National Academy
+  R., Wang, G., Witte, P., Wyatt, M., Xu, C., Xu, J., Xu,               of Sciences, 120(6):e2218523120, 2023. doi: 10.1073/
+ W., Yadav, S., Yang, F., Yang, Z., Yu, D., Zhang, C.,                  pnas.2218523120. URL https://www.pnas.org/
+  Zhang, C., Zhang, J., Zhang, L. L., Zhang, Y., Zhang, Y.,             doi/abs/10.1073/pnas.2218523120.
+  and Zhou, X. Phi-3 technical report: A highly capable
+  language model locally on your phone. Technical                     Bos, J. and Markert, K. Recognising textual entailment
+  Report MSR-TR-2024-12, Microsoft, August 2024.                        with logical inference. In Mooney, R., Brew, C., Chien,
+  URL https://www.microsoft.com/en-us/                                  L.-F., and Kirchhoff, K. (eds.), Proceedings of Human
+  research/publication/phi-3-technical-                                 Language Technology Conference and Conference on
+  report-a-highly-capable-language-                                     Empirical Methods in Natural Language Processing, pp.
+  model-locally-on-your-phone/.                                         628–635, Vancouver, British Columbia, Canada, October
+                                                                        2005. Association for Computational Linguistics. URL
+Ahn, J., Verma, R., Lou, R., Liu, D., Zhang, R., and Yin,               https://aclanthology.org/H05-1079/.
+ W. Large language models for mathematical reason-
+                                                                      Calanzone, D., Vergari, A., and Teso, S. Towards logi-
+  ing: Progresses and challenges. In Falk, N., Papi, S.,
+                                                                        cally consistent language models via probabilistic rea-
+  and Zhang, M. (eds.), Proceedings of the 18th Confer-
+                                                                        soning. In ICLR 2024 Workshop on Reliable and Re-
+  ence of the European Chapter of the Association for
+                                                                        sponsible Foundation Models, 2024. URL https:
+ Computational Linguistics: Student Research Workshop,
+                                                                        //openreview.net/forum?id=q3SGbfj19d.
+  pp. 225–237, St. Julian’s, Malta, March 2024. Asso-
+  ciation for Computational Linguistics. URL https:                   Castello, M., Pantana, G., and Torre, I. Examining cog-
+ //aclanthology.org/2024.eacl-srw.17/.                                  nitive biases in ChatGPT 3.5 and ChatGPT 4 through
+                                                                        human evaluation and linguistic comparison. In Knowles,
+Bahdanau, D., Cho, K., and Bengio, Y. Neural machine                    R., Eriguchi, A., and Goel, S. (eds.), Proceedings
+  translation by jointly learning to align and translate. In            of the 16th Conference of the Association for Ma-
+  Bengio, Y. and LeCun, Y. (eds.), 3rd International Confer-            chine Translation in the Americas (Volume 1: Re-
+  ence on Learning Representations, ICLR 2015, San Diego,               search Track), pp. 250–260, Chicago, USA, September
+  CA, USA, May 7-9, 2015, Conference Track Proceed-                     2024. Association for Machine Translation in the Amer-
+  ings, 2015. URL http://arxiv.org/abs/1409.                            icas. URL https://aclanthology.org/2024.
+  0473.                                                                 amta-research.21/.
+
+Barker-Plummer, D., Barwise, J., and Etchemendy, J. Lan-              Chen, X., Chi, R. A., Wang, X., and Zhou, D. Premise
+  guage, Proof, and Logic: Second Edition. Center for                   order matters in reasoning with large language models.
+  the Study of Language and Information/SRI, 2nd edition,               In Salakhutdinov, R., Kolter, Z., Heller, K., Weller, A.,
+  2011. ISBN 1575866323.                                                Oliver, N., Scarlett, J., and Berkenkamp, F. (eds.), Pro-
+                                                                        ceedings of the 41st International Conference on Ma-
+Berglund, L., Tong, M., Kaufmann, M., Balesni, M., Stick-               chine Learning, volume 235 of Proceedings of Machine
+  land, A. C., Korbak, T., and Evans, O. The reversal curse:            Learning Research, pp. 6596–6620. PMLR, 21–27 Jul
+  LLMs trained on “a is b” fail to learn “b is a”. In The               2024. URL https://proceedings.mlr.press/
+  Twelfth International Conference on Learning Represen-                v235/chen24i.html.
+
+                                                                 10
+        RULEBREAKERS: Challenging LLMs at the Crossroads between Formal Logic and Human-like Reasoning
+
+Dubey, A., Jauhri, A., Pandey, A., Kadian, A., Al-Dahle, A.,            Yazdan, A., James, B., Maurer, B., Leonhardi, B., Huang,
+  Letman, A., Mathur, A., Schelten, A., Yang, A., Fan, A.,              B., Loyd, B., Paola, B. D., Paranjape, B., Liu, B., Wu, B.,
+  Goyal, A., Hartshorn, A., Yang, A., Mitra, A., Sravanku-              Ni, B., Hancock, B., Wasti, B., Spence, B., Stojkovic, B.,
+  mar, A., Korenev, A., Hinsvark, A., Rao, A., Zhang, A.,               Gamido, B., Montalvo, B., Parker, C., Burton, C., Mejia,
+  Rodriguez, A., Gregerson, A., Spataru, A., Roziere, B.,               C., Wang, C., Kim, C., Zhou, C., Hu, C., Chu, C.-H.,
+  Biron, B., Tang, B., Chern, B., Caucheteux, C., Nayak,                Cai, C., Tindal, C., Feichtenhofer, C., Civin, D., Beaty,
+  C., Bi, C., Marra, C., McConnell, C., Keller, C., Touret,             D., Kreymer, D., Li, D., Wyatt, D., Adkins, D., Xu, D.,
+  C., Wu, C., Wong, C., Ferrer, C. C., Nikolaidis, C., Al-              Testuggine, D., David, D., Parikh, D., Liskovich, D., Foss,
+  lonsius, D., Song, D., Pintz, D., Livshits, D., Esiobu, D.,           D., Wang, D., Le, D., Holland, D., Dowling, E., Jamil,
+  Choudhary, D., Mahajan, D., Garcia-Olano, D., Perino,                 E., Montgomery, E., Presani, E., Hahn, E., Wood, E.,
+  D., Hupkes, D., Lakomkin, E., AlBadawy, E., Lobanova,                 Brinkman, E., Arcaute, E., Dunbar, E., Smothers, E., Sun,
+  E., Dinan, E., Smith, E. M., Radenovic, F., Zhang, F., Syn-           F., Kreuk, F., Tian, F., Ozgenel, F., Caggioni, F., Guzmán,
+  naeve, G., Lee, G., Anderson, G. L., Nail, G., Mialon, G.,            F., Kanayet, F., Seide, F., Florez, G. M., Schwarz, G.,
+  Pang, G., Cucurell, G., Nguyen, H., Korevaar, H., Xu, H.,             Badeer, G., Swee, G., Halpern, G., Thattai, G., Herman,
+  Touvron, H., Zarov, I., Ibarra, I. A., Kloumann, I., Misra,           G., Sizov, G., Guangyi, Zhang, Lakshminarayanan, G.,
+  I., Evtimov, I., Copet, J., Lee, J., Geffert, J., Vranes,             Shojanazeri, H., Zou, H., Wang, H., Zha, H., Habeeb,
+  J., Park, J., Mahadeokar, J., Shah, J., van der Linde, J.,            H., Rudolph, H., Suk, H., Aspegren, H., Goldman, H.,
+  Billock, J., Hong, J., Lee, J., Fu, J., Chi, J., Huang, J.,           Damlaj, I., Molybog, I., Tufanov, I., Veliche, I.-E., Gat,
+  Liu, J., Wang, J., Yu, J., Bitton, J., Spisak, J., Park, J.,          I., Weissman, J., Geboski, J., Kohli, J., Asher, J., Gaya,
+  Rocca, J., Johnstun, J., Saxe, J., Jia, J., Alwala, K. V.,            J.-B., Marcus, J., Tang, J., Chan, J., Zhen, J., Reizenstein,
+  Upasani, K., Plawiak, K., Li, K., Heafield, K., Stone, K.,            J., Teboul, J., Zhong, J., Jin, J., Yang, J., Cummings, J.,
+  El-Arini, K., Iyer, K., Malik, K., Chiu, K., Bhalla, K.,              Carvill, J., Shepard, J., McPhie, J., Torres, J., Ginsburg,
+  Rantala-Yeary, L., van der Maaten, L., Chen, L., Tan, L.,             J., Wang, J., Wu, K., U, K. H., Saxena, K., Prasad, K.,
+  Jenkins, L., Martin, L., Madaan, L., Malo, L., Blecher, L.,           Khandelwal, K., Zand, K., Matosich, K., Veeraragha-
+  Landzaat, L., de Oliveira, L., Muzzi, M., Pasupuleti, M.,             van, K., Michelena, K., Li, K., Huang, K., Chawla, K.,
+  Singh, M., Paluri, M., Kardas, M., Oldham, M., Rita, M.,              Lakhotia, K., Huang, K., Chen, L., Garg, L., A, L., Silva,
+  Pavlova, M., Kambadur, M., Lewis, M., Si, M., Singh,                  L., Bell, L., Zhang, L., Guo, L., Yu, L., Moshkovich,
+  M. K., Hassan, M., Goyal, N., Torabi, N., Bashlykov, N.,              L., Wehrstedt, L., Khabsa, M., Avalani, M., Bhatt, M.,
+  Bogoychev, N., Chatterji, N., Duchenne, O., Çelebi, O.,              Tsimpoukelli, M., Mankus, M., Hasson, M., Lennie, M.,
+  Alrassy, P., Zhang, P., Li, P., Vasic, P., Weng, P., Bhargava,        Reso, M., Groshev, M., Naumov, M., Lathi, M., Ke-
+  P., Dubal, P., Krishnan, P., Koura, P. S., Xu, P., He, Q.,            neally, M., Seltzer, M. L., Valko, M., Restrepo, M., Patel,
+  Dong, Q., Srinivasan, R., Ganapathy, R., Calderer, R.,                M., Vyatskov, M., Samvelyan, M., Clark, M., Macey,
+  Cabral, R. S., Stojnic, R., Raileanu, R., Girdhar, R., Patel,         M., Wang, M., Hermoso, M. J., Metanat, M., Rastegari,
+  R., Sauvestre, R., Polidoro, R., Sumbaly, R., Taylor, R.,             M., Bansal, M., Santhanam, N., Parks, N., White, N.,
+  Silva, R., Hou, R., Wang, R., Hosseini, S., Chennabas-                Bawa, N., Singhal, N., Egebo, N., Usunier, N., Laptev,
+  appa, S., Singh, S., Bell, S., Kim, S. S., Edunov, S., Nie,           N. P., Dong, N., Zhang, N., Cheng, N., Chernoguz, O.,
+  S., Narang, S., Raparthy, S., Shen, S., Wan, S., Bhosale,             Hart, O., Salpekar, O., Kalinli, O., Kent, P., Parekh, P.,
+  S., Zhang, S., Vandenhende, S., Batra, S., Whitman, S.,               Saab, P., Balaji, P., Rittner, P., Bontrager, P., Roux, P.,
+  Sootla, S., Collot, S., Gururangan, S., Borodinsky, S., Her-          Dollar, P., Zvyagina, P., Ratanchandani, P., Yuvraj, P.,
+  man, T., Fowler, T., Sheasha, T., Georgiou, T., Scialom,              Liang, Q., Alao, R., Rodriguez, R., Ayub, R., Murthy,
+  T., Speckbacher, T., Mihaylov, T., Xiao, T., Karn, U.,                R., Nayani, R., Mitra, R., Li, R., Hogan, R., Battey, R.,
+  Goswami, V., Gupta, V., Ramanathan, V., Kerkez, V.,                   Wang, R., Maheswari, R., Howes, R., Rinott, R., Bondu,
+  Gonguet, V., Do, V., Vogeti, V., Petrovic, V., Chu, W.,               S. J., Datta, S., Chugh, S., Hunt, S., Dhillon, S., Sidorov,
+  Xiong, W., Fu, W., Meers, W., Martinet, X., Wang, X.,                 S., Pan, S., Verma, S., Yamamoto, S., Ramaswamy, S.,
+  Tan, X. E., Xie, X., Jia, X., Wang, X., Goldschlag, Y.,               Lindsay, S., Lindsay, S., Feng, S., Lin, S., Zha, S. C.,
+  Gaur, Y., Babaei, Y., Wen, Y., Song, Y., Zhang, Y., Li, Y.,           Shankar, S., Zhang, S., Zhang, S., Wang, S., Agarwal,
+  Mao, Y., Coudert, Z. D., Yan, Z., Chen, Z., Papakipos, Z.,            S., Sajuyigbe, S., Chintala, S., Max, S., Chen, S., Kehoe,
+  Singh, A., Grattafiori, A., Jain, A., Kelsey, A., Shajnfeld,          S., Satterfield, S., Govindaprasad, S., Gupta, S., Cho,
+  A., Gangidi, A., Victoria, A., Goldstand, A., Menon, A.,              S., Virk, S., Subramanian, S., Choudhury, S., Goldman,
+  Sharma, A., Boesenberg, A., Vaughan, A., Baevski, A.,                 S., Remez, T., Glaser, T., Best, T., Kohler, T., Robinson,
+  Feinstein, A., Kallet, A., Sangani, A., Yunus, A., Lupu,              T., Li, T., Zhang, T., Matthews, T., Chou, T., Shaked,
+  A., Alvarado, A., Caples, A., Gu, A., Ho, A., Poulton,                T., Vontimitta, V., Ajayi, V., Montanez, V., Mohan, V.,
+  A., Ryan, A., Ramchandani, A., Franco, A., Saraf, A.,                 Kumar, V. S., Mangla, V., Albiero, V., Ionescu, V., Poe-
+  Chowdhury, A., Gabriel, A., Bharambe, A., Eisenman, A.,               naru, V., Mihailescu, V. T., Ivanov, V., Li, W., Wang, W.,
+
+                                                                   11
+         RULEBREAKERS: Challenging LLMs at the Crossroads between Formal Logic and Human-like Reasoning
+
+  Jiang, W., Bouaziz, W., Constable, W., Tang, X., Wang,                    Eccles, T., Hennigan, T., Kocisky, T., Doshi, T., Jain,
+  X., Wu, X., Wang, X., Xia, X., Wu, X., Gao, X., Chen,                     V., Yadav, V., Meshram, V., Dharmadhikari, V., Barkley,
+  Y., Hu, Y., Jia, Y., Qi, Y., Li, Y., Zhang, Y., Zhang, Y.,                W., Wei, W., Ye, W., Han, W., Kwon, W., Xu, X., Shen,
+  Adi, Y., Nam, Y., Yu, Wang, Hao, Y., Qian, Y., He, Y.,                    Z., Gong, Z., Wei, Z., Cotruta, V., Kirk, P., Rao, A.,
+  Rait, Z., DeVito, Z., Rosnbrick, Z., Wen, Z., Yang, Z.,                   Giang, M., Peran, L., Warkentin, T., Collins, E., Bar-
+  and Zhao, Z. The llama 3 herd of models, 2024. URL                        ral, J., Ghahramani, Z., Hadsell, R., Sculley, D., Banks,
+  https://arxiv.org/abs/2407.21783.                                         J., Dragan, A., Petrov, S., Vinyals, O., Dean, J., Has-
+                                                                            sabis, D., Kavukcuoglu, K., Farabet, C., Buchatskaya,
+Eisape, T., Tessler, M., Dasgupta, I., Sha, F., Steenkiste, S.,             E., Borgeaud, S., Fiedel, N., Joulin, A., Kenealy, K.,
+  and Linzen, T. A systematic comparison of syllogistic                     Dadashi, R., and Andreev, A. Gemma 2: Improving
+  reasoning in humans and language models. In Duh, K.,                      open language models at a practical size, 2024. URL
+  Gomez, H., and Bethard, S. (eds.), Proceedings of the                     https://arxiv.org/abs/2408.00118.
+  2024 Conference of the North American Chapter of the
+  Association for Computational Linguistics: Human Lan-                   Han, S., Schoelkopf, H., Zhao, Y., Qi, Z., Riddell, M.,
+  guage Technologies (Volume 1: Long Papers), pp. 8425–                     Zhou, W., Coady, J., Peng, D., Qiao, Y., Benson, L., Sun,
+  8444, Mexico City, Mexico, June 2024. Association for                     L., Wardle-Solano, A., Szabó, H., Zubova, E., Burtell,
+  Computational Linguistics. doi: 10.18653/v1/2024.naacl-                   M., Fan, J., Liu, Y., Wong, B., Sailor, M., Ni, A., Nan,
+  long.466. URL https://aclanthology.org/                                   L., Kasai, J., Yu, T., Zhang, R., Fabbri, A., Kryscinski,
+  2024.naacl-long.466/.                                                    W. M., Yavuz, S., Liu, Y., Lin, X. V., Joty, S., Zhou,
+                                                                           Y., Xiong, C., Ying, R., Cohan, A., and Radev, D. FO-
+Gemma Team, Riviere, M., Pathak, S., Sessa, P. G., Hardin,                  LIO: Natural language reasoning with first-order logic. In
+  C., Bhupatiraju, S., Hussenot, L., Mesnard, T., Shahriari,                Al-Onaizan, Y., Bansal, M., and Chen, Y.-N. (eds.), Pro-
+  B., Ramé, A., Ferret, J., Liu, P., Tafti, P., Friesen, A.,               ceedings of the 2024 Conference on Empirical Methods in
+  Casbon, M., Ramos, S., Kumar, R., Lan, C. L., Jerome,                     Natural Language Processing, pp. 22017–22031, Miami,
+  S., Tsitsulin, A., Vieillard, N., Stanczyk, P., Girgin, S.,               Florida, USA, November 2024. Association for Com-
+  Momchev, N., Hoffman, M., Thakoor, S., Grill, J.-B.,                      putational Linguistics. doi: 10.18653/v1/2024.emnlp-
+  Neyshabur, B., Bachem, O., Walton, A., Severyn, A., Par-                  main.1229. URL https://aclanthology.org/
+  rish, A., Ahmad, A., Hutchison, A., Abdagic, A., Carl,                    2024.emnlp-main.1229/.
+  A., Shen, A., Brock, A., Coenen, A., Laforge, A., Pater-
+  son, A., Bastian, B., Piot, B., Wu, B., Royal, B., Chen,                Hendrycks, D. and Gimpel, K. Gaussian error linear units
+  C., Kumar, C., Perry, C., Welty, C., Choquette-Choo,                      (gelus), 2023. URL https://arxiv.org/abs/
+  C. A., Sinopalnikov, D., Weinberger, D., Vijaykumar,                      1606.08415.
+  D., Rogozińska, D., Herbison, D., Bandy, E., Wang, E.,
+  Noland, E., Moreira, E., Senter, E., Eltyshev, E., Visin, F.,           Holliday, W. H., Mandelkern, M., and Zhang, C. E. Condi-
+  Rasskin, G., Wei, G., Cameron, G., Martins, G., Hashemi,                  tional and modal reasoning in large language models. In
+  H., Klimczak-Plucińska, H., Batra, H., Dhand, H., Nar-                  Al-Onaizan, Y., Bansal, M., and Chen, Y.-N. (eds.), Pro-
+  dini, I., Mein, J., Zhou, J., Svensson, J., Stanway, J.,                  ceedings of the 2024 Conference on Empirical Methods
+  Chan, J., Zhou, J. P., Carrasqueira, J., Iljazi, J., Becker, J.,          in Natural Language Processing, pp. 3800–3821, Miami,
+  Fernandez, J., van Amersfoort, J., Gordon, J., Lipschultz,                Florida, USA, November 2024. Association for Com-
+  J., Newlan, J., yeong Ji, J., Mohamed, K., Badola, K.,                    putational Linguistics. doi: 10.18653/v1/2024.emnlp-
+  Black, K., Millican, K., McDonell, K., Nguyen, K., Sod-                   main.222. URL https://aclanthology.org/
+  hia, K., Greene, K., Sjoesund, L. L., Usui, L., Sifre, L.,                2024.emnlp-main.222/.
+  Heuermann, L., Lago, L., McNealus, L., Soares, L. B.,                   Holtzman, A., West, P., Shwartz, V., Choi, Y., and
+  Kilpatrick, L., Dixon, L., Martins, L., Reid, M., Singh,                  Zettlemoyer, L. Surface form competition: Why
+  M., Iverson, M., Görner, M., Velloso, M., Wirth, M.,                     the highest probability answer isn‘t always right. In
+  Davidow, M., Miller, M., Rahtz, M., Watson, M., Ris-                      Moens, M.-F., Huang, X., Specia, L., and Yih, S.
+  dal, M., Kazemi, M., Moynihan, M., Zhang, M., Kahng,                     W.-t. (eds.), Proceedings of the 2021 Conference on
+  M., Park, M., Rahman, M., Khatwani, M., Dao, N., Bar-                    Empirical Methods in Natural Language Processing,
+  doliwalla, N., Devanathan, N., Dumai, N., Chauhan, N.,                    pp. 7038–7051, Online and Punta Cana, Dominican
+  Wahltinez, O., Botarda, P., Barnes, P., Barham, P., Michel,               Republic, November 2021. Association for Computa-
+  P., Jin, P., Georgiev, P., Culliton, P., Kuppala, P., Co-                 tional Linguistics. doi: 10.18653/v1/2021.emnlp-main.
+  manescu, R., Merhej, R., Jana, R., Rokni, R. A., Agarwal,                 564. URL https://aclanthology.org/2021.
+  R., Mullins, R., Saadat, S., Carthy, S. M., Cogan, S.,                    emnlp-main.564/.
+  Perrin, S., Arnold, S. M. R., Krause, S., Dai, S., Garg,
+  S., Sheth, S., Ronstrom, S., Chan, S., Jordan, T., Yu, T.,              Jiang, A. Q., Sablayrolles, A., Mensch, A., Bamford, C.,
+
+                                                                     12
+        RULEBREAKERS: Challenging LLMs at the Crossroads between Formal Logic and Human-like Reasoning
+
+  Chaplot, D. S., de las Casas, D., Bressand, F., Lengyel,          Li, Y., Zhao, Z., and Scarton, C. Label set optimization via
+  G., Lample, G., Saulnier, L., Lavaud, L. R., Lachaux, M.-           activation distribution kurtosis for zero-shot classification
+  A., Stock, P., Scao, T. L., Lavril, T., Wang, T., Lacroix,          with generative models. arXiv preprint arXiv:2410.19195,
+  T., and Sayed, W. E. Mistral 7b, 2023. URL https:                   2024.
+  //arxiv.org/abs/2310.06825.
+                                                                    Lu, Y., Bartolo, M., Moore, A., Riedel, S., and Stene-
+Johnson-Laird, P. N. Mental models. Cambridge University              torp, P. Fantastically ordered prompts and where to
+  Press, 1983.                                                        find them: Overcoming few-shot prompt order sen-
+                                                                      sitivity. In Muresan, S., Nakov, P., and Villavicen-
+Johnson-Laird, P. N. Against logical form. Psychologica               cio, A. (eds.), Proceedings of the 60th Annual Meet-
+  Belgica, Oct 2010. doi: 10.5334/pb-50-3-4-193.                      ing of the Association for Computational Linguistics
+                                                                      (Volume 1: Long Papers), pp. 8086–8098, Dublin, Ire-
+Johnson-Laird, P. N. and Byrne, R. M. J. Conditionals: A
+                                                                      land, May 2022. Association for Computational Linguis-
+  theory of meaning, pragmatics, and inference. Psycho-
+                                                                      tics. doi: 10.18653/v1/2022.acl-long.556. URL https:
+  logical Review, 109(4):646–678, 2002. doi: 10.1037/
+                                                                      //aclanthology.org/2022.acl-long.556/.
+  0033-295X.109.4.646. URL https://doi.org/10.
+  1037/0033-295X.109.4.646.                                         Meadows, J., Valentino, M., Teney, D., and Freitas, A. A
+                                                                     symbolic framework for evaluating mathematical rea-
+Kamath, A. and Das, R. A survey on semantic parsing.
+                                                                     soning and generalisation with transformers. In Duh,
+  In Automated Knowledge Base Construction (AKBC),
+                                                                     K., Gomez, H., and Bethard, S. (eds.), Proceedings of
+  2019. URL https://openreview.net/forum?
+                                                                     the 2024 Conference of the North American Chapter of
+  id=HylaEWcTT7.
+                                                                     the Association for Computational Linguistics: Human
+Khemlani, S. and Johnson-Laird, P. N. Why machines don’t             Language Technologies (Volume 1: Long Papers), pp.
+  (yet) reason like people. KI - Künstliche Intelligenz, 33         1505–1523, Mexico City, Mexico, June 2024. Associa-
+  (3):219–228, Sep 2019. ISSN 1610-1987. doi: 10.1007/               tion for Computational Linguistics. doi: 10.18653/v1/
+  s13218-019-00599-w. URL https://doi.org/10.                        2024.naacl-long.84. URL https://aclanthology.
+  1007/s13218-019-00599-w.                                           org/2024.naacl-long.84/.
+
+Khemlani, S. S. and Johnson-Laird, P. N. Illusions in               Mondorf, P. and Plank, B. Comparing inferential strate-
+  reasoning. Minds and Machines, 27(1):11–35, Mar                    gies of humans and large language models in deductive
+  2017. ISSN 1572-8641. doi: 10.1007/s11023-017-9421-                reasoning. In Ku, L.-W., Martins, A., and Srikumar,
+ x. URL https://doi.org/10.1007/s11023-                              V. (eds.), Proceedings of the 62nd Annual Meeting of
+  017-9421-x.                                                        the Association for Computational Linguistics (Volume
+                                                                     1: Long Papers), pp. 9370–9402, Bangkok, Thailand,
+Khemlani, S. S., Byrne, R. M. J., and Johnson-Laird,                 August 2024a. Association for Computational Linguis-
+  P. N. Facts and possibilities: A model-based the-                  tics. doi: 10.18653/v1/2024.acl-long.508. URL https:
+  ory of sentential reasoning. Cognitive Science, 42(6):             //aclanthology.org/2024.acl-long.508/.
+ 1887–1924, 2018. doi: https://doi.org/10.1111/cogs.
+ 12634. URL https://onlinelibrary.wiley.                            Mondorf, P. and Plank, B. Beyond accuracy: Evaluat-
+  com/doi/abs/10.1111/cogs.12634.                                    ing the reasoning behavior of large language models -
+                                                                     a survey. In First Conference on Language Modeling,
+Korman, D. Z., Mack, E., Jett, J., and Renear, A. H.                 2024b. URL https://openreview.net/forum?
+  Defining textual entailment. Journal of the Association            id=Lmjgl2n11u.
+  for Information Science and Technology, 69(6):763–772,
+  2018. doi: https://doi.org/10.1002/asi.24007. URL                 Morishita, T., Morio, G., Yamaguchi, A., and Sogawa, Y.
+  https://asistdl.onlinelibrary.wiley.                               Enhancing reasoning capabilities of LLMs via princi-
+  com/doi/abs/10.1002/asi.24007.                                     pled synthetic logic corpus. In The Thirty-eighth Annual
+                                                                     Conference on Neural Information Processing Systems,
+Lampinen, A. K., Dasgupta, I., Chan, S. C. Y., Sheahan,              2024. URL https://openreview.net/forum?
+  H. R., Creswell, A., Kumaran, D., McClelland, J. L., and           id=mljDUaQpln.
+  Hill, F. Language models, like humans, show content
+  effects on reasoning tasks. PNAS Nexus, 3(7):pgae233, 07          Neeman, E., Aharoni, R., Honovich, O., Choshen, L.,
+  2024. ISSN 2752-6542. doi: 10.1093/pnasnexus/pgae233.               Szpektor, I., and Abend, O. DisentQA: Disentangling
+  URL https://doi.org/10.1093/pnasnexus/                              parametric and contextual knowledge with counterfac-
+  pgae233.                                                            tual question answering. In Rogers, A., Boyd-Graber,
+
+                                                               13
+        RULEBREAKERS: Challenging LLMs at the Crossroads between Formal Logic and Human-like Reasoning
+
+  J., and Okazaki, N. (eds.), Proceedings of the 61st An-            Quelhas, A. C. and Johnson-Laird, P. The modulation of
+  nual Meeting of the Association for Computational Lin-               disjunctive assertions. The Quarterly Journal of Experi-
+  guistics (Volume 1: Long Papers), pp. 10056–10070,                   mental Psychology, 70(4):703–717, 2017. doi: 10.1080/
+  Toronto, Canada, July 2023. Association for Computa-                17470218.2016.1154079. URL https://doi.org/
+  tional Linguistics. doi: 10.18653/v1/2023.acl-long.559.             10.1080/17470218.2016.1154079.                    PMID:
+  URL https://aclanthology.org/2023.acl-                               26878158.
+  long.559/.
+                                                                     Quelhas, A. C., Johnson-Laird, P. N., and Juhos, C.
+Olausson, T., Gu, A., Lipkin, B., Zhang, C., Solar-                   The modulation of conditional assertions and its ef-
+  Lezama, A., Tenenbaum, J., and Levy, R. LINC: A                      fects on reasoning. Quarterly Journal of Experimen-
+  neurosymbolic approach for logical reasoning by com-                 tal Psychology, 63(9):1716–1739, 2010. doi: 10.1080/
+  bining language models with first-order logic provers.              17470210903536902. URL https://doi.org/10.
+  In Bouamor, H., Pino, J., and Bali, K. (eds.), Pro-                 1080/17470210903536902. PMID: 20204920.
+  ceedings of the 2023 Conference on Empirical Meth-
+  ods in Natural Language Processing, pp. 5153–5176,                 Ragni, M. and Johnson-Laird, P. Reasoning about pos-
+  Singapore, December 2023. Association for Computa-                   sibilities: human reasoning violates all normal modal
+  tional Linguistics. doi: 10.18653/v1/2023.emnlp-main.                logics. In Proceedings of the Annual Meeting of the Cog-
+  313. URL https://aclanthology.org/2023.                              nitive Science Society, volume 40, 2018. URL https:
+  emnlp-main.313/.                                                     //escholarship.org/uc/item/2hq029b3.
+
+                                                                     Saparov, A. and He, H. Language models are greedy rea-
+OpenAI. Hello gpt-4o. https://openai.com/
+                                                                       soners: A systematic formal analysis of chain-of-thought.
+  index/hello-gpt-4o/, May 2024.
+                                                                       In The Eleventh International Conference on Learning
+Pan, L., Albalak, A., Wang, X., and Wang, W. Logic-                    Representations, 2023. URL https://openreview.
+  LM: Empowering large language models with symbolic                   net/forum?id=qFVVBzXxR2V.
+  solvers for faithful logical reasoning. In Bouamor, H.,
+                                                                     Saparov, A. and Mitchell, T. M. Towards general natural
+  Pino, J., and Bali, K. (eds.), Findings of the Association
+                                                                       language understanding with probabilistic worldbuilding.
+  for Computational Linguistics: EMNLP 2023, pp. 3806–
+                                                                       Transactions of the Association for Computational Lin-
+  3824, Singapore, December 2023. Association for Com-
+                                                                       guistics, 10:325–342, 04 2022. ISSN 2307-387X. doi:
+  putational Linguistics. doi: 10.18653/v1/2023.findings-
+                                                                       10.1162/tacl a 00463. URL https://doi.org/10.
+  emnlp.248. URL https://aclanthology.org/
+                                                                       1162/tacl_a_00463.
+  2023.findings-emnlp.248/.
+                                                                     Saparov, A., Pang, R. Y., Padmakumar, V., Joshi, N.,
+Parmar, M., Patel, N., Varshney, N., Nakamura, M., Luo,                Kazemi, M., Kim, N., and He, H. Testing the general
+  M., Mashetty, S., Mitra, A., and Baral, C. LogicBench:               deductive reasoning capacity of large language models us-
+  Towards systematic evaluation of logical reasoning abil-             ing OOD examples. In Thirty-seventh Conference on Neu-
+  ity of large language models. In Ku, L.-W., Martins,                 ral Information Processing Systems, 2023. URL https:
+  A., and Srikumar, V. (eds.), Proceedings of the 62nd                 //openreview.net/forum?id=MCVfX7HgPO.
+  Annual Meeting of the Association for Computational
+  Linguistics (Volume 1: Long Papers), pp. 13679–13707,              Sarti, G., Feldhus, N., Sickert, L., and van der Wal, O.
+  Bangkok, Thailand, August 2024. Association for Com-                 Inseq: An interpretability toolkit for sequence genera-
+  putational Linguistics. doi: 10.18653/v1/2024.acl-long.              tion models. In Bollegala, D., Huang, R., and Ritter,
+  739. URL https://aclanthology.org/2024.                              A. (eds.), Proceedings of the 61st Annual Meeting of
+  acl-long.739/.                                                       the Association for Computational Linguistics (Volume 3:
+                                                                       System Demonstrations), pp. 421–435, Toronto, Canada,
+Qiao, S., Ou, Y., Zhang, N., Chen, X., Yao, Y., Deng, S.,              July 2023. Association for Computational Linguistics.
+  Tan, C., Huang, F., and Chen, H. Reasoning with lan-                 doi: 10.18653/v1/2023.acl-demo.40. URL https:
+  guage model prompting: A survey. In Rogers, A., Boyd-                //aclanthology.org/2023.acl-demo.40/.
+  Graber, J., and Okazaki, N. (eds.), Proceedings of the 61st
+  Annual Meeting of the Association for Computational                Simonyan, K., Vedaldi, A., and Zisserman, A. Deep in-
+  Linguistics (Volume 1: Long Papers), pp. 5368–5393,                  side convolutional networks: Visualising image clas-
+  Toronto, Canada, July 2023. Association for Computa-                 sification models and saliency maps. In Workshop at
+  tional Linguistics. doi: 10.18653/v1/2023.acl-long.294.              International Conference on Learning Representations,
+  URL https://aclanthology.org/2023.acl-                               2014. URL https://openreview.net/forum?
+  long.294/.                                                           id=cO4ycnpqxKcS9.
+
+                                                                14
+        RULEBREAKERS: Challenging LLMs at the Crossroads between Formal Logic and Human-like Reasoning
+
+Speer, R., Chin, J., and Havasi, C. Conceptnet 5.5: an open            Thailand, August 2024. Association for Computa-
+  multilingual graph of general knowledge. In Proceedings              tional Linguistics. doi: 10.18653/v1/2024.findings-acl.
+  of the Thirty-First AAAI Conference on Artificial Intelli-           75. URL https://aclanthology.org/2024.
+  gence, AAAI’17, pp. 4444–4451. AAAI Press, 2017.                     findings-acl.75/.
+Sun, J., Zheng, C., Xie, E., Liu, Z., Chu, R., Qiu, J., Xu,          Vrandečić, D. and Krötzsch, M. Wikidata: a free collabora-
+  J., Ding, M., Li, H., Geng, M., Wu, Y., Wang, W., Chen,              tive knowledgebase. Commun. ACM, 57(10):78–85, sep
+  J., Yin, Z., Ren, X., Fu, J., He, J., Wu, Y., Liu, Q., Liu,          2014. ISSN 0001-0782. doi: 10.1145/2629489. URL
+  X., Li, Y., Dong, H., Cheng, Y., Zhang, M., Heng, P. A.,             https://doi.org/10.1145/2629489.
+  Dai, J., Luo, P., Wang, J., Wen, J.-R., Qiu, X., Guo, Y.,
+  Xiong, H., Liu, Q., and Li, Z. A survey of reasoning               Wan, Y., Wang, W., Yang, Y., Yuan, Y., Huang, J.-t., He,
+  with foundation models: Concepts, methodologies, and                P., Jiao, W., and Lyu, M. LogicAsker: Evaluating and
+  outlook. ACM Comput. Surv., April 2025. ISSN 0360-                  improving the logical reasoning ability of large language
+  0300. doi: 10.1145/3729218. URL https://doi.                        models. In Al-Onaizan, Y., Bansal, M., and Chen, Y.-N.
+  org/10.1145/3729218. Just Accepted.                                 (eds.), Proceedings of the 2024 Conference on Empiri-
+                                                                      cal Methods in Natural Language Processing, pp. 2124–
+Suri, G., Slater, L. R., Ziaee, A., and Nguyen, M. Do                 2155, Miami, Florida, USA, November 2024. Association
+  large language models show decision heuristics similar              for Computational Linguistics. doi: 10.18653/v1/2024.
+  to humans? a case study using gpt-3.5. Journal of Exper-            emnlp-main.128. URL https://aclanthology.
+  imental Psychology: General, 153(4):1066–1075, 2024.                org/2024.emnlp-main.128/.
+  doi: 10.1037/xge0001547.
+                                                                     Wang, S., Zhong, W., Tang, D., Wei, Z., Fan, Z., Jiang,
+Suzgun, M., Scales, N., Schärli, N., Gehrmann, S., Tay, Y.,
+                                                                      D., Zhou, M., and Duan, N. Logic-driven context ex-
+  Chung, H. W., Chowdhery, A., Le, Q., Chi, E., Zhou, D.,
+                                                                      tension and data augmentation for logical reasoning
+  and Wei, J. Challenging BIG-bench tasks and whether
+                                                                      of text. In Muresan, S., Nakov, P., and Villavicen-
+  chain-of-thought can solve them. In Rogers, A., Boyd-
+                                                                      cio, A. (eds.), Findings of the Association for Com-
+  Graber, J., and Okazaki, N. (eds.), Findings of the As-
+                                                                      putational Linguistics: ACL 2022, pp. 1619–1629,
+  sociation for Computational Linguistics: ACL 2023, pp.
+                                                                      Dublin, Ireland, May 2022. Association for Computa-
+  13003–13051, Toronto, Canada, July 2023. Association
+                                                                      tional Linguistics. doi: 10.18653/v1/2022.findings-acl.
+  for Computational Linguistics. doi: 10.18653/v1/2023.
+                                                                      127. URL https://aclanthology.org/2022.
+  findings-acl.824. URL https://aclanthology.
+                                                                      findings-acl.127/.
+  org/2023.findings-acl.824/.
+Talmor, A., Yoran, O., Bras, R. L., Bhagavatula, C., Gold-           Wason, P. C. Reasoning about a rule. Quarterly Journal
+  berg, Y., Choi, Y., and Berant, J. CommonsenseQA                    of Experimental Psychology, 20(3):273–281, 1968. doi:
+  2.0: Exposing the limits of AI through gamification. In             10.1080/14640746808400161.
+  Thirty-fifth Conference on Neural Information Process-             Wei, J., Tay, Y., Bommasani, R., Raffel, C., Zoph, B.,
+  ing Systems Datasets and Benchmarks Track (Round 1),                Borgeaud, S., Yogatama, D., Bosma, M., Zhou, D., Met-
+  2021. URL https://openreview.net/forum?                             zler, D., Chi, E. H., Hashimoto, T., Vinyals, O., Liang,
+  id=qF7FlUT5dxa.                                                     P., Dean, J., and Fedus, W. Emergent abilities of large
+Tian, J., Li, Y., Chen, W., Xiao, L., He, H., and Jin, Y. Di-         language models. Transactions on Machine Learning
+  agnosing the first-order logical reasoning ability through          Research, 2022a. ISSN 2835-8856. URL https://
+  LogicNLI. In Moens, M.-F., Huang, X., Specia, L., and               openreview.net/forum?id=yzkSU5zdwD. Sur-
+  Yih, S. W.-t. (eds.), Proceedings of the 2021 Confer-               vey Certification.
+  ence on Empirical Methods in Natural Language Pro-
+                                                                     Wei, J., Wang, X., Schuurmans, D., Bosma, M., Ichter,
+  cessing, pp. 3738–3747, Online and Punta Cana, Do-
+                                                                      B., Xia, F., Chi, E., Le, Q. V., and Zhou, D. Chain-of-
+  minican Republic, November 2021. Association for Com-
+                                                                      thought prompting elicits reasoning in large language
+  putational Linguistics. doi: 10.18653/v1/2021.emnlp-
+                                                                      models.      In Koyejo, S., Mohamed, S., Agarwal,
+  main.303. URL https://aclanthology.org/
+                                                                      A., Belgrave, D., Cho, K., and Oh, A. (eds.), Ad-
+  2021.emnlp-main.303/.
+                                                                      vances in Neural Information Processing Systems,
+Voita, E., Ferrando, J., and Nalmpantis, C.        Neu-               volume 35, pp. 24824–24837. Curran Associates, Inc.,
+  rons in large language models: Dead, n-gram, po-                    2022b. URL https://proceedings.neurips.
+  sitional. In Ku, L.-W., Martins, A., and Srikumar,                  cc/paper_files/paper/2022/file/
+  V. (eds.), Findings of the Association for Computa-                 9d5609613524ecf4f15af0f7b31abca4-
+  tional Linguistics: ACL 2024, pp. 1288–1301, Bangkok,               Paper-Conference.pdf.
+
+                                                                15
+        RULEBREAKERS: Challenging LLMs at the Crossroads between Formal Logic and Human-like Reasoning
+
+Weir, N., Clark, P., and Van Durme, B. Nellie: A neuro-              tics. doi: 10.18653/v1/2024.acl-long.720. URL https:
+ symbolic inference engine for grounded, compositional,              //aclanthology.org/2024.acl-long.720/.
+ and explainable reasoning. In Larson, K. (ed.), Pro-
+ ceedings of the Thirty-Third International Joint Con-             Yu, F., Zhang, H., Tiwari, P., and Wang, B. Natural language
+ ference on Artificial Intelligence, IJCAI-24, pp. 3602–             reasoning, a survey. ACM Comput. Surv., may 2024.
+ 3612. International Joint Conferences on Artificial Intel-          ISSN 0360-0300. doi: 10.1145/3664194. URL https:
+ ligence Organization, 8 2024. doi: 10.24963/ijcai.2024/             //doi.org/10.1145/3664194.
+ 399. URL https://doi.org/10.24963/ijcai.                          Zach, R. Logic in mathematics and computer science, 2024.
+ 2024/399. Main Track.                                               URL https://arxiv.org/abs/2404.09033.
+Welch, B. L. The generalization of ‘Student’s’ problem             Zhao, Z. and Aletras, N. Incorporating attribution impor-
+ when several different population variances are involved.           tance for improving faithfulness metrics. In Rogers, A.,
+ Biometrika, 34(1-2):28–35, 01 1947. ISSN 0006-3444.                 Boyd-Graber, J., and Okazaki, N. (eds.), Proceedings of
+ doi: 10.1093/biomet/34.1-2.28. URL https://doi.                     the 61st Annual Meeting of the Association for Compu-
+ org/10.1093/biomet/34.1-2.28.                                       tational Linguistics (Volume 1: Long Papers), pp. 4732–
+                                                                     4745, Toronto, Canada, July 2023. Association for Com-
+Wolf, T., Debut, L., Sanh, V., Chaumond, J., Delangue,               putational Linguistics. doi: 10.18653/v1/2023.acl-long.
+ C., Moi, A., Cistac, P., Rault, T., Louf, R., Funtow-               261. URL https://aclanthology.org/2023.
+ icz, M., Davison, J., Shleifer, S., von Platen, P., Ma,             acl-long.261/.
+ C., Jernite, Y., Plu, J., Xu, C., Le Scao, T., Gugger, S.,
+ Drame, M., Lhoest, Q., and Rush, A. Transformers:                 Zhao, Z., Wallace, E., Feng, S., Klein, D., and Singh, S.
+ State-of-the-art natural language processing. In Liu, Q.            Calibrate before use: Improving few-shot performance
+ and Schlangen, D. (eds.), Proceedings of the 2020 Confer-           of language models. In Meila, M. and Zhang, T. (eds.),
+ ence on Empirical Methods in Natural Language Process-              Proceedings of the 38th International Conference on Ma-
+ ing: System Demonstrations, pp. 38–45, Online, October              chine Learning, volume 139 of Proceedings of Machine
+ 2020. Association for Computational Linguistics. doi:               Learning Research, pp. 12697–12706. PMLR, 18–24 Jul
+ 10.18653/v1/2020.emnlp-demos.6. URL https://                        2021. URL https://proceedings.mlr.press/
+ aclanthology.org/2020.emnlp-demos.6/.                               v139/zhao21c.html.
+
+Wu, Z., Qiu, L., Ross, A., Akyürek, E., Chen, B., Wang, B.,       Zhao, Z., Chrysostomou, G., Bontcheva, K., and Aletras, N.
+ Kim, N., Andreas, J., and Kim, Y. Reasoning or reciting?            On the impact of temporal concept drift on model explana-
+ exploring the capabilities and limitations of language              tions. In Goldberg, Y., Kozareva, Z., and Zhang, Y. (eds.),
+ models through counterfactual tasks. In Duh, K., Gomez,             Findings of the Association for Computational Linguis-
+ H., and Bethard, S. (eds.), Proceedings of the 2024 Con-            tics: EMNLP 2022, pp. 4039–4054, Abu Dhabi, United
+ ference of the North American Chapter of the Associa-               Arab Emirates, December 2022. Association for Com-
+ tion for Computational Linguistics: Human Language                  putational Linguistics. doi: 10.18653/v1/2022.findings-
+ Technologies (Volume 1: Long Papers), pp. 1819–1862,                emnlp.298. URL https://aclanthology.org/
+ Mexico City, Mexico, June 2024. Association for Compu-              2022.findings-emnlp.298/.
+ tational Linguistics. doi: 10.18653/v1/2024.naacl-long.
+ 102. URL https://aclanthology.org/2024.
+ naacl-long.102/.
+
+Xu, F., Lin, Q., Han, J., Zhao, T., Liu, J., and Cambria,
+  E. Are large language models really good logical rea-
+  soners? a comprehensive evaluation and beyond. IEEE
+ Transactions on Knowledge and Data Engineering, 37(4):
+ 1620–1634, 2025. doi: 10.1109/TKDE.2025.3536008.
+
+Xu, J., Fei, H., Pan, L., Liu, Q., Lee, M.-L., and Hsu,
+ W. Faithful logical reasoning via symbolic chain-of-
+  thought. In Ku, L.-W., Martins, A., and Srikumar, V.
+ (eds.), Proceedings of the 62nd Annual Meeting of the
+ Association for Computational Linguistics (Volume 1:
+ Long Papers), pp. 13326–13365, Bangkok, Thailand,
+ August 2024. Association for Computational Linguis-
+
+                                                              16
+          RULEBREAKERS: Challenging LLMs at the Crossroads between Formal Logic and Human-like Reasoning
+
+A. Additional Related Work
+Further comparisons between RULEBREAKERS and existing datasets in logical reasoning. On the surface,
+RULEBREAKERS seems similar to logical reasoning datasets introduced in Parmar et al. (2024) and Holliday et al. (2024)
+in that they also focus on single-step inference instead of long reasoning chains. It also seems similar to other logical
+reasoning datasets such as LogicNLI (Tian et al., 2021) and ProntoQA (Saparov & He, 2023) in that sentences within the
+dataset are also syntactically straightforward and easy to represent in symbolic forms in formal logic.
+However, as Section 2 has explained in detail, RULEBREAKERS has a fundamentally different nature and objectives
+from these logical reasoning datasets. It assesses LLMs’ ability to utilize common sense and factual knowledge about the
+real world when reasoning, not just how rigidly they can apply logical rules. For this reason, our examples also do not
+introduce any fictional ontology, nonsensical entities or deliberately false premises (e.g. “All mammals are cats”)22 , unlike
+some logical reasoning datasets such as ProntoQA (Saparov & He, 2023) or Wu et al. (2024).
+Failure modes of LLMs. LLMs have exhibited surprisingly simple failure modes, such as being sensitive to premise order
+(Chen et al., 2024) and unable to infer that “B is A” upon learning that “A is B” (Berglund et al., 2024). By examining LLMs’
+reasoning behavior in the context of rulebreakers, our work also sheds light on another potential limitation of these models:
+their propensity to “over-generalize” certain logical rules learned from patterns in their training data, potentially applying
+them incorrectly or too rigidly in reasoning tasks.
+Concurrent to our work, Holliday et al. (2024) evaluated LLMs on reasoning problems in conditional and modal logic,
+including some “controversial” cases which we would also consider to be rulebreakers under our definition. However, there
+are key differences between their contributions and ours. Firstly from a theoretical perspective, while they consider these
+cases as specific anomalies that are subject to competing theories in logic and philosophy, we draw on expertise in cognitive
+science to characterize these as part of a larger category of examples that demonstrate the general gap between formal logic
+and human-like reasoning. Accordingly, we draw attention to scenarios where even basic rules in propositional logic which
+they do not consider to be “controversial” (e.g. disjunctive syllogism) can produce problematic inferences when applied
+rigidly in reasoning with natural language. Moreover, while Holliday et al. (2024) gathered data instances for each logical
+rule by handcrafting one question and then generating dozens more in the same form with the help of LLMs, our study’s
+novel design and use of rulebreaker templates enables us to generate instances at scale that are carefully controlled – this
+allows for more in-depth and rigorous analysis into LLMs’ reasoning behavior with respect to these problems.
+Table 5 provides an overview of the relevant studies conducted in cognitive science relating to what we have termed as
+“rulebreakers”. We show how templates introduced by our RULEBREAKERS are abstracted from specific examples that
+were manually written and tested on human participants in these studies.23
+
+
+
+
+B. Categorical Entity Pairs in the RULEBREAKERS Dataset
+
+ Type                       Instances
+                            finch, robin, ostrich, parakeet, swan, pheasant, crow, falcon, goose, nightingale, pelican, hawk,
+ bird
+                            puffin, peacock, flamingo, quail, gull, toucan, partridge, kingfisher
+ fish                       trout, crappie, pike, tuna, catfish, flounder, mullet, salmon, haddock, hake, eel, goldfish, cod
+ insect                     fly, butterfly, ant, earwig, beetle, flea, firefly, stonefly, termite, wasp, bee, mayfly
+                            banjo, sitar, koto, samisen, zither, guitar, dulcimer, psaltery, violin, gusli, lute, harp,
+ stringed instrument
+                            balalaika, cello, mandolin, viola
+ brass instrument           tuba, trumpet, euphonium, trombone, sousaphone, French horn, cornet, bugle, flugelhorn
+ woodwind instrument        clarinet, oboe, flute, piccolo, bassoon, bagpipe, shakuhachi, English horn
+ martial art                tai chi, karate, aikido, kung fu, judo, tae kwon do, jiu jitsu, muay thai
+ racket sport               tennis, badminton, table tennis, squash, racquetball
+   22
+      For example, “If Anne was born in Sweden, then she was not born in Stockholm” does not imply that Stockholm is not in Sweden -
+rather, it only implies that Anne might be born somewhere else in Sweden, or in another country.
+   23
+      We also carried out an informal inspection/annotation on a subset of samples generated with our RULEBREAKERS templates, to
+validate that they mirror the semantic patterns of manually written examples used in these prior studies.
+
+                                                                17
+         RULEBREAKERS: Challenging LLMs at the Crossroads between Formal Logic and Human-like Reasoning
+
+
+Table 5. Key studies on rulebreakers in cognitive science and their connection to various templates we have introduced in our RULE-
+BREAKERS dataset.
+ Study              Relevant examples from          Our     corre-     No. of human       Relevant finding
+                    their dataset                   sponding           participants
+                                                    rulebreaker        included in
+                                                    template(s)        study
+ Quelhas et al.,    “If Ana drinks a juice,         MT (type, in-      28                 Participants generally avoid conclu-
+ 2010               then she doesn’t drink an       stance)                               sions that factually contradict the
+                    orange juice”; “If Manuel                                             premises, even where they can be de-
+                    plays a game, then he                                                 rived by applying a logical rule (e.g.
+                    doesn’t play football”                                                modus tollens). Instead, they con-
+                                                                                          clude that “nothing follows” from the
+                                                                                          premises.
+ Quelhas     &      “Andre is in Lisbon or he       DS (country,       80                 As above, participants generally
+ Johnson-Laird,     is in Portugal”; “Luis is       city), DS (type,                      avoid conclusions that factually con-
+ 2017               cooking bass or he is cook-     instance)                             tradict the premises, even where they
+                    ing fish”; “Luis is eating                                            can be derived by applying a logical
+                    chicken or he is eating                                               rule (disjunctive syllogism).
+                    meat”
+ Johnson-Laird      “If Bill is in Brazil then he   MT (country,       41                 When participants are familiar
+ & Byrne, 2002      is not in Rio de Janeiro”;      city)                                 with the entities mentioned in the
+                    “If Ann is in the Hotel                                               premises, they are more likely to
+                    LaBlanc then she is not in                                            recognize and avoid factually contra-
+                    the Champagne Suite”                                                  dicting conclusions, as compared to
+                                                                                          when they are unfamiliar with the
+                                                                                          entities.
+
+
+C. Licenses of Datasets Used in Creating RULEBREAKERS
+We list in Table 6 existing datasets that we used in creating RULEBREAKERS, and their respective licenses.
+
+
+                      Table 6. Datasets used in creating RULEBREAKERS and their corresponding licenses
+
+                 Dataset                Usage in RULEBREAKERS                                License
+                                        Source of geographical entity pairs
+                 WikiData                                                                    CC0-1.0 Universal
+                                        (list of current-day countries and capital cities)
+                 ConceptNet             Source of categorical entity pairs                   CC BY-SA 4.0
+                 Popular Names by       List of most common first names and
+                                                                                             CC0-1.0 Universal
+                 Country Dataset        corresponding pronouns around the world
+
+
+
+D. Model Sizes
+Table 7 lists the six open-sourced LLMs included in our study, and their respective number of parameters.
+
+E. Checking Models’ Knowledge with Respect to Categorical Entity Pairs
+Compared to the check for geographical (country, city) pairs, the check for categorical (type, instance) pairs elicited more
+varied responses from the models. While some of these responses did not precisely match the ground truth (i.e. the specific
+type that an entity belongs to according to our dataset), they are technically correct and demonstrate that the model has
+the relevant knowledge. For example, when prompted with “Complete the sentence: goose is a type of ”, some models
+responded not with “bird” (which is the ground truth type in our dataset) but with “waterfowl”, which is nonetheless correct,
+
+                                                                18
+        RULEBREAKERS: Challenging LLMs at the Crossroads between Formal Logic and Human-like Reasoning
+
+
+                          Table 7. Number of parameters of each open-sourced LLM used in our study.
+
+                                 M ODEL NAME                         N O . OF PARAMETERS
+                                 P HI -3- MINI -128 K - INSTRUCT     3.8 × 109
+                                 P HI -3- MEDIUM -128 K - INSTRUCT   1.4 × 1010
+                                 M ETA -L LAMA -3-8B-I NSTRUCT       8.0 × 109
+                                 M ETA -L LAMA -3-70B-I NSTRUCT      7.1 × 1010
+                                 M ISTRAL -7B-I NSTRUCT- V 0.3       7.3 × 109
+                                 G EMMA -2-27 B - IT                 2.7 × 1010
+
+
+since waterfowl is a subspecies of birds.
+Consequently, we perform an additional manual check and, on this basis, did not exclude any type-instance pairs as part of
+this filtering process.
+
+F. Results Breakdown by Prompt Phrasing
+As shown in Figure 5, the seven LLMs exhibit varying degrees of sensitivity to input prompt phrasings used in our study.
+We find that Meta-Llama-3-8B-Instruct is the most sensitive in this regard, with paired accuracy varying by over 0.4. On the
+other end of the spectrum, we find that Phi-3-medium-128k-instruct, GPT-4o and Gemma-2-27b-it are the most robust to the
+prompt phrasing variations included in our study, although the latter two are also the worst performing models in terms of
+paired accuracy.
+An interesting observation is that we did not identify any particular correlation between model performance and the different
+verbs used in the phrasings. As shown in Figure 6, verbs that elicit the best (or worst) accuracy on rulebreakers and
+non-rulebreakers differ among the seven LLMs. This contrasts with an intuitive expectation that e.g. the word “support”
+might be eliciting softer reasoning by a model or that, conversely, the words “entail” and “deduced”, which are more
+often used in the context of logical reasoning, might be motivating the model to adhere more strictly to logical rules when
+reasoning (and therefore perform worse on rulebreakers). We leave a more detailed investigation of this phenomenon to
+future work.
+
+
+
+
+                                                             19
+   RULEBREAKERS: Challenging LLMs at the Crossroads between Formal Logic and Human-like Reasoning
+
+
+
+
+                                           Model: Phi-3-mini-128k-instruct
+                 All
+                                                                                                Question keyword, Answer options
+MT, (country, city)
+MT, (type, instance)                                                                                  entail, Yes-No
+ DS, (country, city)                                                                                  entail, True-False
+DS, (type, instance)                                                                                  followFrom, Yes-No
+                                          Model: Phi-3-medium-128k-instruct                           followFrom, True-False
+                 All                                                                                  inferred, Yes-No
+MT, (country, city)
+                                                                                                      inferred, True-False
+MT, (type, instance)
+ DS, (country, city)                                                                                  deduced, Yes-No
+DS, (type, instance)                                                                                  deduced, True-False
+                                          Model: Meta-Llama-3-8B-Instruct                             support, Yes-No
+                 All                                                                                  support, True-False
+MT, (country, city)
+MT, (type, instance)
+ DS, (country, city)
+DS, (type, instance)
+                                          Model: Meta-Llama-3-70B-Instruct
+                 All
+MT, (country, city)
+MT, (type, instance)
+ DS, (country, city)
+DS, (type, instance)
+                                           Model: Mistral-7B-Instruct-v0.3
+                 All
+MT, (country, city)
+MT, (type, instance)
+ DS, (country, city)
+DS, (type, instance)
+                                                  Model: gemma-2-27b-it
+                 All
+MT, (country, city)
+MT, (type, instance)
+ DS, (country, city)
+DS, (type, instance)
+                                              Model: gpt-4o-2024-11-20
+                 All
+MT, (country, city)
+MT, (type, instance)
+ DS, (country, city)
+DS, (type, instance)
+                       0     0.1    0.2     0.3       0.4     0.5     0.6     0.7   0.8   0.9
+
+                                                    Paired accuracy
+
+
+                Figure 5. Breakdown of results with respect to paired accuracy, by different question phrasings.
+
+
+
+
+                                                                    20
+  RULEBREAKERS: Challenging LLMs at the Crossroads between Formal Logic and Human-like Reasoning
+
+
+
+
+                                    Model: Phi-3-mini-128k-instruct
+non-rulebreakers
+                                                                                       Question keyword, Answer options
+    rulebreakers
+                                                                                              entail, Yes-No
+                                   Model: Phi-3-medium-128k-instruct                          entail, True-False
+non-rulebreakers
+                                                                                              followFrom, Yes-No
+    rulebreakers
+                                                                                              followFrom, True-False
+                                   Model: Meta-Llama-3-8B-Instruct
+                                                                                              inferred, Yes-No
+non-rulebreakers
+                                                                                              inferred, True-False
+    rulebreakers
+                                                                                              deduced, Yes-No
+                                   Model: Meta-Llama-3-70B-Instruct
+non-rulebreakers                                                                              deduced, True-False
+    rulebreakers                                                                              support, Yes-No
+                                                                                              support, True-False
+                                    Model: Mistral-7B-Instruct-v0.3
+non-rulebreakers
+    rulebreakers
+                                           Model: gemma-2-27b-it
+non-rulebreakers
+    rulebreakers
+                                       Model: gpt-4o-2024-11-20
+non-rulebreakers
+    rulebreakers
+                   0   0.1   0.2     0.3     0.4    0.5   0.6    0.7   0.8   0.9   1
+
+                                                   Accuracy
+
+Figure 6. Breakdown of results with respect to rulebreaker and non-rulebreaker accuracy, by different question phrasings.
+
+
+
+
+                                                                21
+        RULEBREAKERS: Challenging LLMs at the Crossroads between Formal Logic and Human-like Reasoning
+
+G. Example Prompts
+We list example prompts used in experiment that are produced by applying the chat template specific to each open-weight
+LLM accessed on Hugging Face. Chat templates are applied using the apply chat template function as documented in
+https://huggingface.co/docs/transformers/main/en/chat_templating.
+Phi-3-mini-128k-instruct and Phi-3-medium-128k-instruct:
+
+     <|user|> Premises: If Lı́v caught some kind of bird, then she did not catch
+     a goose. Lı́v caught a goose.\n
+     Conclusion: Lı́v did not catch any kind of bird.\n
+     Do the Premises entail the Conclusion? Answer Yes or No only.<|end|>
+     <|assistant|>
+
+Meta-Llama-3-8B-Instruct and Meta-Llama-3-70B-Instruct:
+
+     <|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n
+     Premises: If Lı́v caught some kind of bird, then she did not catch a goose.
+     Lı́v caught a goose.\n
+     Conclusion: Lı́v did not catch any kind of bird.\n
+     Do the Premises entail the Conclusion? Answer Yes or No only.<|eot_id|>
+     <|start_header_id|>assistant<|end_header_id|>\n\n
+
+Mistral-7B-Instruct-v0.3:
+
+     <s>[INST] Premises: If Lı́v caught some kind of bird, then she did not catch
+     a goose. Lı́v caught a goose.\n
+     Conclusion: Lı́v did not catch any kind of bird.\n
+     Do the Premises entail the Conclusion? Answer Yes or No only.[/INST]
+
+Gemma-2-27b-it:
+
+     <bos><start_of_turn>user\n
+     Premises: If Lı́v caught some kind of bird, then she did not catch a goose.
+     Lı́v caught a goose.\n
+     Conclusion: Lı́v did not catch any kind of bird.\n
+     Do the Premises entail the Conclusion? Answer Yes or No only.<end_of_turn>\n
+     <start_of_turn>model\n
+
+
+
+
+                                                           22
+           RULEBREAKERS: Challenging LLMs at the Crossroads between Formal Logic and Human-like Reasoning
+
+H. Additional Instructions and Variation in Prompt Phrasing
+In light of our results in Section 5.1, we further investigate whether prompting instructions that remind LLMs to utilize
+common sense and factual knowledge when reasoning improve their mediocre performance on RULEBREAKERS.
+We do this in two different ways:
+
+ 1. Baseline phrasing + additional instructions. We include the bold instructions into each of the same 10 prompt
+    phrasings described in Section 4.2:
+             ... [Does the Conclusion follow from the Premises?] When reasoning, you should take into account your
+             factual knowledge about the real world and assess whether any relevant logical rules should be applied.
+             Answer [Yes] or [No] only.
+ 2. Alternative phrasing. Instead of including additional instructions, we use this alternative question phrasing:
+             ... Based on the provided context and commonsense knowledge, is the Conclusion correct? Answer Yes or
+             No only.
+
+Additionally, while using the alternative phrasing, we also prefix the two premises in each prompt with the bold wording, to
+test whether this improves models’ ability to recognize the factual contradiction between the two premises (we refer to this
+condition as alternative phrasing + prefixed premises), i.e.:
+
+        Premises: Suppose we are told that [premise 1]. However, as a matter of fact, [premise 2].
+        Conclusion: [conclusion].
+        Based on the provided context and commonsense knowledge, is the Conclusion correct? Answer Yes or No only.
+
+As shown in Table 8, using the alternative question phrasing in combination with adding prefixes to the premises improves
+the paired accuracy achieved by most models24 , with the most substantial gain being +24.13 (%) over the baseline condition
+for gemma-2-27b-it. However, paired accuracy of all models remain mediocre, ranging from 31.27 (gemma-2-27b-it) to
+69.12 (Meta-Llama-3-8B-Instruct).
+Importantly, for the majority of the models, we often observe a trade-off in rulebreaker versus non-rulebreaker accuracy
+under different conditions. For example, while Mistral-7B-Instruct-v0.3 under the alternative phrasing condition improves
+by +5.58 in non-rulebreaker accuracy compared to the baseline condition, the model suffers a drop of -13.62 in rulebreaker
+accuracy. Conversely, under the baseline phrasing + additional instructions condition, Meta-Llama-8B-Instruct improves
+by +10.51 in rulebreaker accuracy but drops by -18.21 in non-rulebreaker accuracy. We find this “trading off” pattern with
+respect to Phi-3-mini-128k-Instruct, Phi-3-medium-128k-Instruct and Meta-Llama-3-70B-Instruct. Whilst highlighting
+the challenge that RULEBREAKERS poses to current LLMs, these results also indicate the inherent tension between
+prompting models to reason according to what formal logic demands (i.e. robustly applying rules regardless of the semantic
+content of the propositions) and prompting them to reason in a more human-like and knowledge-informed manner by taking
+semantic content, factual knowledge and common sense into account.
+
+I. Task Variation: Conclusion Generation
+Inspired by similar experiment setups in Johnson-Laird & Byrne (2002) and Quelhas & Johnson-Laird (2017), instead of
+presenting both the premises and conclusions to LLMs and asking them to either accept or reject the conclusions (as we had
+done in our main experiment), we present only the premises and ask the LLMs to generate the conclusions themselves for
+both rulebreaker and non-rulebreaker scenarios. For example:
+
+        Premises: If Lı́v caught some kind of [if non-rulebreaker: insect / if rulebreaker: bird], then she did not catch a
+        goose. Lı́v caught a goose.
+        What conclusion, if any, follows from the Premises? If you think nothing follows from the Premises, answer
+       ’Nothing follows’. Keep your response concise.
+  24
+       The evaluation of GPT-4o on the alternative phrasing + prefixed premises condition was carried out in March 2025.
+
+                                                                   23
+         RULEBREAKERS: Challenging LLMs at the Crossroads between Formal Logic and Human-like Reasoning
+
+
+
+
+Table 8. Comparison of models’ accuracy results (paired accuracy (τ ), rulebreaker accuracy (τDR ), non-rulebreaker accuracy (τDN ) in
+%) across four conditions: (a) baseline question phrasings (as described in Section 4.2); (b) baseline question phrasings with additional
+instructions appended; (c) alternative question phrasing; and (d) alternative question phrasing with prefixed premises. Highest score in
+each row is highlighted in bold. Accuracy gain/loss of each condition (compared against the baseline) is provided in brackets.
+
+                                                                                                        A LTERNATIVE
+                                                           BASELINE PHRASING
+                                            BASELINE                                 A LTERNATIVE       PHRASING
+                                                           + ADDITIONAL
+                                            PHRASING                                 PHRASING           + PREFIXED
+                                                           INSTRUCTIONS
+                                                                                                        PREMISES
+                                    τ       20.75          22.30 (+1.55)             24.56 (+3.81)      28.72 (+7.97)
+             P HI -3- MINI -
+                                    τD R    21.07          22.70 (+1.63)             25.12 (+4.05)      29.34 (+8.27)
+             128 K -I NSTRUCT
+                                    τD N    99.68          99.59 (-0.09)             99.44 (-0.24)      99.37 (-0.31)
+                                    τ       29.19          32.61 (+3.42)             29.14 (-0.05)      44.66 (+15.47)
+             P HI -3- MEDIUM -
+                                    τD R    38.19          42.49 (+4.30)             35.03 (-3.16)      44.87 (+6.68)
+             128 K -I NSTRUCT
+                                    τD N    89.63          89.11 (-0.52)             92.97 (+3.34)      99.73 (+10.1)
+                                    τ       60.92          52.89 (-8.03)             65.94 (+5.02)      69.12 (+8.20)
+             M ETA -L LAMA -3-
+                                    τD R    73.58          84.09 (+10.51)            78.32 (+4.74)      88.22 (+14.64)
+             8B-I NSTRUCT
+                                    τD N    86.46          68.25 (-18.21)            87.36 (+0.90)      80.53 (-5.93)
+                                    τ       49.71          51.95 (+2.24)             59.39 (+9.68)      56.19 (+6.48)
+             M ETA -L LAMA -3-
+                                    τD R    49.73          52.03 (+2.30)             59.53 (+9.80)      56.40 (+6.67)
+             70B-I NSTRUCT
+                                    τD N    99.98          99.91 (-0.07)             99.86 (-0.12)      99.79 (-0.19)
+                                    τ       47.64          47.08 (-0.56)             39.53 (-8.11)      40.09 (-7.55)
+             M ISTRAL -7B-
+                                    τD R    56.28          57.13 (+0.85)             42.66 (-13.62)     55.12 (-1.16)
+             INSTRUCT- V 0.3
+                                    τD N    90.99          89.57 (-1.42)             96.57 (+5.58)      84.96 (-6.03)
+                                    τ       7.14           6.99 (-0.15)              8.65 (+1.51)       31.27 (+24.13)
+             GEMMA -2-27 B - IT     τD R    7.14           6.99 (-0.15)              8.65 (+1.51)       31.28 (+24.14)
+                                    τD N    100.00         100.00 (+/-0)             100.00 (+/-0)      99.99 (-0.01)
+                                    τ       15.06          13.91 (-1.15)             19.78 (+4.72)      31.92 (+16.86)
+             GPT-4 O                τD R    15.06          13.91 (-1.15)             19.78 (+4.72)      31.92 (+16.86)
+                                    τD N    100.00         99.99 (-0.01)             100.00 (+/-0)      100.00 (+/-0)
+
+
+
+
+                                                                   24
+         RULEBREAKERS: Challenging LLMs at the Crossroads between Formal Logic and Human-like Reasoning
+
+In the non-rulebreaker case, the answer which we consider correct and expected of typical human reasoners would be ”Lı́v
+did not catch an25 insect”, since it is an uncontentious application of modus tollens; by contrast, we consider the answer
+“nothing follows” as incorrect.
+In the rulebreaker case, the conclusion we consider correct would be “nothing follows”, as the premises are factually
+inconsistent with each other (since goose is in fact a type of bird); by contrast, we consider the answer “Lı́v did not catch
+a bird” as incorrect, since it factually contradicts the second premise. As in our main experiment, this again reflects the
+views and findings in existing cognitive science literature (Quelhas et al., 2010; Khemlani & Johnson-Laird, 2019, etc.)
+that, when faced with what they recognize to be inconsistent premises, typical human reasoners are not expected to just
+conclude that any conclusion whatsoever follows. By contrast, in classical logic, any conclusion follows validly from a set
+of contradictory premises.
+Similarly, for the disjunctive syllogism instances, e.g. “Lı́v caught either a goose or some kind of [insect/bird]. Lı́v did not
+catch [an insect/a bird].”, the correct conclusion would be “Lı́v caught a goose” in the non-rulebreaker case, and “nothing
+follows” in the rulebreaker case.
+We prompt each model to generate using greedy decoding and setting a maximum generated token limit of 50 tokens. We
+then pattern-match their outputs against our expected correct and incorrect answers. Where our pattern-matching fails to
+map an output to either a correct or incorrect answer, we categorize it as “unparsed”.
+We compute the frequency of each LLM’s correct, incorrect and unparsed responses to all rulebreakers and non-rulebreakers
+in RULEBREAKERS. Additionally, we apply the same approach in calculating paired accuracy to compute the frequency
+of correct, incorrect and unparsed responses to rulebreaker and non-rulebreaker pairs (see Section 3.4). If a model’s response
+to both the rulebreaker and non-rulebreaker prompt in a pair are correct, we categorize the paired response as correct. If at
+least one response is unparsed, we categorize the paired response as unparsed. In all other cases, we categorize the paired
+response as incorrect.
+As shown in Figure 7, the results of this additional experiment generally conform to the patterns we had identified in the
+results of our main experiment in Section 5.1. Most models still perform better with respect to non-rulebreakers than
+rulebreakers. As in our main experiment, Phi-3-mini-128k-instruct, gemma-2-27b-it and gpt-4o-2024-11-20 exhibit behavior
+that suggests the models’ over-rigidly applying logical rules in generating conclusions, thereby performing particularly well
+on non-rulebreakers but particularly poor on rulebreakers.
+Notable exceptions, however, are Phi-3-medium-128k-instruct and Mistral-7B-Instruct-v0.3. Unlike their behavior in our
+main experiment, both these models perform better on rulebreakers than non-rulebreakers in this setup. In particular, we
+observe that Mistral-7B-Instruct-v0.3 exhibits a strong bias towards outputting ”Nothing follows” which results in a near
+perfect accuracy on rulebreakers but to the detriment of its performance on non-rulebreakers. As a result, its proportion of
+correct paired responses is even lower than the paired accuracy it achieved in our main experiment. Whilst highlighting an
+interesting phenomenon that merits future investigation, these results also demonstrate the robustness of our paired accuracy
+metric against any abrupt shifts in models’ preferences due to variations in task and prompt phrasing.
+We also conduct a follow-up experiment on a subset of models to validate that our findings above are robust to the use of
+sampling as opposed to greedy decoding during inference with different temperature settings. As shown in Table 9, the
+results obtained from using sampling with varying temperatures do not substantially deviate from our baseline. Increasing
+temperature exhibits mixed effects with respect to different models, harming the performance of Llama-3-8B-Instruct and
+Mistral-7B-Instruct-v0.3 but improving the performance of Phi-3-mini-128-instruct (which has performed the worst under
+the baseline condition compared to the other two models).
+
+J. Further Implementation Details
+All open-sourced models used in our study were accessed and downloaded through Hugging Face: https://
+huggingface.co/models.
+We ran each model on a single NVIDIA A100 GPU, except for Meta-Llama-3-70B-Instruct which we ran on three.
+Running inference on the full RULEBREAKERS dataset permuted by 10 prompt phrasing variations took approximately
+   25
+      In extracting the LLMs’ answers by pattern-matching, we also allow for the article in this position to be substituted with “any”, “any
+kind of” or “some kind of”, since these produce the same meaning.
+
+
+                                                                    25
+         RULEBREAKERS: Challenging LLMs at the Crossroads between Formal Logic and Human-like Reasoning
+
+
+
+
+                                             Correct       Unparsed       Incorrect
+
+                                                          Model: Phi-3-mini-128k-instruct
+                            Rulebreakers
+                                   Paired
+                         Non-rulebreakers
+
+
+                                                         Model: Phi-3-medium-128k-instruct
+                            Rulebreakers
+                                   Paired
+                         Non-rulebreakers
+
+
+                                                          Model: Meta-Llama-3-8B-Instruct
+                            Rulebreakers
+                                   Paired
+                         Non-rulebreakers
+
+
+                                                         Model: Meta-Llama-3-70B-Instruct
+                            Rulebreakers
+                                   Paired
+                         Non-rulebreakers
+
+
+                                                          Model: Mistral-7B-Instruct-v0.3
+                            Rulebreakers
+                                   Paired
+                         Non-rulebreakers
+
+
+                                                               Model: gemma-2-27b-it
+                            Rulebreakers
+                                   Paired
+                         Non-rulebreakers
+
+
+                                                              Model: gpt-4o-2024-11-20
+                            Rulebreakers
+                                   Paired
+                         Non-rulebreakers
+                                         0        0.2            0.4         0.6            0.8      1
+                                                              Proportion of responses
+
+Figure 7. Proportion of correct, unparsed and incorrect responses extracted from LLMs’ outputs when they are provided with only the
+premises and instructed to generate conclusions.
+
+
+
+
+Table 9. Percentage of corrected paired responses in conclusion generation by using random sampling with different temperatures
+
+                                                       P HI -3- MINI -        L LAMA -3-          M ISTRAL -7B-
+                   T EMPERATURE
+                                                       128 K -I NSTRUCT       8B-I NSTRUCT        I NSTRUCT- V 0.3
+                   N/A - GREEDY DECODING
+                                                       1.23                   32.44               19.50
+                   ( BASELINE )
+                   0.1                                 1.47                   32.34               19.26
+                   0.5                                 4.24                   31.76               18.68
+                   1.0                                 7.59                   28.51               17.12
+
+
+
+                                                                   26
+        RULEBREAKERS: Challenging LLMs at the Crossroads between Formal Logic and Human-like Reasoning
+
+one hour per model with batch size of 128, except for Gemma-2-27b-it which took four hours with a batch size of 128, and
+Meta-Llama-3-70B-Instruct which took 10 hours with batch size of 64.
+
+K. Further Experiments and Discussion regarding Logic-enhanced Models
+While revealing a reasoning blind spot in current general-purpose models, our findings also point to the potential trade-off in
+methods that rely on formal logic to enhance these models’ general reasoning abilities.
+For example, intuitively, we would expect that models specifically fine-tuned on logical reasoning datasets would exhibit an
+even more pronounced tendency to over-rigidly apply formal logic. In addition, some hybrid systems are explicitly guided
+or constrained to reason according to formal logic. This is done, for example, by using LLMs to parse natural language
+statements into symbolic logical forms, which are then either processed by an external symbolic solver (as in the case of,
+e.g., LogicLM (Pan et al., 2023)) or fed back into the model in the subsequent stages as part of a multi-turn prompting
+strategy (e.g. in SymbolicCoT (Xu et al., 2024)). However, the problem RULEBREAKERS poses to these systems is
+precisely that each rulebreaker and non-rulebreaker in a pair share the same surface logical form, such that the conclusion is
+logically valid given the premises in propositional logic. Thus, even if the parsing is correct, the system would theoretically
+accept the conclusion in both non-rulebreakers (which would be correct) and non-rulebreakers (which would be incorrect),
+hence leading to low paired accuracy.
+To validate these theoretical arguments, we evaluate an existing Llama-3.1-8B-Instruct model on Hugging Face26 that has
+been fine-tuned on a dataset for propositional logic reasoning, and compare its performance on RULEBREAKERS against
+the baseline model before fine-tuning. We also evaluate the performance gpt-3.5-turbo on RULEBREAKERS across four
+conditions: (a) directly prompting the model for an answer (baseline); (b) using chain-of-thought (CoT) prompting (Wei
+et al., 2022b); (c) using LogicLM; and (d) using SymbolicCoT.
+We prompt the models to answer the question under the alternative phrasing + prefixed premises condition introduced in
+Appendix H, using greedy decoding. With respect to gpt-3.5-turbo, we use the LogicLM authors’ implementation (including
+their default settings)27 for conditions (a), (b) and (c); and that of the SymbolicCoT authors28 for condition (d). As in the
+LogicLM authors’ implementation, where the model fails to output valid logical forms that can be successfully executed, it
+falls back to the answer it outputs under the CoT condition.
+As shown in Table 10, the fine-tuned Llama-3.1-8B-Instruct model outperforms the baseline model in accepting and
+generating the correct conclusions in non-rulebreaker cases. However, as we expected, its performance on rulebreakers
+is substantially lower than the baseline model, indicating that the fine-tuned model is over-rigidly applying logical rules
+without regard to the semantic content of the premises.
+With respect to gpt-3.5-turbo, Table 10 shows that using LogicLM and SymbolicCoT boosts the model’s performance on
+non-rulebreakers at the expense of its performance on rulebreakers, leading as expected to worse paired accuracy than
+the baseline. We also observe that using CoT has a similar trade-off in boosting non-rulebreaker performance (to a level
+comparable to using LogicLM and SymbolicCoT), but the drop in rulebreaker performance is much less drastic. Nonetheless,
+these results show that the inherent challenge remains in prompting models to reason robustly in a knowledge-informed
+manner.
+
+L. Qualitative Analysis
+With respect to our hypothesis (1), we observe that the most frequent country-city pairs about which LLMs answer incorrectly
+tend to be those that are considered less well-known or likely to appear less frequently in the models’ training corpora.
+These include, for example, capital cities of relatively small island countries (such as Funafuti in Tuvalu and Ngerulmud
+in the Republic of Palau), and those of smaller African countries relative to their neighbours (such as Gitega in Burundi,
+Bissau in Guinea-Bissau and Maseru in Lesotho). Conversely, the most frequent country-city pairs that these models answer
+correctly about tend to be those that are relatively better known or larger in size. Examples include New Delhi in India,
+Madrid in Spain and Tokyo in Japan.
+  26
+     https://huggingface.co/ergotts/llama_3.1_8b_prop_logic_ft
+  27
+     https://github.com/teacherpeterpan/Logic-LLM
+  28
+     https://github.com/Aiden0526/SymbCoT
+
+
+
+                                                              27
+         RULEBREAKERS: Challenging LLMs at the Crossroads between Formal Logic and Human-like Reasoning
+
+
+Table 10. Results of logic-enhanced models. “Executable subset” refers to the subset of RULEBREAKERS instances where gpt-3.5-turbo
+has parsed the premises and conclusion into valid logical forms that were successfully evaluated by the symbolic solver. Paired accuracy
+(τ ) for the executable subset is not computed since the model can output valid logical forms for the non-rulebreaker but not the rulebreaker,
+or vice versa, within a prompt pair.
+                                                                          τ          τDR       τDN
+                                      L LAMA -3.1-8B-I NSTRUCT
+                                        BASELINE MODEL                    60.68      65.68     94.67
+                                        F INE - TUNED WITH
+                                                                          19.03      20.67     97.15
+                                        LOGIC DATASET
+
+                                      GPT-3.5- TURBO
+                                       BASELINE MODEL                     50.80      90.88     59.92
+                                       C OT (2- SHOT )                    65.36      71.78     91.75
+                                        L OGIC LM                         30.81      32.56     94.59
+                                          ( EXECUTABLE SUBSET )           -          5.98      95.07
+                                        S YMBOLIC C OT                    9.53       10.47     91.33
+
+
+
+Interestingly, LLMs seem to do particularly well on cities that also contain their country names (e.g. Mexico City in Mexico,
+Kuwait City in Kuwait). We speculate that this might be because these entity pairs make it easier for models to recognize
+the implicit contradiction between the factual premise and the conclusion in rulebreakers on a symbolic level (i.e. between
+”Anne is in [XYZ] City” and ”Anne is not in [XYZ]”).
+Furthermore, this “symbolic overlap” factor may also hint at a possible explanation for the trend we observed in Section 5.1
+that models generally perform better on the DS subset rather than the MT subset of RULEBREAKERS. Intuitively, for a
+model to apply a logical rule, it needs to recognize where segments of the natural language premises are negations of one
+another and abstract these segments accordingly e.g. into “B” and “not B”. This mapping is arguably more obvious and
+straightforward in MT cases than in DS ones. For example, in MT (country, city) cases, the bold and underlined parts form
+a clear negation pair:
+“If Anne is in Sweden, then she is not in Stockholm. Anne is in Stockholm.” (If A, then not B. B.)
+By comparison, the negation pair is less obvious in DS (country, city) cases:
+“Anne is either in Stockholm or somewhere in Sweden. Anne is not in Sweden.” (A or B. Not B.)
+We conjecture that this may make it more difficult for models to map DS premises and conclusions to their logical forms,
+compared to MT ones. As a result, models may be less likely to rigidly apply logical rules, hence avoiding incorrect
+conclusions in DS rulebreaker cases. Nevertheless, as with other factors such as entity familiarity, the precise impact of
+this “structural-similarity effect” on model behavior may vary across models, potentially contributing to the performance
+variation we observe.
+
+M. Unnormalized Score Ratios
+Table 11 shows a variation of Table 4 that lists the importance score ratios computed without normalizing by the number of
+tokens aggregated in each of the two premises. As expected, since the second premise always contains fewer tokens than
+the first, the score ratios listed in Table 11 are all lower than their counterparts in Table 4. Nonetheless, we do not observe
+any substantive deviations from the patterns we have identified with respect to the normalized score ratios in Table 4. This
+indicates that our findings are not substantially affected by variations in how prompts in our experiment are tokenized for
+each model.
+
+N. Counting and Comparing Activated Neurons in Rulebreakers versus Non-rulebreakers
+To better understand how LLMs internally distinguish rulebreakers from non-rulebreakers, we perform an additional
+experiment inspired by Voita et al. (2024), focusing on individual neurons’ activation values between the two linear layers of
+the feedforward neural network (FFN) within each model layer’s Transformer block.
+
+                                                                     28
+         RULEBREAKERS: Challenging LLMs at the Crossroads between Formal Logic and Human-like Reasoning
+
+
+Table 11. Mean unnormalized score ratios (with sd) of each LLM. The paired accuracy (τ ) from Section 5.1 is provided for the analysis.
+The greater the ratio, the more the model attends to the factual context.
+
+                                                             S CORE RATIO                S CORE RATIO
+                                                                                                            τ
+                                                             ( INPUT × GRADIENT )        ( ATTENTION )
+                      P HI -3- MINI -128 K - INSTRUCT        0.412 (0.152)               0.572 (0.125)      0.208
+                      P HI -3- MEDIUM -128 K - INSTRUCT      0.358 (0.090)               0.589 (0.320)      0.292
+                      M ETA -L LAMA -3-8B-I NSTRUCT          0.441 (0.109)               0.991 (0.184)      0.609
+                      M ETA -L LAMA -3-70B-I NSTRUCT         0.445 (0.119)               0.877 (0.165)      0.497
+                      M ISTRAL -7B-I NSTRUCT- V 0.3          0.405 (0.111)               0.771 (0.169)      0.476
+                      G EMMA -2-27 B - IT                    0.412 (0.095)               0.815 (0.116)      0.071
+
+
+Specifically, given an input prompt, we count the number of activation values that are greater than zero29 , summed over all
+token positions, with respect to each layer within a model.
+We divide all prompts used in our main experiment described in Section 4.2 into four categories: rulebreakers versus
+non-rulebreakers that an LLM answered correctly versus incorrectly. We then compute the average number of activated
+neurons across all prompts within each of the four categories.
+As the results in Figure 8 show, models differ widely in their activation counts with respect to each of the four categories.
+On one end of the spectrum, we see a near perfect overlap in activated counts across all layers in Gemma-2-27b-it – in
+other words, there is no substantial difference in the average number of neurons activated by rulebreaker or non-rulebreaker
+prompts (regardless of whether or not the model has answered the prompt correctly). On the other end, with respect to
+Meta-Llama-3-70B-Instruct, we observe that the four categories of prompts are clearly (and consistently across all layers)
+distinguishable in terms of activated counts. Somewhat surprisingly, in three out of six models (Phi-3-mini-128k-instruct,
+Meta-Llama-3-8B-Instruct and Meta-Llama-3-70B-Instruct), incorrectly answered rulebreakers and non-rulebreakers appear
+to activate more neurons than correctly answered ones. These results suggest a non-trivial relationship between a model’s
+neuron activations and its responses to rulebreakers and non-rulebreakers, presenting an avenue for future investigation.
+
+
+
+
+  29
+     We select zero as a threshold for consistency (whilst recognizing that these values can also be less than zero), since Gemma-2-27b-it
+uses GeLU activation function estimated with tanh, whereas other LLMs in our study use SiLU (Hendrycks & Gimpel, 2023).
+
+                                                                   29
+                                         RULEBREAKERS: Challenging LLMs at the Crossroads between Formal Logic and Human-like Reasoning
+
+
+
+
+                                               Correctly answered         Incorrectly answered    Correctly answered              Incorrectly answered
+                                               rulebreakers               rulebreakers            non-rulebreakers                non-rulebreakers
+
+
+                                                                    Phi-3-mini-128k-instruct                                                                             Phi-3-medium-128k-instruct
+                                                                                                                                     600
+
+
+                                        300                                                                                          550
+
+
+                                                                                                                                     500
+                                        250
+
+                                                                                                                                     450
+
+                                        200
+                                                                                                                                     400
+
+
+                                        150                                                                                          350
+
+                                          0         5               10         15            20       25               30               0             5             10         15        20         25             30         35
+
+                                                                    Meta-Llama-3-8B-Instruct                                                                             Meta-Llama-3-70B-Instruct
+
+
+
+
+  Avg no. of neurons activated ('000)
+                                                                                                                                   1200
+                                        450                                                                                        1150
+                                                                                                                                   1100
+                                        400                                                                                        1050
+                                                                                                                                   1000
+                                                                                                                                    950
+                                        350                                                                                         900
+                                                                                                                                    850
+                                        300                                                                                         800
+                                                                                                                                    750
+                                                                                                                                    700
+                                        250
+                                                                                                                                    650
+                                                                                                                                    600
+                                        200                                                                                         550
+                                                                                                                                    500
+                                                                                                                                    450
+                                        150
+                                           0        5               10         15            20       25               30              0     5    10      15        20   25    30   35   40    45   50        55   60    65   70   75
+
+                                                                    Mistral-7B-Instruct-v0.3                                                                                    gemma-2-27b-it
+                                                                                                                                     600
+                                        350                                                                                          550
+                                                                                                                                     500
+                                                                                                                                     450
+                                        300
+                                                                                                                                     400
+                                                                                                                                     350
+                                        250                                                                                          300
+                                                                                                                                     250
+                                                                                                                                     200
+                                        200                                                                                          150
+                                                                                                                                     100
+                                                                                                                                      50
+                                        150
+                                           0        5               10         15            20       25               30               0         5            10         15        20        25         30         35        40        45
+
+                                                                                                                             th
+                                                                                                                            n layer
+
+
+Figure 8. Average number of neurons activated per model layer, with respect to prompts belonging to each of four categories (rulebreaker
+vs non-rulebreaker, correctly vs incorrectly answered by each model).
+
+
+
+
+                                                                                                                        30
+

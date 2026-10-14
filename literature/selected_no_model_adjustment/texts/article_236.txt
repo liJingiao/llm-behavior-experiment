@@ -1,0 +1,566 @@
+                                   The Thirty-Ninth AAAI Conference on Artificial Intelligence (AAAI-25)
+
+
+
+
+Benchmarking and Understanding Compositional Relational Reasoning of LLMs
+       Ruikang Ni1 * † , Da Xiao1 * ‡ , Qingye Meng2 , Xiangyu Li3† , Shihui Zheng1 , Hongliang Liang1
+                                          1
+                                          Beijing University of Posts and Telecommunications
+                                                 2
+                                                   ColorfulClouds Technology Co., Ltd.,
+                                                     3
+                                                       ICBC UBS Asset Management
+                                             {ni,xiaoda99,shihuizheng,hliang}@bupt.edu.cn
+                                          hilbertmeng@gmail.com, li.xiangyu@icbccs.com.cn
+
+
+                            Abstract                                         strengths and weaknesses of models on targeted tasks. Thus,
+                                                                             they are more suitable for benchmarking CRR, which oc-
+  Compositional relational reasoning (CRR) is a hallmark of
+  human intelligence, but we lack a clear understanding of
+                                                                             curs relatively rarely in real-world corpora. Besides, we also
+  whether and how existing transformer large language mod-                   want to understand the underlying mechanism by which the
+  els (LLMs) can solve CRR tasks. To enable systematic ex-                   models solve CRR using mechanistic interpretability (MI)
+  ploration of the CRR capability of LLMs, we first propose                  (Bereska and Gavves 2024) analysis.
+  a new synthetic benchmark called Generalized Associative                      One line of work studies compositional or multi-step rea-
+  Recall (GAR) by integrating and generalizing the essence of
+  several tasks in mechanistic interpretability (MI) study in a
+                                                                             soning (Dziri et al. 2024; Press et al. 2023; Yang et al. 2024;
+  unified framework. Evaluation shows that GAR is challeng-                  Allen-Zhu and Li 2023; Ye, Li, and Allen-Zhu 2024; Zhang
+  ing enough for existing LLMs, revealing their fundamental                  et al. 2022; Sanford, Hsu, and Telgarsky 2024; Brinkmann
+  deficiency in CRR. Meanwhile, it is easy enough for system-                et al. 2024; Thomm et al. 2024; Zhao and Zhang 2024). They
+  atic MI study. Then, to understand how LLMs solve GAR                      use synthetic tasks to reveal some fundamental limitations
+  tasks, we use attribution patching to discover the core circuits           of LLMs on such tasks, manifested as either poor general-
+  reused by Vicuna-33B across different tasks and a set of vital             ization when task complexities of training and test set dif-
+  attention heads. Intervention experiments show that the cor-               fer (Dziri et al. 2024), or the compositionality gap (Press
+  rect functioning of these heads significantly impacts task per-            et al. 2023), i.e., how often models correctly answer all sub-
+  formance. Especially, we identify two classes of heads whose               problems but not generate the overall solution. In these tasks,
+  activations represent the abstract notion of true and false in
+  GAR tasks respectively. They play a fundamental role in CRR
+                                                                             difficulty is mainly controlled by the number of reasoning
+  across various models and tasks.                                           steps. When the number becomes large, the over-complex
+                                                                             input and usually poor performance of existing LLMs, espe-
+Dataset and code — https://github.com/Caiyun-AI/GAR                          cially open source ones, make in-depth MI study infeasible.
+                                                                             Several studies train specialized models from scratch on the
+                                                                             proposed tasks, but the conclusions drawn from analyzing
+                        Introduction                                         these models may not necessarily apply to existing LLMs.
+Compositional relational reasoning (CRR), the ability to rea-                Moreover, the benchmarks used by most of these works have
+son about multiple types of relations between different enti-                only a single dimension of variety, namely, the number of
+ties and combine them to draw conclusions or make predic-                    steps, which captures only an aspect of CRR.
+tions, is a hallmark of human intelligence. Transformer large                   Another line of research uses synthetic tasks for MI
+language models (LLMs) have become the de facto back-                        study, e.g. associative recall (AR) (Ba et al. 2016; Fu et al.
+bone for foundation models due to their exceptional per-                     2023; Olsson et al. 2022), knowledge recall (KR) (Meng
+formance on various tasks. An important open question is                     et al. 2022; Geva et al. 2023), greater-than (Hanna, Liu,
+whether and how existing LLMs can solve CRR tasks.                           and Variengien 2023) and indirect object identification (IOI)
+   Attempting to answer this question, a number of works                     (Wang et al. 2023). Using techniques such as path patching
+study the CRR capabilities of LLMs using synthetic bench-                    (Wang et al. 2023) and attribution patching (Syed, Rager,
+marks (Weston et al. 2016; Lake and Baroni 2018; Clark,                      and Conmy 2023; Hanna, Pezzelle, and Belinkov 2024),
+Tafjord, and Richardson 2020). Compared with real-world                      some works discover the circuits - subgraph of the model’s
+benchmarks, synthetic benchmarks offer precise control                       computation graph consisting of attention heads and MLPs
+over the data creation process, helping to understand the                    - responsible for solving the tasks. These works deepen our
+   * These authors contributed equally.                                      understanding of the general working mechanism of LLMs.
+   †
+     Contribution during internship at ColorfulClouds Tech.                  For example, the induction head mechanism found by study-
+   ‡
+     Corresponding author                                                    ing AR tasks underpins the in-context learning capability of
+Copyright © 2025, Association for the Advancement of Artificial              Transformer LLMs (Olsson et al. 2022). And the IOI cir-
+Intelligence (www.aaai.org). All rights reserved.                            cuit is also generalizable to other tasks (Merullo, Eickhoff,
+
+
+                                                                     19703
+and Pavlick 2024). While the tasks used in these works are                loop1 , which we call a relational loop. This is not a coin-
+suitable for MI study, they are usually too simple for main-              cidence because, from first principles, the existence of the
+stream LLMs (e.g., a model as small as GPT-2-117M can                     loop ensures predictability.
+do AR and IOI tasks perfectly) to reveal any deficiency of                   There are two semantic relations in AR. One (denoted as
+LLMs in CRR. They also lack variety; most current MI re-                  rlookup , C→C in Figure 1) is used for looking up the correct
+search is done on a single task without any systematic study.             K-V pair in context, the other (rretrieve , 4→4) is for retriev-
+   In summary, the lack of a CRR benchmark with both ap-                  ing the value V and predict answer A. In AR, both rlookup
+propriate difficulty and sufficient variety in existing work              and rretrieve are same relation. To generalize AR and KR to
+hinders systematic MI studies on the CRR capabilities of                  GAR, we just replace nr of these two same semantic rela-
+LLMs. In this paper, we make the following contributions:                 tions (black arrows) in AR with other semantic relations (red
+                                                                          arrows) like those in KR (e.g. kindOf), where 0 ≤ nr ≤ 2,
+ • We propose a new synthetic benchmark called General-                   e.g. “John has an apple. Mary has a dog ... So Mary has
+   ized Associative Recall (GAR) by integrating and gener-                a kind of → animal” (nr = 1. rretrieve is replaced). The
+   alizing the essence of several tasks in MI, e.g. associa-              number of non-same semantic relations nr is a key factor
+   tive recall, knowledge recall, indirect object identifica-             for task difficulty in GAR (see Figure 2 (b)). The relational
+   tion (IOI), in a unified framework. GAR consists of a set              loops remain. We argue that they are the motif of CRR. Be-
+   of automatically generated tasks with varying forms (e.g.              sides guiding task design, they are also helpful for under-
+   affirmative/negative, generation/classification) and diffi-            standing the mechanism, as will be shown in Figure 3.
+   culties. It is challenging enough to stress the CRR capa-
+   bility of mainstream LLMs, meanwhile simple enough
+   for systematic MI study.
+                                                                          Workflow for Task and Example Generation
+ • We evaluate existing LLMs, e.g. open source Llama-2/3                  A task of GAR and a basic form example from it with nKV
+   7B-70B, close source GPT 3.5/4, on GAR to show that                    K-V pairs are generated in three steps:
+   it is challenging for these LLMs despite appearing sim-                 • Step 1: Select two relational schemas from a predefined
+   ple. Scaling helps but the compositionality gap increases,                set of relational schemas (i.e. sets enriched with some re-
+   revealing fundamental deficiency of these LLMs in CRR.                    lations between elements), and for each schema select a
+ • To understand how LLMs solve GAR tasks, we use at-                        relation to be used in the next step. This work uses seven
+   tribution patching to discover the core circuits reused by                relational schemas divided into two types (Table 1): com-
+   Vicuna-33B across different tasks, and a set of vital atten-              monsense and factual, ensuring the variety of the tasks;
+   tion heads. Intervention experiments show that the cor-                 • Step 2: Sample Q, K from the domain and codomain
+   rect functioning of these heads significantly impacts task                of rlookup and similarly sample V , A from rretrieve
+   performance. Especially, we identify two classes of heads                 to make the relational loop. Also sample nKV −1 ele-
+   whose activations represent the abstract notion of true                   ments from the complement set of domain(rlookup ) and
+   and false in GAR tasks respectively. Experiments show                     domain(rretrieve ) respectively to form nKV −1 distract-
+   that they play fundamental roles in CRR across various                    ing K ′ -V ′ pairs. Then shuffle the nKV K-V pairs (not
+   models and tasks. To our knowledge, it is the first time                  shown in the Figure 1).
+   that such heads are identified and studied in real LLMs.                • Step 3: Convert the data structures obtained in Step 2
+                                                                             into natural language statements by filling templates.
+  Generalized Associative Recall Benchmark                                   Besides the basic form, we apply two semantic variations
+Basic Idea: From AR and KR to GAR                                         and two syntactic variations to increase task variety.
+                                                                          Semantic variation negate is closely related to IOI (Wang
+Two well studied synthetic tasks in MI are AR and KR,                     et al. 2023), another well studied task in MI. An exam-
+which inspire GAR. In AR, given a sequence of key-value                   ple is “When John and Mary went to store, Mary gave a
+(K-V ) pairs as context and one of the keys as query Q, the               drink to → John‘”. Drawing the relation edges (Figure 1
+model must recall the value associated with the specified key             bottom left), we observe that the essence of IOI is set com-
+as answer A, e.g. “H 1 C 4 M 7 ... C → 4”.                                plements (essentially also the logical semantics of negation),
+   Compared with AR that requires the model to recall the                 e.g. {“John”, “Mary”} − {“Mary”} = {“John”} (assuming
+information in context, KR requires the model to retrieve the             the set {“John”, “Mary”} is the universe. ¬same is used to
+factual knowledge stored in its parameters. Given a subject               denote the set complement semantic relation, which means
+Q and a relation, the model must predict the corresponding                ‘not same’/‘except’). We incorporate this into GAR to turn
+attribute A, e.g. “A dog is a kind of → animal”.                          an affirmative statement to its negative form by adding a
+   To view these two tasks from a unified perspective, we                 ¬rel semantic relation (dotted blue arrow) to the relational
+connect elements K, V , Q, A in them with edges rep-                      loop, e.g. “John has an apple. Mary has a dog ... So Mary
+resenting two types of relations, as shown in Figure 1                    doesn’t have a kind of → fruit”. The introduction of negation
+(left): long-range semantic relations (solid arrows), e.g.                significantly increases task difficulty.
+same, kindOf; local syntactic relations (dashed lines), e.g.
+subject-object, adjacent positions. We observe that for both                  1
+                                                                                Interleaved long-range and local relations are also characteris-
+tasks the two types of relation edges interleave and form a               tics in other benchmarks for reasoning, e.g. Zhang et al. (2022)
+
+
+                                                                  19704
+                             Figure 1: Overall framework of Generalized Associative Recall (GAR).
+
+ Type            Relational schema         A (codomain)         R0 (∈)         B (domain)                         Ri
+ Commonsense GendersOfPersons              boy, girl            isA            John, David, Mary, Ann, ...        same, sameGender
+             KindsOfThings                 fruit, animal, ...   kindOf         apple, banana, dog, cat, ...       same, sameKind
+             UsagesOfThings                drive, write, ...    usedFor        car, truck, pen, chalk, ...        same, sameUsage
+             Adjectives                                                        happy, glad, fast, poor, ...       synonym, antonym
+ Factual         OccupationOfPersons∗ Actor, author, ... worksAsA     Tom Hanks, Stephen King, ...        same, sameOccupation
+                 CountriesOfCities     China, France, ... inCountryOf Beijing, Shanghai, Paris, Lyon, ... same, sameCountry
+                 CountriesOfLandmarks∗ China, France, ... inCountryOf Forbidden City, Louvre Museum, ... same, sameCountry
+
+                                               R       {Ri }
+                                          0
+Table 1: Relational schemas with form A ←−− B ⟳ , where ← denotes a one-to-many relation. Relations used in GAR tasks
+                                  ∗
+are bolded. Schemas marked with are from Hernandez et al. (2024). The others are manually constructed by the authors.
+
+Semantic variation g2c converts the generation task to a                    of 384 tasks in GAR. They have varied forms and control-
+classification one. Instead of predicting the last missing A,               lable difficulty levels, while still require some shared basic
+the model must judge the truthfulness of the complete state-                capabilities of CRR, enabling systematic MI study.
+ment and predict Yes/No for the affirmative/negative form.
+Examples are given in Figure 1 (green text). The generation                              Evaluating LLMs on GAR
+task and its corresponding classification task share the same               To evaluate if existing LLMs can solve GAR tasks, we test
+underlying data and relational loop. The former is similar                  10 models (Figure 2 (a)). The GAR dataset consists of 192
+to the LAMBADA benchmark (Paperno et al. 2016), while                       generation tasks and 192 classification tasks and a total of
+the latter is similar to NLI tasks, e.g. Bowman et al. (2015),              4608 examples, with 8/16 examples per generation/classi-
+allowing us to study the difference and connection between                  fication task. To obtain better performance, all examples
+the mechanisms underlying these two forms of tasks.                         are formatted as in-context one-shot learning. Figure 2 (a)
+Syntactic variations swapQA and swapKV means swap-                          shows the average accuracy and predicted probability of the
+ping the order of Q and A or of K and V . Examples are                      correct answers for both generation and classification tasks.
+shown in Figure 1 (right). These variations change the lo-                  It is evident that generation are harder than classification,
+cal syntactic relation, e.g. from subject-object/prev position              and accuracy correlates positively with answer probability,
+to object-subject/next position. We use these syntactic vari-               both increasing with model size. Compared with several ex-
+ations to investigate if perturbing syntactic relations like this           isting multi-hop reasoning benchmarks (Dziri et al. 2024;
+has any impact on model performance.                                        Zhang et al. 2022; Sanford, Hsu, and Telgarsky 2024), GAR
+                                                                            is two-hop. Though looking simple, due to the introduction
+Tasks The two relational schemas with selected semantic                     of non-same semantic relations and variations, GAR is still
+relations rlookup and rretrieve , number of K-V pairs nKV                   challenging for existing LLMs, even for GPT-4 with an av-
+and the applied semantic and syntactic variations jointly de-               erage accuracy of only 71.5%, far below perfect level.
+fine a task. We use the following format for task identifiers:
+   rlookup , rretrieve ×nKV [semantic var.](syntactic var.)                 Task difficulty and compositionality gap GAR task dif-
+   e.g. GendersOfPersons/same,KindsOfThings/kindOf×3                        ficulty can be adjusted by modifying the number of non-
+[negate](swapKV), where same and kindOf can be abbre-                       same (other) semantic relations nr and applying the negate
+viated as = and ∈. In this work, nKV defaults to 3. Table 2                 semantic variation. Generation task accuracies with varying
+shows some tasks with examples. The combination of these                    difficulty are shown for GPT-4 and Vicuna-33B in Figure 2
+different relational schemas and variations results in a total              (b). The accuracies on simple KR tasks with other seman-
+
+
+                                                                    19705
+                                                         Semantic Syntactic
+ Relational Schemas / Relations                      nKV Variation Variation Example
+
+ KindsOfThings/∈                                     0                                 Papaya is a kind of fruit.
+                                                                                       Madrid attracts Michael. Bangkok attracts John.
+ GendersOfPersons/=, CountriesOfCities/∈             2                          swapKV So John wants to go to a city of Thailand
+                                                                                       The biro is Frida Kahlo’s. The telephone is Meryl Streep’s.
+ OccupationOfPersons/∈, UsagesOfThings/∈ 2                  negate              swapKV The artist does not have a thing used for communicating
+                                                                                       Sarah is slow. Donna is rational. Steven is selfless.
+ GendersOfPersons/=, Adjectives/∼                    3      g2c                        Can we infer that Steven is altruistic? Answer: Yes
+                                                                                       Tom has car. Lisa has piano. John has sweater.
+ GendersOfPersons/=, KindsOfThings/=                 3      g2c                 swapQA The one who has car is Lisa? Answer: No
+
+                                                    Table 2: Some GAR Tasks with examples.
+
+          1.0                                                   1.0                                          1.0                               1.0
+                   Gen. Acc         Gen. Ans Prob
+          0.8      Cls. Acc         Cls. Ans Prob               0.8                                          0.8                               0.8
+                                                                                                                                    43%                                 12%
+                                                                                                                            50%                                        16%
+
+   Accuracy
+          0.6                                                   0.6                                          0.6    44%                        0.6           17%
+                                                                                                                   43%
+                                                                                                                                                      13%
+          0.4                                                   0.4         GPT-4 Affirm.                    0.4                               0.4
+                                                                            GPT-4 Neg.
+                                                                                                                           sub-tasks                          highest Acc
+          0.2                                                   0.2         Vicuna-33B Affirm.               0.2                               0.2
+                                                                            Vicuna-33B Neg.                                other,other                        lowest Acc
+          0.0                                                   0.0                                          0.0                               0.0
+                     a-                                         KR        e                                                         PT                                 PT
+              Ll  Vi 2-7
+                    cu
+                 am a-
+                    a- n   7B B
+                                                                      e,
+                                                                                   he r    m
+                                                                                             e    ther       7B      3B   3- 70       -4
+                                                                                                                                               7B       3B   3- 70       -4
+                                                                         sa
+               Ll 2-1                                                                                  un           -3                   un            -3
+                  am 3
+               Vi -3-
+                  cu
+               Vi a-1
+                     a
+                     n     8B B                             e
+                                                            pl              m
+                                                                                 ot
+                                                                                e,
+                                                                                          sa     ,o      a-    un               B   G      a-    un                B   G
+      am
+                  cu
+                    Gna B
+                        -3 3
+                           3B                              m                          her,     he                 a      a-                         a       a-
+                      PT
+                      Y   -3 .5                            si    sa       sa                      r   Vi c   Vi       am                Vi c   Vi        am
+                                                                             m
+              Ll
+    Ll           am i-3
+                    a- 3-
+                       G
+                           4B
+                          70
+                         PT   B                                    m                 ot      ot                 c    Ll                           c     Ll
+                            -4
+                (a) Performance of different LLMs on GAR        (b) Acc of GPT-4 and Vicuna-33B on                 (c) Compositionality              (d) Syntactic Variation
+                                                                generation tasks of varying difficulty              Gap vs. Model Size                 Gap vs. Model Size
+
+
+                                              Figure 2: Performance of existing LLMs on GAR.
+
+tic relations (see 1st example in Table 2) are also shown for                             tion step, we choose among query, key or value attribution
+comparison. Task difficulty increases with nr , and this trend                            manually, roughly following the same logic as Wang et al.
+is consistent across models of different sizes. By combin-                                (2023). Currently, we do not use any automatic circuit dis-
+ing nr = 2 (other, other) and negate (3rd example in Ta-                                  covery methods because it is hard to make existing methods
+ble 2), the accuracies of the models drop below 40%, even                                 (Conmy et al. 2023; Hanna, Pezzelle, and Belinkov 2024)
+for GPT-4. Figure 2 (c) shows the compositionality gaps                                   work with our model size and circuit complexity. We leave
+for the above 4 models on generation tasks. We use sim-                                   it for future work. We choose the Vicuna-33B model because
+ple KR with other semantic relations and nr =0 tasks with                                 its performance on GAR tasks is good enough for meaning-
+two same semantic relations (same, same), both affirmative                                ful MI study while its size guarantees affordable attribution
+and negative, as sub-problems since they contain enough ba-                               cost. We choose 8 tasks that are representative and that can
+sic knowledge and skill which can be composed to solve                                    be solved by Vicuna-33B with high accuracy to ease attri-
+the hardest nr =2 tasks (other, other). The compositionality                              bution. Note that Vicuna-33B is larger than most models
+gap is computed as the ratio of the average accuracy of sub-                              studied in MI literature with 60 layers and 52 heads. The
+problems to that of nr =2 tasks. The Llama series of models                               complete circuits for these tasks are quite complex. We only
+(including Vicuna) show an increasing compositionality gap                                show the main circuits in Figure 3, omitting some minor
+as the model scales, revealing some fundamental deficiency                                branches for clarity.
+of these LLMs in CRR. In contrast, syntactic variations have
+much less impact on performance (Figure 2 (d)), indicating                                Circuits in Classification Tasks
+that the models are less sensitive to these perturbations.
+                                                                                          As shown in Figure 3 (a), the first identified contribution
+                                                                                          to Yes/No logits comes from output of an MLP at layer 36,
+       Discovering and Analyzing the Circuits                                             whose input is obtained from the hidden state of token A at
+To understand the general mechanism by which LLMs solve                                   layer 15 through an MLP and a A→E head. A further step
+GAR tasks, we do systematic MI study to extract reusable                                  of attribution finds a class of very important heads, namely
+core circuits of Vicuna-33B by comparing individual circuits                              higher-order relating (Rel.2 ) heads, which includes two True
+discovered for solving some tasks. We use step-wise patch-                                heads 14.18, 14.46 and two False heads 15.51, 14.0, respon-
+ing similar to Wang et al. (2023), tracing from model out-                                sible for writing a True/False signal into the residual stream
+puts back to inputs, but replace path patching with integrated                            at A according to the relation between Q and A.
+gradients-based attribution patching (Hanna, Pezzelle, and                                   Query and key attributions of the True and False higher-
+Belinkov 2024) for much faster speed. We use KL diver-                                    order relating heads are demonstrated in Figure 3 (b) and
+gence as the metric to compute gradient. At each attribu-                                 3 (c) separately. For True heads, their query A gathers the
+
+
+                                                                                19706
+                                     Figure 3: Circuits of Vicuna-33B for solving GAR tasks
+
+information of Q by local heads, and of K-V pair by com-                  another class of higher-order Induction (Ind.2 ) heads, which
+position of the relating and local heads, while its key Q gath-           transmit in-context signals from answer Aˆ in the previous
+ers the information of K and V by the relating and induc-                 one-shot demonstration to the current token, promoting the
+tion heads respectively. Therefore, the information of query              activation of the Loc.2 heads (Q→E) by the higher-order
+side K-V pair and the key side K-V pair can be compared                   True heads (Qˆ→Aˆ) activated on the previous demonstra-
+and matched to affirm that the statement is true. False heads             tion (path 2⃝), which are exactly the same class of heads we
+(Figure 3 (c)) share similar circuit as True heads except that            find in the classification circuits (Figure 3 (b)). Similarly, the
+1) the relating heads move the distractive K ′ -V ′ to A; 2)              relating head (V ˆ→Aˆ) activated on the demonstration pro-
+the False heads are activated at A by comparison of query-                motes the activation of the predicting heads V →E (path 1    ⃝),
+wise K ′ -V ′ and key-wise K-V pairs, which don’t match. In               through the same set of Ind.2 heads. So the higher-order in-
+both affirmative and negative circuits, the local Q→A heads               duction heads play a fundamental role in bridging different
+contribute to the formation of Q→A attention pattern of the               classes of attention heads across context.
+higher-order relating heads.                                                 The predicting heads identified in the negative task are
+                                                                          different from those in the affirmative task because rretrieve
+Circuits in Generation Tasks                                              changes from KindsOfThings to same. With similar
+Circuits in the affirmative and negative generation tasks are             attribution we can find different pre-predicting, higher-
+depicted in Figure 3 (d) and (e) separately. For the affirma-             order local and higher-order relating heads consecutively.
+tive one, we first identify two classes of heads, predicting              Value attribution of the higher-order local heads shows that
+and pre-predicting heads. The former is responsible for cor-              a relating head (K→Q) promotes negative-relating heads
+rectly attending to V (“car”) and retrieving its kindOf at-               (K ′ →Q) which transmit the information of K ′ to Q then
+tribute (“vehicle”), and its query attribution reveals that the           to E, helping the (pre-)predicting heads attend from E to
+formation of its attention pattern relies on the pre-predicting           V ′ , which also has the information of K ′ . An R→E head
+heads. Further query attribution of these (pre-)predicting                attending to “not” also has some contribution to the atten-
+heads finds the higher-order local (Loc.2 , Q→E) heads,                   tion formation of the predicting heads. The key difference
+whose value attribution in turn finds the induction heads                 between the negative and affirmative circuits is that different
+(V →Q), through which the information of V flows through                  higher-order relating heads activated on the demonstration
+Q into End, helping form the attention V →E of the pre-                   activate different higher-order local heads, though via the
+dicting heads. Query attribution of the Loc.2 heads discovers             same higher-order induction heads.
+
+
+                                                                  19707
+Core and Sketch Circuits                                                           V →E). Unlike strong intervention which directly im-
+Putting it all together, we can extract the core circuits reused                   poses an attention pattern (essentially the same as the in-
+across various tasks.                                                              tervention method used in Merullo, Eickhoff, and Pavlick
+                                                                                   (2024)), weak intervention utilizes the attention weights
+ • Truthfulness Sub-Circuit: The circuit of higher-order                           already formed by the model itself, though from other
+   relating heads (Figure 3 (b) and (c)) shared between clas-                      heads, thus avoiding the introduction of additional infor-
+   sification and generation tasks detects the higher-order                        mation from outside the model.
+   relation between A and Q to judge truthfulness.
+ • ICL Sub-Circuit: Across various generation tasks, dif-
+   ferent (higher-order) relating heads activate different                      Validating Non-True/False Heads in Vicuna-33B
+   higher-order local heads or predicting heads through the
+   same higher-order induction heads, which plays a funda-                      We apply weak and strong interventions to several classes of
+   mental role in in-context learning.                                          attention heads in Figure 3 to validate their importance. As
+                                                                                a motivation for intervention, we first inspect their average
+ • Overall Circuit: The truthfulness sub-circuit can be                         attention weights in generation tasks that match the desired
+   combined either with downstream MLPs to complete                             attention pattern, e.g. the average weight of End attending
+   classification tasks (Figure 3 (a)), or with downstream at-                  to V for pattern V →E, which measures how well the heads
+   tention heads via the ICL sub-circuit to solve generation                    function as expected. As shown in Figure 4 (a), similar to
+   tasks (Figure 3 (d), (e)).                                                   the compositionality gap, the matched attention weights of
+   To understand these circuits from the relational loop per-                   some classes of heads also exhibit a clear gap between the
+spective, the first sketch in Figure 3 (legend) shows query-                    easiest same,same tasks and the hardest other,other tasks (re-
+wise (from A) and key-wise (from Q) attribution of the                          call discussion on task difficulty and compositionality gap
+higher-order relating heads in Figure 3 (b), where two links                    in Figure 2 (c) for definition of these tasks), partially ex-
+between Q and A appear: one is formed directly by the lo-                       plaining the performance drop on harder tasks. In contrast,
+cal heads; the other is formed indirectly by composition of                     higher-order induction heads are more robust, maintaining
+query-wise K→V →A and key-wise K→Q. The two links                               high matched attention weights across tasks.
+together form a relational loop, which are detected by the                         For generation tasks, we intervene on the class of heads
+higher-order True heads. The second sketch shows a high-                        with positive matched attention weight gaps in Figure 4
+level sketch of the circuit in Figure 3 (d). The critical at-                   (a). We jointly intervene on higher-order local heads with
+tention pattern V →E of the predicting heads is formed by                       induction heads (Ind.+Loc.2 , for affirmative tasks) or with
+composition of V →Q and Q→E, which completes the re-                            negative-relating heads (NRel.+Loc.2 , for negative tasks),
+lational loop required for solving the generation task.                         because they V-compose to form critical paths in the circuits
+                                                                                (Figure 3 (d,e)). For classification tasks, we jointly intervene
+              Validating Attention Heads                                        on all relating heads and induction heads, because they work
+In this section, we use intervention and other methods to                       in parallel to form the attention of True/False heads (Figure 3
+validate the vital roles of several types of heads identified in                (b,c)). We don’t intervene on 1) predicting heads, which vary
+the previous section. We first explain a few concepts:                          between different rretrieve for generation tasks and are thus
+                                                                                not universal, and 2) relating heads in affirmative generation
+ • Head Activation: If at any attending position (a row in                      tasks and higher-order induction heads, which exhibit nega-
+   the attention weight matrix) a head assigns the largest                      tive matched attention weight gaps.
+   attention weight to any token other than the first token
+   <s>, this head is considered to be activated.2 The largest                      Figure 4 (b) shows that strong intervention jointly on all
+   such weight across the whole attention matrix is defined                     heads increase the accuracy of Vicuna-33B significantly,
+   as its activation value.                                                     approaching (for affirmative generation and classification
+                                                                                tasks) or even surpassing (for negative generation tasks) the
+ • True/False Heads: Higher-order relating heads which                          performance of Llama-3-70B. For generation tasks, inter-
+   activate on true/false statements for truthfulness judge-                    vention on pre-predicting heads is most effective, which is
+   ment (Figure 3 (b) / (c)).                                                   intuitive because they are closest to and thus have the most
+ • Strong Intervention: This intervention forces the atten-                     direct impact on the final output of the model. Interven-
+   tion weights of a head to fully comply with the expected                     ing on the other heads (Ind.+Loc.2 in affirmative tasks and
+   attention pattern, e.g. for attention pattern V →E, the at-                  NRel+Loc.2 in negative tasks) has smaller effect, perhaps
+   tention weight of token End attending to token V is set                      because they are too far away from the final output to have
+   to 1 while the weights to the other tokens are set to 0.                     strong impact. To conclude, the effectiveness of strong inter-
+ • Weak Intervention: This intervention replaces the at-                        vention shows that the correct functioning of these heads, es-
+   tention weights of a head at the attending position (e.g.                    pecially correct formation of the required attention patterns,
+   End) with weights found from all other heads in the                          significantly impact task performance. Weak intervention is
+   model that complies best with the attention pattern (e.g.                    also effective, albeit weaker, indicating that the model has
+                                                                                the intrinsic ability to attend correctly, but with other heads
+   2                                                                            that cannot compose the functional circuits, showing poten-
+     We observed that for Llama/Vicuna models the first token
+plays the role of “sink token” for null attention (Xiao et al. 2024).           tial for improvement.
+
+
+                                                                        19708
+                              same,same tasks                                                  0.8                                                               Llama-3-70B       Weak Interv.
+             0.6              other,other tasks                                                                                                                  Original          Strong Interv.
+
+
+Avg Matched
+                              candidate for interv.
+                                                                           -54%
+
+                                                                                        Accuracy
+             0.4              not candidate for interv.                                        0.6
+
+Attn Weights
+             0.2
+                             52%        38%                            -80%
+                   84%                             49%       75%                               0.4
+
+             0.0
+                                                                                                                            PPred. Ind.+Loc.2       all              PPred. NRel.+Loc.2   all               all    all
+                Ind.(A)   Loc.2(A)   NRel.(N)   Loc.2(N)   PPred.    Rel.(A)    Ind.2                                        V->E    V->Q->E                          V->E   K'->Q->E
+                  V->Q                                       V->E              A^->E
+                             Q->E      K'->Q       Q->E             A^->V^                                            Affirmative generation tasks              Negative generation tasks           Classification tasks
+
+           (a) Matched attn weight gaps                                                                               (b) Accuracies of Vicuna-33B by intervening different classes of vital heads
+
+ Figure 4: Analysis and intervention results of some vital heads in Vicuna-33B. In Figure (a), (A) denotes affirmative generation
+ tasks and (N) denotes negative generation tasks.
+
+
+                Orig        Interv
+
+
+
+
+                                                                                                   Avg Act. T Heads
+       1.0
+                                                                                                                 1.0
+                                                                                                                              T stmt              The Efficacy of True/False Heads in Other Datasets
+                                                                                                                              F stmt
+
+Accuracy
+                                                                                                                 0.8                              To investigate if the True/False heads also play an important
+       0.5                                                                                                       0.6                              role on other datasets besides GAR, we test them on two
+                                                                                                                 0.4
+                                                                                                                 0.2
+                                                                                                                                                  datasets that require to judge if a statement is true (entail-
+       0.0                                                                                                       0.0                              ment) or false (contradiction): Stanford Natural Language
+               CoC KoT UoT CoC KoT UoT CoC KoT UoT                                                                      0.2 0.4 0.6 0.8
+                Vicuna-7B   Vicuna-13B  Vicuna-33B                                                                    Avg Act. F Heads            Inference (SNLI, Bowman et al. (2015) and Geometry of
+                (a) Acc. of Vicuna models by (b) Act. of True/False heads                                                                         Truth (GoT, Marks and Tegmark (2023). We forward the ex-
+                interveningTrue/False heads distinguish True/False stmt.                                                                          amples through Vicuna-33B and extract the activation values
+                                                                                                                                                  of four True/False heads (14.18, 14.46, 15.51, 14.0) as fea-
+ Figure 5: Analysis and intervention of True/False heads.                                                                                         tures to train simple MLP classifiers to predict true or false.
+ CoC = CountriesOfCities, KoT = KindsOfThings, UoT =                                                                                                 Table 3 shows the results along with one-shot accuracies
+ UsagesOfThings                                                                                                                                   of several other different-sized models on these two datasets
+                                                                                                                                                  for comparison. The MLP classifiers’ accuracies approach
+                                                                                                                                                  (SNLI) or surpass (GoT) Vicuna-7B, indicating that the ac-
+ Validating True/False Heads across Models                                                                                                        tivations of these heads encode information for truthfulness
+ After validating the upstream heads of the True/False heads                                                                                      classification. The activation patterns of these True/False
+ in Vicuna-33B (Figure 4 (b) rightmost), we further val-                                                                                          heads identified in GAR are robust across other datasets.
+ idate the effectiveness and universality of the True/False
+ heads themselves by intervention on different-sized vicuna                                                                                         Model                          SNLI Acc(%) GoT Acc(%)
+ models. We conduct experiments on three representative                                                                                             Random Guess              50                       50
+ tasks: GendersOfPersons/=, rretrieve / ∈, where rretrieve ∈                                                                                        GPT-2-Medium (345M)       51.43                    51.04
+ {CountriesOfCities (CoC), KindsOfThings (KoT), Usage-                                                                                              GPT-2-XL (1.5B)           53.90                    50.35
+ sOfThings (UoT)}. Using the attribution method described                                                                                           True/False Head Act + MLP 87.07±0.2                85.63±1.8
+                                                                                                                                                    Vicuna-7B                 91.00                    84.73
+ previously, we identify the True/False heads in different-                                                                                         Vicuna-33B                96.80                    89.69
+ sized Vicuna models for intervention. Specifically, when the
+ answer is Yes/No, we apply intervention on the True/False                                                                                        Table 3: Accuracy of different models and MLP classifiers
+ heads while knocking out the False/True heads. As shown                                                                                          with activation values of True/False heads of Vicuna-33B as
+ in Figure 5 (a), after intervention, the average accuracy of                                                                                     features on SNLI and on 4 subsets of GoT.
+ Vicuna-7B/13B/33B is increased by 17%/14%/6%, indicat-
+ ing that the True/False heads are universal and exhibit con-
+ sistent effects across different model sizes.
+    To understand why Vicuna-33B already has high classifi-                                                                                                               Conclusion
+ cation accuracy before intervention, we randomly sample 96                                                                                       We propose the Generalized Associative Recall (GAR)
+ examples from the classification tasks and plot each example                                                                                     benchmark that is challenging enough to stress the CRR ca-
+ as a dot using the average activation values of the True heads                                                                                   pability of mainstream LLMs, meanwhile simple enough for
+ and False heads as coordinates in Figure 5 (b). It can be seen                                                                                   systematic MI study. We evaluate existing LLMs on GAR to
+ that the activation values can effectively distinguish true and                                                                                  show that the compositionality gap increases despite scaling,
+ false statements, indicating that these True/False heads defi-                                                                                   revealing fundamental deficiency of these LLMs in CRR.
+ nitely represent the abstract notion of true and false in these                                                                                  We discover the core circuits reused by Vicuna-33B across
+ tasks. Combining Figure 5 (a) and (b), it is evident that the                                                                                    different GAR tasks and a set of attention heads important
+ activation status of True/False heads encodes the truthful-                                                                                      for task performance, especially the True/False heads, which
+ ness of statements and that the models indeed use them to                                                                                        can represent true/false statements in GAR tasks and play
+ judge truthfulness in GAR tasks.                                                                                                                 fundamental roles in CRR across various models and tasks.
+
+
+                                                                                                                                          19709
+                  Acknowledgements                                        Hanna, M.; Pezzelle, S.; and Belinkov, Y. 2024. Have Faith
+                                                                          in Faithfulness: Going Beyond Circuit Overlap When Find-
+The work was partially supported by National Natural Sci-
+                                                                          ing Model Mechanisms. In Conference on Language Mod-
+ence Foundation of China (NSFC) (Grant No. 62425105,
+                                                                          eling (COLM).
+62350001, 62206019), Fundamental Research Funds for the
+Central Universities (Grant No. 530424001) and Taiyuan                    Hernandez, E.; Sharma, A. S.; Haklay, T.; Meng, K.; Wat-
+City “Double hundred Research action” 2024TYJB0127.                       tenberg, M.; Andreas, J.; Belinkov, Y.; and Bau, D. 2024.
+                                                                          Linearity of relation decoding in transformer language mod-
+                                                                          els. In Proceedings of the Twelfth International Conference
+                        References                                        on Learning Representations (ICLR).
+Allen-Zhu, Z.; and Li, Y. 2023. Physics of language                       Lake, B.; and Baroni, M. 2018. Generalization without
+models: Part 3.2, knowledge manipulation. arXiv preprint                  systematicity: On the compositional skills of sequence-to-
+arXiv:2309.14402.                                                         sequence recurrent networks. In Proceedings of Interna-
+Ba, J.; Hinton, G. E.; Mnih, V.; Leibo, J. Z.; and Ionescu,               tional Conference on Machine Learning (ICML), 2873–
+C. 2016. Using fast weights to attend to the recent past.                 2882. PMLR.
+In Advances in Neural Information Processing Systems                      Marks, S.; and Tegmark, M. 2023. The geometry of
+(NeurIPS), volume 29.                                                     truth: Emergent linear structure in large language model
+Bereska, L.; and Gavves, E. 2024. Mechanistic Interpretabil-              representations of true/false datasets.       arXiv preprint
+ity for AI Safety–A Review. In Transactions on Machine                    arXiv:2310.06824.
+Learning Research (TMLR).                                                 Meng, K.; Bau, D.; Andonian, A.; and Belinkov, Y.
+Bowman, S. R.; Angeli, G.; Potts, C.; and Manning, C. D.                  2022. Locating and editing factual associations in GPT.
+2015. A large annotated corpus for learning natural language              In Advances in Neural Information Processing Systems
+inference. In Proceedings of the 2015 Conference on Empir-                (NeurIPS), volume 35, 17359–17372.
+ical Methods in Natural Language Processing (EMNLP).                      Merullo, J.; Eickhoff, C.; and Pavlick, E. 2024. Circuit com-
+Brinkmann, J.; Sheshadri, A.; Levoso, V.; Swoboda, P.; and                ponent reuse across tasks in transformer language models.
+Bartelt, C. 2024. A mechanistic analysis of a transformer                 In The Twelfth International Conference on Learning Rep-
+trained on a symbolic multi-step reasoning task. In Findings              resentations (ICLR).
+of the Association for Computational Linguistics ACL 2024.                Olsson, C.; Elhage, N.; Nanda, N.; Joseph, N.; DasSarma,
+Clark, P.; Tafjord, O.; and Richardson, K. 2020. Transform-               N.; Henighan, T.; Mann, B.; Askell, A.; Bai, Y.; Chen, A.;
+ers as soft reasoners over language. In Proceedings of the                et al. 2022. In-context learning and induction heads. arXiv
+Twenty-Ninth International Joint Conference on Artificial                 preprint arXiv:2209.11895.
+Intelligence (IJCAI-20).                                                  Paperno, D.; Kruszewski, G.; Lazaridou, A.; Pham, Q. N.;
+Conmy, A.; Mavor-Parker, A.; Lynch, A.; Heimersheim,                      Bernardi, R.; Pezzelle, S.; Baroni, M.; Boleda, G.; and
+S.; and Garriga-Alonso, A. 2023. Towards automated cir-                   Fernández, R. 2016. The LAMBADA dataset: Word pre-
+cuit discovery for mechanistic interpretability. In Advances              diction requiring a broad discourse context. In Proceedings
+in Neural Information Processing Systems (NeurIPS), vol-                  of the 54th Annual Meeting of the Association for Computa-
+ume 36, 16318–16352.                                                      tional Linguistics (Volume 1: Long Papers).
+Dziri, N.; Lu, X.; Sclar, M.; Li, X. L.; Jiang, L.; Lin, B. Y.;           Press, O.; Zhang, M.; Min, S.; Schmidt, L.; Smith, N. A.;
+Welleck, S.; West, P.; Bhagavatula, C.; Le Bras, R.; et al.               and Lewis, M. 2023. Measuring and narrowing the com-
+2024. Faith and fate: Limits of transformers on composition-              positionality gap in language models. In Findings of the
+ality. In Advances in Neural Information Processing Systems               Association for Computational Linguistics: EMNLP 2023.
+(NeurIPS), volume 36.                                                     Sanford, C.; Hsu, D.; and Telgarsky, M. 2024. Transformers,
+Fu, D. Y.; Dao, T.; Saab, K. K.; Thomas, A. W.; Rudra, A.;                parallel computation, and logarithmic depth. arXiv preprint
+and Ré, C. 2023. Hungry hungry hippos: Towards language                  arXiv:2402.09268.
+modeling with state space models. In Proceedings of the                   Syed, A.; Rager, C.; and Conmy, A. 2023. Attribution patch-
+Eleventh International Conference on Learning Representa-                 ing outperforms automated circuit discovery. In Advances in
+tions (ICLR).                                                             Neural Information Processing Systems (NeurIPS).
+Geva, M.; Bastings, J.; Filippova, K.; and Globerson, A.                  Thomm, J.; Terzic, A.; Karunaratne, G.; Camposampiero,
+2023. Dissecting recall of factual associations in auto-                  G.; Schölkopf, B.; and Rahimi, A. 2024. Limits of Trans-
+regressive language models. In Conference on Empirical                    former Language Models on Algorithmic Learning. arXiv
+Methods in Natural Language Processing (EMNLP).                           preprint arXiv:2402.05785.
+Hanna, M.; Liu, O.; and Variengien, A. 2023. How does                     Wang, K.; Variengien, A.; Conmy, A.; Shlegeris, B.; and
+GPT-2 compute greater-than?: Interpreting mathematical                    Steinhardt, J. 2023. Interpretability in the wild: a circuit
+abilities in a pre-trained language model. In Advances                    for indirect object identification in gpt-2 small. In Proceed-
+in Neural Information Processing Systems (NeurIPS), vol-                  ings of the Eleventh International Conference on Learning
+ume 36.                                                                   Representations (ICLR).
+
+
+                                                                  19710
+Weston, J.; Bordes, A.; Chopra, S.; Rush, A. M.;
+Van Merriënboer, B.; Joulin, A.; and Mikolov, T. 2016. To-
+wards ai-complete question answering: A set of prerequisite
+toy tasks. In Proceedings of International Conference on
+Learning Representations (ICLR).
+Xiao, G.; Tian, Y.; Chen, B.; Han, S.; and Lewis, M. 2024.
+Efficient streaming language models with attention sinks. In
+The Twelfth International Conference on Learning Repre-
+sentations (ICLR).
+Yang, S.; Gribovskaya, E.; Kassner, N.; Geva, M.; and
+Riedel, S. 2024.        Do Large Language Models La-
+tently Perform Multi-Hop Reasoning?          arXiv preprint
+arXiv:2402.16837.
+Ye, T.; Li, Y.; and Allen-Zhu, Z. 2024. Physics of language
+models: Part 3.2, grade-school math and the hidden reason-
+ing process. arXiv preprint arXiv:2407.20311.
+Zhang, Y.; Backurs, A.; Bubeck, S.; Eldan, R.; Gunasekar,
+S.; and Wagner, T. 2022. Unveiling transformers with lego: a
+synthetic reasoning task. arXiv preprint arXiv:2206.04301.
+Zhao, J.; and Zhang, X. 2024. Exploring the limitations of
+large language models in compositional relation reasoning.
+In Conference on Language Modeling (COLM).
+
+
+
+
+                                                               19711
+

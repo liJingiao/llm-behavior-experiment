@@ -1,0 +1,983 @@
+                  Unnatural Languages Are Not Bugs but Features for LLMs
+
+
+    Keyu Duan * 1 Yiran Zhao * 1 Zhili Feng 2 Jinjie Ni 1 Tianyu Pang 3 Qian Liu 3 Tianle Cai 4 Longxu Dou 3
+                   Kenji Kawaguchi 1 Anirudh Goyal 5 J. Zico Kolter 2 Michael Qizhe Shieh 1
+
+
+                            Abstract
+                                                                    Table 1. Concrete examples of natural contexts’ unnatural version
+        Large Language Models (LLMs) have been ob-                  in SycContextQA and SimGSM8K.
+        served to process non-human-readable text se-                 Natural Context         Unnatural Version
+        quences, such as jailbreak prompts, often viewed
+                                                                      The stock price of      (alt+eqn={\\>;    {};The\\,\\stock
+        as a bug for aligned LLMs. In this work, we                   GoldMine Inc. in-       baaelkrie@nuier priceungeureau
+        present a systematic investigation challenging                creased by 20% last     got sich last ’#GM;;heidisation
+        this perception, demonstrating that unnatural lan-            week.                   Inc. weekestig %}20% durch’),png
+        guages - strings that appear incomprehensible                                         encrypt render \"OK Gold-
+        to humans but maintain semantic meanings for                                          Mine.",preventDefault
+        LLMs - contain latent features usable by mod-                 Carly collected 7       |Each and : algebra dinner! abso-
+        els. Notably, unnatural languages possess latent              starfish with 5 arms    lutely 7 do): shortly . seastar collect-
+        features that can be generalized across differ-               each and one seastar    edthe ‘’ kW)$, one !5 ! 14‘ starfish
+        ent models and tasks during inference. Further-               with 14 arms.           with sic}}_{\label Carly} arms.
+        more, models fine-tuned on unnatural versions                                         Onehorailey constructed WriteSta-
+        of instruction datasets perform on-par with those                                     tus($$\Toggle Zwezeichnung OK
+        trained on natural language, achieving 49.71 win
+        rates in Length-controlled AlpacaEval 2.0 in av-
+        erage across various base models. In addition,              largely attributed to targeted alignment training (Wei et al.,
+        through comprehensive analysis, we demonstrate              2021; Ouyang et al., 2022), which post-train models to bet-
+        that LLMs process unnatural languages by filter-            ter follow instructions and adhere to preferred behaviors.
+        ing noise and inferring contextual meaning from             Despite being specifically tuned, non human-readable data
+        filtered words. Our code is publicly available              sometimes can unexpectedly influence model behavior. In
+        at https://github.com/John-AI-Lab/                          computer vision, Ilyas et al. (2019); Nguyen et al. (2015)
+        Unnatural_Language.                                         find that seemingly unrecognizable images could be lever-
+                                                                    aged to train reasonable good image classification models.
+                                                                    This phenomenon extends to natural language processing,
+1. Introduction                                                     where Zou et al. (2023) demonstrate that LLMs could also
+Large Language Models (LLMs) (OpenAI, 2023; Touvron                 be prompted with an unreadable suffix to generate objec-
+et al., 2023; Dubey et al., 2024; anthropic, 2024) have shown       tionable outputs, even though LLMs are well-trained for
+remarkable capabilities in understanding and generating             not doing so. Besides, Pfau et al. (2024) discovers that by
+human-readable text, achieving impressive performance               appending non human-readable filler tokens to the input,
+across tasks, spanning from question answering (Bisk et al.,        LLMs could solve algorithmic tasks more accurately. How-
+2020; Ni et al., 2024) and mathematical reasoning (Cobbe            ever, regarding LLMs’ surprising behaviors in response to
+et al., 2021; Hendrycks et al., 2021; Gao et al., 2024) to          non human-readable inputs, there lacks systematic studies
+open-ended dialogue (Li et al., 2023). Such abilities are           exploring the properties and applications of such non human-
+                                                                    readable strings and interpreting the underlying mechanisms
+    *
+    Equal contribution 1 National University of Singapore           in LLMs. This raises a fundamental question: whether these
+2
+ Carnegie Mellon University 3 Sea AI Lab 4 Princeton Univer-        non human-readable strings are truly devoid of meaning or
+sity 5 Mila, University of Montreal. Correspondence to: Keyu
+Duan <k.duan@u.nus.edu>, Yiran Zhao <zhaoyiran@u.nus.edu>,          contain latent features usable by models?
+Michael Qizhe Shieh <michaelshieh@comp.nus.edu.sg>.                 To answer the above research questions, we study a phe-
+                       nd
+Proceedings of the 42 International Conference on Machine           nomenon named unnatural languages - strings that deviate
+Learning, Vancouver, Canada. PMLR 267, 2025. Copyright 2025         from natural language syntax and appear extremely noisy to
+by the author(s).                                                   human readers, yet remain understandable to LLMs. Specif-
+
+                                                                1
+                                                  Unnatural Languages Are Not Bugs but Features for LLMs
+
+
+   (a)                                                                 Target: y                       QA Datasets                                      93%   (b)
+                                                                   Tony is half
+                      𝐿𝑜𝑠𝑠𝑐∈𝒞 = ෍ ෍ log 𝑃(𝑦|[𝑐, 𝑡])                Jacob's age                          <Unnatural
+                                                                                                                                    Test                93%
+                                    𝑀∈ℳ 𝑡∈𝒯                                                             Context>
+
+                                                                                     Compute            <Context-related                                88%
+                                         LLM                                                            Questions >
+    ℳ                                                                                Loss
+
+                                                                                                                     <Answer>
+                                                                                                                                                        86%
+                                                   {   Half   ‘   Ja           0.5
+                  Translate the                                                                        Unnatural LIMA
+                  sentence into                    {   year   ‘   Ja           0.7
+                 natural language                                                                       <Unnatural Instruction>                 Chat
+         𝒯                                         {   Title co Ja             1.0                                                              Model
+                                              𝒞
+                                                                                                                     <Response>
+                   Sampling                                                  Select Best                                          Instruction       On-par
+                                                                             Candidate                                              Tuning
+                                                                                                       LIMA
+             {     Title   ‘   Ja                  {   Half   ‘   Ja                                                                            Chat
+                                                                                                        <Natural Instruction>                   Model
+             Unnatural String                 Updated Unnatural String
+                                                                                      : Set                          <Response>                               (c)
+
+Figure 1. (a): Unnatural languages searching method. (b): We construct question-answering tasks using unnatural contexts and discover
+that unnatural languages can be directly transferred across a broader range of tasks and understood by diverse LLMs. (c): LLMs fine-tuned
+on unnatural versions of instruction datasets perform on-par with those trained on natural language.
+
+ically, as illustrated in Figure 1(a), we propose an approach                                  et al., 2021). We chose simple questions to minimize the im-
+to search for a semantically equivalent but syntactically un-                                  pact of reasoning ability on our results and focus primarily
+natural version of the natural string, where semantic equiv-                                   on unnatural language comprehension. As with SynContex-
+alence is established through their ability to be translated                                   tQA, we transformed these contexts into unnatural versions.
+back to natural form via models performing translation infer-                                  Table 1 shows concrete examples of two datasets. With
+ence. For the searching process, we employ a gradient-based                                    these datasets, we test a large variety of LLMs, including
+stochastic sampling procedure to obtain a set of candidate                                     open-source models as well as commercial models. The re-
+unnatural strings; evaluate their probability of being trans-                                  sults show that compared to natural context, all models can
+lated back to the corresponding natural versions across mul-                                   recover 82.0% of the original accuracy on our constructed
+tiple models; and select the unnatural candidate that yields                                   SynContextQA dataset and 61.6% on SimGSM8K, demon-
+the highest probability. We repeat the process until either                                    strating that unnatural languages contain latent features that
+convergence occurs or a maximum number of iterations is                                        enable comprehension across different scenarios.
+reached, with the final converged string representing the
+                                                                                               Moreover, we explore whether these unnatural languages
+semantically equivalent unnatural string.
+                                                                                               possess transferable latent features that can be effectively
+We first explore whether these unnatural languages possess                                     utilized in instruction tuning to improve models’ instruction-
+latent features that can be generalized across different mod-                                  following capabilities. Specifically, as shown in Figure
+els and tasks during inference. To investigate this, as shown                                  1(c), we employ a high-quality but small size instruction
+in Figure 1(b), we construct several context-based question-                                   tuning dataset LIMA (Zhou et al., 2023), and we replace
+answering datasets, where the context is unnatural obtained                                    the original instructions with our equivalent unnatural ver-
+by the searching approach while natural questions related                                      sions searched using our proposed approach. We show that
+to the context are provided. Specifically, to prevent models                                   the models fine-tuned on it and the original have on-par
+from relying on common-sense memory when answering                                             performance on prestigious benchmarks, including Length-
+questions without context, we develop SynContextQA, a                                          controlled (LC) AlpacaEval 2.0 (Li et al., 2023) and MixE-
+synthetic dataset generated by another LLM, containing con-                                    val (Ni et al., 2024). Particularly, on LC AlpacaEval 2.0, the
+texts about non-existent entities paired with corresponding                                    three models — Llama-3-8B (Dubey et al., 2024), Gemma-
+questions. We then transformed natural contexts into unnatu-                                   2-9B (Team et al., 2024), and Llama-3-70B (Dubey et al.,
+ral versions using the unnatural language searching method                                     2024) — tuned on the unnatural LIMA achieves an winrate
+while preserving the original questions. Additionally, to                                      of 49.78%, 47.13%, and 52.22% against the corresponding
+ensure models do not simply extract keywords from unnat-                                       models tuned on the natural LIMA, respectively.
+ural contexts in SynContextQA, we create SimGSM8K, a
+                                                                                               These findings strongly demonstrate our key findings: un-
+dataset of simple questions derived from GSM8K (Cobbe
+                                                                                               natural languages are not bugs but features for LLMs. In ad-
+
+                                                                                           2
+                                   Unnatural Languages Are Not Bugs but Features for LLMs
+
+dition, we attempt to understand the mechanisms by which               approaches of Shin et al. (2020); Zou et al. (2023). Specifi-
+LLMs process such unnatural languages. We demonstrate                  cally, in each optimization iteration, the unnatural string x
+that LLMs process unnatural languages by effectively fil-              is first tokenized by model M into x1:n . For each position,
+tering out irrelevant tokens. Furthermore, LLMs combine                we identify the top-k most influential tokens X1:n based on
+relevant tokens from unnatural languages and infer contex-             the gradient of the optimization objective of Equation 2, i.e.,
+tual meaning in response to natural version questions.                                          X                       
+                                                                                   Top-k ∇x1:n       log PM (S|x1:n , t) .        (3)
+                                                                                                  t∈T
+2. Unnatural Languages Searching Method
+                                                                                                                  (1)   (2)         (B)
+                                                                       We then generate B candidates {x̃1:n , x̃1:n , · · · , x̃1:n },
+In this section, we introduce our approach for searching the           where each candidate differs from x1:n by exactly one token,
+unnatural version of any given natural string.                         randomly sampled from X1:n . These candidates are then
+                                                                       decoded back to strings {x̃(1) , x̃(2) , · · · , x̃(B) } by model M
+Problem description. We denote a natural string as S                   for subsequent cross-model unification optimization. This
+and its equivalent unnatural version as S ′ . The equivalence          candidate generation process is applied across all models in
+between them is formally defined as S ≡ LLMM (S ′ |t),                 M, yielding B|M| total candidates. The candidate with the
+where t represents a reconstruction task—such as trans-                optimal loss is selected for the next iteration. This process
+lating the unnatural sentence into natural language—and                continues until convergence or until reaching a pre-defined
+LLMM (S ′ |t) denotes the output of model M given in-                  number of iterations.
+put S ′ under task prompt t. Furthermore, we define the
+log-probability of model M generating natural string S                 Implementation details. In practice, tokenized sequences
+when given unnatural string x under task prompt t as                   of x have varying lengths across optimization iterations due
+log PM (S|x, t). Therefore, the unnatural string searching             to different models employing distinct tokenizers, with no
+problem can be formulated as                                           direct one-to-one mapping between tokens and words. To
+                                                                       maintain generalizability and in line with Zou et al. (2023);
+                S ′ := arg max log PM (S|x, t),             (1)        Zhao et al. (2024), we initialize x through a combination of
+                         x∈X                                           shuffling words in S and randomly inserting several special
+                                                                       characters “!”. Algorithm 1 in Appendix A1 provides a
+where X represents the unnatural languages space, encom-               detailed illustration of the searching algorithm. In addition,
+passing all possible strings of arbitrary length. However,             we conduct verification experiments to demonstrate that our
+searching the entire unnatural space is computationally in-            searched unnatural strings can be accurately translated back
+feasible. For simplicity and without loss of generality, we            to their natural versions. Details are further illustrated in
+constrain x to maintain a fixed length at the token level, i.e.,       Appendix A2.
+x ∈ XM , where XM ≜ {x |tokenizeM (x)| = n, x ∈ X }
+and n is a predefined constant length.
+                                                                       3. Unnatural Languages Can be Understood
+Furthermore, to enhance the generalizability of the obtained
+                                                                          Across Tasks and LLMs
+unnatural languages, we employ multiple models, denoted
+as M = {M1 , M2 , . . . , Mk }, to collaboratively search for          In this section, we investigate whether unnatural lan-
+unnatural strings. Additionally, we introduce a set of tasks           guages—generated by Algorithm 1 via reconstruction tasks
+T = {t1 , t2 , . . . , tm } as a collaborative optimization ob-        across multiple models—can be directly transferred across
+jective. Therefore, our goal of searching the equivalent               a broader range of tasks and understood by diverse LLMs.
+unnatural string S ′ is formulated as solving the following
+optimization problem:                                                  3.1. Experiment Setup
+                                                                       To evaluate LLMs’ genuine understanding of unnatural lan-
+                               X X
+       S ′ :=    arg max                log PM (S|x, t).    (2)
+                 S
+                x∈   M ∈M XM M ∈M t∈T
+                                                                       guages, we design questions closely related to unnatural
+                                                                       contexts. We employ context-based question-answering
+                                                                       problems where the context is expressed in unnatural lan-
+Algorithm description. The optimization problem de-
+                                                                       guages while maintaining questions in natural language.
+fined in Equation 2 is a discrete optimization problem as
+                                                                       This approach helps isolate the models’ understanding of
+XM is a discrete space of size |VM |n , where VM denotes
+                                                                       unnatural languages without introducing additional compre-
+the vocabulary set of the model M . Due to the discrete
+                                                                       hension challenges.
+nature of the problem, gradient-based optimization methods
+cannot be directly applied. Furthermore, the search space is           Benchmarks. ❶ SynContextQA. We begin with a classic
+too vast for exhaustive exploration. Therefore, we propose a           commonsense question-answering task, where questions
+sample-and-selection algorithm inspired by the optimization            are asked in relation to given contextual knowledge. How-
+
+                                                                   3
+                                  Unnatural Languages Are Not Bugs but Features for LLMs
+
+
+Table 2. Performance comparison for different contexts across different models on SynContextQA and SimGSM8K datasets. All answers
+were generated under zero-shot setting without sampling. “Direct” refers to models used for unnatural languages searching, while
+“Transfer” indicates the implementation of searched unnatural languages.
+                                                              SynContextQA                          SimGSM8K
+                     Model
+                                                    Natural      Shuf-InJ    Unnatural    Natural   Shuf-InJ   Unnatural
+                     Mistral-7B-Instruct-v0.1        0.89         0.55          0.93       0.85       0.20        0.42
+        Direct       Vicuna-7B-v1.5                  0.96         0.40          0.86       0.63       0.12        0.20
+                     Average                         0.93         0.48          0.90       0.74       0.16        0.31
+                     Meta-Llama-3-8B-Instruct        0.99         0.29          0.63       0.58       0.18        0.50
+                     Gemma-2-9B-Instruct             0.98         0.35          0.65       0.97       0.21        0.41
+                     Meta-Llama-3-70B-Instruct       0.97         0.73          0.93       1.00       0.38        0.75
+        Transfer
+                     GPT-3.5-turbo                   0.98         0.73          0.93       0.91       0.32        0.53
+                     GPT-4o                          0.98         0.61          0.88       0.95       0.25        0.53
+                     Average                         0.98         0.54          0.80       0.88       0.27        0.54
+
+
+ever, using existing commonsense QA datasets presents a               shuffled language with injected special tokens (Shuf-Inj),
+challenge, as LLMs may answer questions based on their                which serves as the initialization step for our unnatural
+pre-trained knowledge rather than the provided context. To            languages search algorithm in Algorithm 1.
+address this, we leverage GPT-3.5 (Achiam et al., 2023) to
+                                                                      Metrics. For SynContextQA, we evaluate performance
+generate knowledge about non-existing entities and their
+                                                                      using exact keyword matching, while for SimGSM8K, we
+corresponding questions, named as SynContextQA, thereby
+                                                                      use accuracy as the evaluation metric.
+ensuring the model must derive answers from the given con-
+text rather than rely on pre-existing information. Prompts for
+generation and post-processing are illustrated in Appendix            3.2. Main Results
+A3. We then transformed natural contexts into unnatural               As shown in Table 2, for SynContextQA, the test accuracy
+versions using the unnatural languages searching method               of all models in unnatural languages is on-par with the one
+while preserving the original questions. ❷ SimGSM8K. Fur-             of natural language, by a large margin with Shuf-InJ. In
+thermore, to ensure models do not simply extract keywords             average, the test accuracy of transferred models in unnatural
+from unnatural contexts in SynContextQA, we test the un-              languages is 80.4%. For SimGSM8K, the test accuracy of
+natural languages on GSM8K (Cobbe et al., 2021), a more               most models on natural questions is over 80%, indicating
+complex task requiring reasoning capability. As our primary           the simplicity of questions, thus mitigating the concerning
+objective is to assess the ability to comprehend unnatural            of question complexity. Meanwhile, the performance of
+languages, rather than to evaluate reasoning ability, we se-          close-source models could also answer half of the ques-
+lect 100 relatively simple questions from the whole test set,         tions correctly, outperforming the Shuf-InJ by an averaged
+named SimGSM8K. We show a concrete example for each                   margin of 26.7%. Both results indicate that such unnatu-
+dataset in Table 1.                                                   ral languages are highly transferrable across models with
+Backbone Models. We select a diverse range of LLMs,                   different architectures and training corpus, including GPT-
+spanning from smaller open-source models to larger closed-            4o (Hurst et al., 2024), which is considered as the most
+source ones. Specifically, we use Mistral-7B-Instruct-                well-aligned model. As a result, it mitigates the conjecture
+v0.1 (Jiang et al., 2023), Vicuna-7B-v1.5 (Chiang et al.,             that such unnatural languages are a glitch of specific LLMs,
+2023), Meta-Llama-3-8B-Instruct (Dubey et al., 2024),                 but a general phenomenon and inherent property for LLMs.
+Gemma2-9B-Instruct (Team et al., 2024), Meta-Llama-3-                 It is worthwhile to note that there is a significant per-
+70B-Instruct, GPT-3.5-turbo (Achiam et al., 2023), GPT-               formance gap between the natural and unnatural set for
+4o (Hurst et al., 2024). Furthermore, to balance efficiency           SimGSM8K. This gap can be attributed to the increased
+in the unnatural languages searching algorithm with gener-            complexity of SimGSM8K contexts, which typically com-
+alizability, we employ Mistral-7B-Instruct-v0.1 and Vicuna-           prise multiple interconnected sentences. Furthermore,
+7B-v1.5, two renowned open-source models from distinct                SimGSM8K questions require sophisticated multi-step rea-
+series, as the model set M in Algorithm 1.                            soning processes, making them substantially more challeng-
+Baselines. We mainly employ two baselines. (i) natural                ing than standard SynContextQA tasks. However, this is not
+language, which uses the original unmodified text, and (ii)           the upper bound of the performance of LLMs on unnatural
+
+
+                                                                  4
+                                    Unnatural Languages Are Not Bugs but Features for LLMs
+
+
+
+
+Figure 2. The winrate (%) against natural set on LC Alpaca 2.0 for various models. A winrate of 50% indicates on-par performance.
+
+                                                                        4.1. Experiment Setup
+Table 3. The performance comparison of different pre-trained base
+models on SimGSM8K. Ratio is calculated as the performance on
+                                                                        We explore whether the instruction fine-tuning pre-trained
+unnatural languages divided by the performance on natural ones
+                                                                        LLMs on unnatural languages instructions could help mod-
+    Model          Prompt Natural Unnatural Ratio                       els gain general instruction following (chatting) ability.
+                   ICL(n=1)     0.70        0.23      0.33
+    Mistral-7B                                                          Training Dataset. We employ LIMA (Zhou et al., 2023),
+                   ICL(n=8)     0.71        0.38      0.53
+                                                                        a high-quality instruction tuning dataset of 1000 carefully
+                   ICL(n=1)     0.74        0.33      0.45              created (instruction, answer) pairs. Furthermore, we lever-
+    Llama-3-8B
+                   ICL(n=8)     0.87        0.42      0.48              age our proposed unnatural languages searching approach
+                                                                        to find an unnatural version for each instruction in LIMA,
+languages, once the unnatural languages searching approach              and keep the original answers in natural version.
+could be further improved. In addition, we extend our inves-            Benchmarks. We evaluate all variants on Length-controlled
+tigation into the understanding of unnatural languages in a             (LC) AlpacaEval 2.0 (Li et al., 2023) and MixEval (Ni et al.,
+dialogue format in Appendix A4.                                         2024). LC AlpacaEval 2.0 is a well-recognized benchmark
+                                                                        for chat model evaluation. MixEval is a ground-truth-based
+3.3. Further Analysis                                                   benchmark that collects data from numerous QA datasets
+                                                                        under real-world data distribution.
+To broaden the scope of the unnatural languages, we im-
+plemented it in the base model rather than only the chat                Baselines. We employ three baselines: (i) Natural, which
+version, demonstrating that models can truly understand                 uses the original unmodified instructions; (ii) Random,
+these unnatural languages without relying on chat models’               which replace the original instructions with an equal number
+ability to understand noisy instructions.                               of random tokens; and (iii) Empty, in which instruction is
+                                                                        empty (Hewitt et al., 2024).
+Experiment Settings. For the base model, we employ
+in-context learning (ICL) with examples in natural language             Experiment Details. In practice, since the instruction in
+to ensure consistent output formatting while avoiding unnat-            LIMA is extremely long, which exceeds the capacity of
+ural languages patterns in the learning process.                        our searching approach, we leverage GPT-4 to generate
+                                                                        a compressed version of the instructions. Therefore, for
+Main Results. As shown in Table 3, under in-context
+                                                                        fairness, we compare the instruction following ability of
+learning setting with 8 examples, the unnatural test accuracy
+                                                                        models finetuned on the unnatural LIMA and the instruction-
+of pre-trained base models before alignment achieves 38%
+                                                                        shortened LIMA. In addition, all models are fine-tuned for
+and 42% in average, respectively. Particularly, considering
+                                                                        10 epochs using identical hyperparameters.
+the success ratio (i.e. unnatural acc./natural acc.), the ratio
+achieves 53% and 48%, respectively. This indicates that
+pre-trained model could inherently understand the unnatural             4.2. Main Results
+languages without alignment.                                            In Figure 2, we show the winrate of different variants against
+                                                                        the corresponding models tuned on natural LIMA using the
+4. LLMs Can Learn Instruction Following                                 official pipeline and the annotation model is GPT-4o. The
+   Capabilities From Unnatural Languages                                results clearly show that responses of models instruction
+                                                                        tuned on unnatural LIMA is comparable to the one tuned on
+In this section, we explore the properties of unnatural lan-            natural LIMA with a winrate of 48.82% in average, which
+guages from the perspective of post-training.
+
+                                                                    5
+                                   Unnatural Languages Are Not Bugs but Features for LLMs
+
+
+Table 4. The results of model variants instruction tuned on different types of LIMA (including natural, unnatural, random, and empty
+instruction (Hewitt et al., 2024)) on MixEval (Ni et al., 2024). Each dataset represents the subsets selected by MixEval based on the
+real-world data distribution. M.C. and F.F. denote multiple-choice and free-form, respectively. Particularly, we remove the results of
+subset GPQA, MBPP, WinoGrande, and HumanEval since the subsets were too small (less than ten test cases) for consistent evaluation.
+                                    Llama-3-8B                          Gemma-2-9B                            Llama-3-70B
+ Type Dataset
+                        Natural Random Empty Unnatural Natural Random Empty Unnatural Natural Random Empty Unnatural
+     ComsenseQA         0.530    0.569   0.604     0.579     0.599    0.550   0.495     0.668     0.748    0.668   0.559     0.693
+     BoolQ              0.614    0.649   0.673     0.678     0.567    0.614   0.632     0.673     0.830    0.708   0.632     0.848
+     OpenBookQA         0.581    0.628   0.721     0.721     0.605    0.744   0.744     0.721     0.814    0.744   0.721     0.837
+     SIQA               0.462    0.570   0.624     0.462     0.613    0.516   0.645     0.538     0.742    0.581   0.495     0.677
+     HellaSwag          0.338    0.364   0.360     0.328     0.331    0.344   0.289     0.357     0.461    0.373   0.351     0.364
+ M.C MMLU-Pro           0.357    0.346   0.308     0.335     0.427    0.438   0.459     0.432     0.503    0.427   0.465     0.578
+     AGIEval            0.331    0.359   0.340     0.352     0.370    0.314   0.407     0.349     0.566    0.423   0.426     0.543
+     PIQA               0.514    0.676   0.705     0.600     0.781    0.695   0.638     0.733     0.790    0.752   0.724     0.886
+     MMLU               0.658    0.634   0.661     0.633     0.724    0.680   0.700     0.718     0.811    0.736   0.731     0.805
+     ARC                0.802    0.802   0.780     0.791     0.923    0.901   0.879     0.923     0.956    0.835   0.868     0.934
+        Average         0.545    0.563   0.579     0.552     0.607    0.585   0.582     0.623     0.721    0.635   0.611     0.707
+        TriviaQA        0.591    0.453   0.452     0.558     0.609    0.481   0.563     0.585     0.829    0.638   0.685     0.825
+        BBH             0.537    0.633   0.526     0.606     0.621    0.438   0.700     0.687     0.817    0.670   0.484     0.693
+        DROP            0.584    0.385   0.484     0.545     0.638    0.481   0.638     0.651     0.755    0.585   0.631     0.767
+ F.F.
+        MATH            0.381    0.290   0.510     0.394     0.490    0.668   0.568     0.410     0.668    0.642   0.606     0.610
+        GSM8K           0.593    0.470   0.535     0.500     0.675    0.460   0.715     0.545     0.873    0.827   0.817     0.787
+        Average         0.583    0.445   0.467     0.554     0.616    0.481   0.592     0.603     0.809    0.631   0.662     0.799
+   Overall Average      0.557    0.499   0.516     0.547     0.605    0.526   0.582     0.605     0.760    0.627   0.631     0.748
+
+
+outperforms the baselines (models tuned on random/empty               of correct chain-of-thought answers.) from Yu et al. (2023),
+LIMA) by a large margin.                                              which finally results in 14886 training instances. Built upon
+                                                                      the training set, we create four versions, the same as Sec-
+Furthermore, Table 4 confirms our conclusion. As shown in
+                                                                      tion 4.1. We train the pre-trained version and instruction
+Table 4, most models instruction tuned on unnatural version
+                                                                      tuned version of Mistral-7B-v0.1 and Llama-3-8B on the
+LIMA performs on-par with the one tuned on natural LIMA.
+                                                                      four types of training set and test their performance on the
+Meanwhile, it outperforms the baselines, which are tuned on
+                                                                      unnatural test set. The results are shown in Table 5.
+random and empty instruction version LIMA, significantly,
+especially under base model Llama-3-70B with a margin                 It shows that models fine-tuned on the unnatural training
+of over 11%. Both results strongly demonstrate our claim              set significantly outperform models trained on other types
+that unnatural languages contains generalizable patterns that         of training sets when evaluated on the unnatural test set.
+could be help LLMs gain instruction-following ability via             Specifically, the average accuracy for models tuned on un-
+instruction finetuning.                                               natural training set is 31.8%, outperforming the one tuned
+                                                                      on natural training set by 11.2%, the one tuned on random
+4.3. Further Analysis                                                 training set by 19.9%, and the one tuned on empty train-
+                                                                      ing set by 17.3%. This indicates that unnatural languages
+So far we have shown that unnatural languages contains nat-           contain generalizable unnatural patterns that could enhance
+ural patterns that could be generalized to various tasks by in-       LLMs’ unnatural languages understanding capability.
+struction tuning. Besides, we are curious about whether the
+unnatural languages consists unnatural patterns and whether
+fine-tuning on unnatural languages could boost the unnatural          5. How do LLMs Understand Unnatural
+language understanding capability of LLMs. To this end, we               Languages?
+focus the math reasoning task, which is highly demanded for
+                                                                      Unnatural languages have been empirically shown to con-
+question understanding. We created an unnatural languages
+                                                                      tain latent features that are comprehensible across different
+version of GSM8K for its training subset and test subset.
+                                                                      LLMs, while also enhancing their ability to follow instruc-
+Due to the high cost of GCG and computation limitation, we
+                                                                      tions. In this section, we investigate how LLMs process and
+searched 1333 training instances and 654 test instances. For
+                                                                      understand these unnatural languages.
+training, we leverage corresponding answer augmentation
+version (i.e., for each question, there are multiple version
+
+                                                                  6
+                                                     Unnatural Languages Are Not Bugs but Features for LLMs
+
+
+
+
+Table 5. The accuracy of the unnatural GSM8K test
+set for models instruction-tuned on various types of
+GSM8K training sets. Columns denote the training set.
+ Unnatural Test Acc. Natural Random Empty Unnatural
+ Mistral-7B                  0.187     0.116                  0.122            0.310
+ Llama-3-8B                  0.197     0.087                  0.109            0.312
+ Mistral-7B-Instruct         0.225     0.138                  0.171            0.300
+ Llama-3-8B-Instruct         0.214     0.136                  0.179            0.349
+ Average                     0.206     0.119                  0.145            0.318               (a) Token importance distribution                           (b) Relative importance distribution
+
+                                                                                                  Figure 3. Token importance of SimGSM8K under Llama3-8B-Instruct.
+
+
+
+
+                                                                                                                                                                                                                             1.0
+                                                                         0.8
+                                                                                                                                                    0.8
+                                                                                                                                                                                                                             0.8
+                                                                        0.6
+                                                                                                                                                   0.6
+                                                                                                                                                                                                                            0.6
+                                                                        0.4                                                                        0.4
+                                                                                                                                                                                                                            0.4
+                                                                        0.2                                                                        0.2                                                                      0.2
+
+
+                                                                   30                                                                         30                                                                       30
+                                                              25                                                                         25                                                                       25
+                                                         20                                                                         20                                                                       20
+   [                           INS /
+                                  T                 15
+                                                     er
+                                                                                [                         INS /
+                                                                                                              T                15
+                                                                                                                                er
+                                                                                                                                                          [                    INS /
+                                                                                                                                                                                  T                     15
+                                                                                                                                                                                                         er
+                              OK ]                  lay                                                   OK ]                 lay                                            OK ]                      lay
+                                               10                                                                         10                                                                       10
+                          go ,
+                            it t                                                                     go ,
+                                                                                                       it t                                                              go ,
+                                                                                                                                                                           it t
+                      INS .[
+                         T                                                                       INS .[
+                                                                                                    T                                                                INS .[
+                                                                                                                                                                        T
+                 m How ]
+                 armany                                                                      m Ho ]
+                                                                                                  w                                                             m
+                                                                                                                                                             an anyHo ]
+                                                                                                                                                                      w
+                                           5                                                                          5                                                                        5
+           an t dos                                                                        mo uc
+                                                                                              ne h                                                               im
+                                                                                                                                                               leg al
+     co imalse
+         lle sh  h                                                                           dy
+                                                                                            t id
+                                                                                           twhe                                                           theare
+                                                                                                                                                               re  s
+             c e
+          hated
+              ve                                                                        m
+                                                                                 tog ea en   o                                                             allin
+                                       0                                                                          0                                                                        0
+        tot in
+             al                                                                      eth rn
+                                                                                         er                                                               [ ?
+           [?                                                                   INS /  [ ?                                                                                         INS /
+   INS /
+      ]T                                                                           ]T                                                                                                ]T
+
+
+
+
+Figure 4. Three 3D surface examples showing the inverse similarity of natural and unnatural context embeddings. The inverse similarity
+decreases significantly when question-related tokens are added, indicating that LLMs correctly infers the organization of keywords.
+
+5.1. LLMs Extract Keywords from Unnatural                                                                     important tokens have a relative position closer to 0.
+     Languages
+                                                                                                              In Figure 3, we present the distribution of token importance
+To investigate what LLMs truly capture when processing                                                        and relative token importance within the unnatural version
+unnatural languages, we evaluate each token’s importance                                                      of the SimGSM8K dataset as processed by the model Llama-
+by measuring its impact on the output when removed from                                                       3-8B-Instruct. Specifically, as shown in the Figure 3 (a),
+the sequence. Formally, for an unnatural string S ′ , tokenized                                               the density of natural-related tokens (tokens appears in the
+by model M as x1:n = [x1 , x2 , · · · , xn ], the importance of                                               natural version) is more higher than others when token im-
+token xi is defined as the effect of its removal on the change                                                portance is higher than 0.2. Besides, compared with natural
+in the embedding of M ’s final layer, i.e.,                                                                   related tokens, the majority of other tokens lies in the lower
+                                                                                                              importance range. Furthermore, Figure 3 (b) clearly shows
+   I(xi ) = LLMM (x1:n ) − LLMM (x1:n \xi )                                                   .     (4)       that most of the naturally related tokens are higher relative
+                                                                                          2                   important while the other tokens are lower relative impor-
+Specifically, to ensure consistent evaluation across unnatural                                                tant. The above results demonstrate that LLMs are capable
+strings of varying lengths and given that the embedding                                                       of pay more attention on the natural related tokens while fil-
+of the final position is used to predict the next token, we                                                   tering out the other noise. Consequently, LLMs effectively
+measure the embedding of the final position rather than                                                       extract keywords from unnatural languages inputs.
+the entire sequence. Furthermore, we normalize the “token
+importance” relative to the most important token in each                                                      5.2. LLMs Infer Correct Organization of Keywords in
+sequence, referring to this as “relative token importance”.                                                        Unnatural Languages
+The relative token importance represents a softened position                                                  Although LLMs are capable of extracting keywords from
+of the token after sorting in ascending order, scaled within                                                  unnatural languages, the extracted words are often shuffled
+the range [0, 1]. Tokens with greater importance within a                                                     and arranged in the wrong order. Therefore, we hypothe-
+data point have a relative position closer to 1, whereas less
+
+                                                                                                          7
+                                   Unnatural Languages Are Not Bugs but Features for LLMs
+
+
+Table 6. Concrete examples of token reordering: The “natural context” represents the original version, while the “unnatural version”
+simplifies the unnatural languages by removing noise and retaining only keywords. We decode the internal embeddings of LLMs into
+tokens for unnatural language inputs using the same decoder as the final output layer, referred to as “decode internal embeddings”.
+   Natural Context                              Unnatural Version (De-noised)         Decode Internal Embeddings
+   Brandon sold 86 geckos last year. He sold    twice geckos year before last sold    twice geckos year before last before sold
+   twice that many the year before.             Brandon He                             Brandon He sold he 86 sold twice sold
+                                                                                      twice sold last twice year sold
+
+   Ruiz receives a monthly salary of $500.      a monthly $500 salary Ruiz receives   a monthly $500 a salary a Ruiz a re-
+                                                                                      ceives a receives a salary
+
+
+size that LLMs can reorganize these keywords and infer                6. Related Works
+their correct arrangement. Specifically, when the unnatural
+context is provided to LLMs alongside appended natural                Unnatural Languages. Prior studies have observed iso-
+questions, we propose that LLMs progressively infer the               lated instances of unexpected model behavior, while they
+correct organization of keywords—i.e., their corresponding            did not explicitly identify or systematically analyze unnat-
+natural language versions—as they process an increasing               ural language. For example, Zou et al. (2023) prompted
+number of natural question tokens.                                    models generating harmful outputs, Pfau et al. (2024) en-
+                                                                      hanced chain-of-thought reasoning, and Sinha et al. (2020)
+To verify our hypothesis, we calculate the inverse similar-           showed NLI models worked with permuted inputs. Ker-
+ity of embeddings between the context inputs of unnatural             vadec et al. (2023) demonstrated that LLMs interpret un-
+languages and their corresponding natural versions across             natural languages differently, while Kallini et al. (2024)
+layers, as well as for increasingly natural question tokens           categorized them by perplexity, showing LLMs struggled to
+inputted into LLMs. As shown in Figure 4, for the marginal            learn them.
+version of a layer, the inverse similarity of unnatural and
+natural context embeddings gradually decreases as follow-             Discrete Optimization. Prompt optimization tools have
+ing tokens are inputted. Particularly, the inverse similarity         been used to explore unnatural languages in token space.
+drastically decreases when the question related tokens are            Early works (Zou et al., 2023; Liu et al., 2023; Zhao et al.,
+inputted. This indicates that LLMs does not always com-               2024; Chao et al., 2023; Andriushchenko, 2022) focused on
+prehend unnatural languages independently as the corre-               adversarial prompts to jailbreak LLMs, while others (Shin
+sponding natural language. In contrast, the comprehension             et al., 2020; Jones et al., 2023) optimized prompts for spe-
+process is highly related to the context (i.e. the questions.).       cific outputs. These studies did not address whether such
+As a result, the unnatural languages works in certain con-            prompts reflect natural language features. This work investi-
+texts. Supposing random context is provided, the model                gates this question.
+behavior on unnatural languages could be different from               Transferability of Adversarial Examples. Unnatural
+natural language.                                                     languages often transfer across LLMs, similar to adversarial
+                                                                      examples in computer vision (Szegedy et al., 2014; Papernot
+5.3. Qualitative Analysis                                             et al., 2016; Nguyen et al., 2015). For example, Wallace
+                                                                      et al. (2019) showed that prompts from GPT-2 transferred
+We further investigate whether LLMs are truly capable of
+                                                                      to larger models, and Jones et al. (2023) found that toxic
+reordering keywords by analyzing the embeddings of inter-
+                                                                      prompts from GPT-2 affected davinci-002. Building on
+mediate layers. Specifically, we decode the internal embed-
+                                                                      these findings, this work examines how LLMs rely on frag-
+dings of LLMs when processing unnatural language inputs
+                                                                      ile, unnatural features in token space (Ilyas et al., 2019).
+into tokens using the same decoder as the final layer. As
+shown in Table 6, we observe that although the keywords in
+the unnatural version are disordered, LLMs are able to re-            7. Conclusion
+order certain patterns in the keywords to match the original
+                                                                      Our study reveals that LLMs possess the ability to compre-
+natural context. Moreover, we utilize dependency parsing
+                                                                      hend unnatural languages, an incomprehensible data pattern
+to demonstrate that LLMs can understand the dependency
+                                                                      that could convey information across models. Through
+structure of unnatural languages. Details are illustrated in
+                                                                      systematic analysis and experiments, we demonstrate that
+Appendix A5.
+                                                                      unnatural languages contains generalizable patterns across
+                                                                      a wide variety of LLMs, despite these models being pre-
+                                                                      dominantly aligned with human data. We show that models
+
+
+                                                                  8
+                                   Unnatural Languages Are Not Bugs but Features for LLMs
+
+fine-tuned on unnatural instructions achieves on-par per-                chatbot impressing gpt-4 with 90%* chatgpt quality,
+formance of instruction-following ability with models fine-              March 2023. URL https://lmsys.org/blog/
+tuned on natural versions. Furthermore, through comprehen-               2023-03-30-vicuna/.
+sive analysis, we demonstrate that LLMs process unnatural
+languages by filtering noise and inferring contextual mean-            Cobbe, K., Kosaraju, V., Bavarian, M., Chen, M., Jun, H.,
+ing from filtered words.                                                 Kaiser, L., Plappert, M., Tworek, J., Hilton, J., Nakano,
+                                                                         R., et al. Training verifiers to solve math word problems,
+                                                                         2021. URL https://arxiv. org/abs/2110.14168, 2021.
+Impact Statement
+                                                                       Devlin, J. Bert: Pre-training of deep bidirectional trans-
+Our findings suggest that LLMs’ interaction with incompre-
+                                                                         formers for language understanding. arXiv preprint
+hensible patterns, while potentially useful, adds complexity
+                                                                         arXiv:1810.04805, 2018.
+to our understanding of their behavior and raises impor-
+tant questions about the nature of language processing in              Dubey, A., Jauhri, A., Pandey, A., Kadian, A., Al-Dahle,
+artificial systems. This could have broader implications                A., Letman, A., Mathur, A., Schelten, A., Yang, A., Fan,
+for the development and deployment of AI technologies.                  A., et al. The llama 3 herd of models. arXiv preprint
+Understanding these dynamics is crucial for ensuring the                 arXiv:2407.21783, 2024.
+responsible use of LLMs in real-world applications, where
+their ability to process unconventional data patterns might            Gao, B., Song, F., Yang, Z., Cai, Z., Miao, Y., Dong, Q.,
+lead to both innovative solutions and unforeseen challenges.             Li, L., Ma, C., Chen, L., Xu, R., et al. Omni-math:
+                                                                         A universal olympiad level mathematic benchmark for
+Acknowledgment                                                           large language models. arXiv preprint arXiv:2410.07985,
+                                                                         2024.
+We thank Wei Tsang Ooi, Ying Sheng, Lianmin Zheng,
+Hwee Tou Ng, Tat-Seng Chua, and Dan Hendrycks for their                Hendrycks, D., Burns, C., Kadavath, S., Arora, A., Basart,
+insightful discussions and feedback. We are also grateful to             S., Tang, E., Song, D., and Steinhardt, J. Measuring math-
+the Center for AI Safety (CAIS) for providing computational              ematical problem solving with the math dataset. arXiv
+resources that supported this research. This project was                 preprint arXiv:2103.03874, 2021.
+partly supported by the MOE AcRF Tier 1 grant with grant
+                                                                       Hewitt, J. and Manning, C. D. A structural probe for find-
+number 251RES2514.
+                                                                         ing syntax in word representations. In North American
+                                                                         Chapter of the Association for Computational Linguistics:
+References                                                               Human Language Technologies. Association for Compu-
+Achiam, J., Adler, S., Agarwal, S., Ahmad, L., Akkaya, I.,               tational Linguistics, 2019.
+  Aleman, F. L., Almeida, D., Altenschmidt, J., Altman, S.,
+                                                                       Hewitt, J., Liu, N. F., Liang, P., and Manning, C. D. Instruc-
+  Anadkat, S., et al. Gpt-4 technical report. arXiv preprint
+                                                                         tion following without instruction tuning, 2024. URL
+  arXiv:2303.08774, 2023.
+                                                                         https://arxiv.org/abs/2409.14254.
+Andriushchenko, M. Adversarial attacks on gpt-4 via simple
+                                                                       Hurst, A., Lerer, A., Goucher, A. P., Perelman, A., Ramesh,
+  random search, 2022.
+                                                                         A., Clark, A., Ostrow, A., Welihinda, A., Hayes, A.,
+anthropic. Meet claude. https://www.anthropic.                           Radford, A., et al. Gpt-4o system card. arXiv preprint
+  com/claude, 2024. Accessed: 2024-05-01.                                arXiv:2410.21276, 2024.
+
+Bisk, Y., Zellers, R., Gao, J., Choi, Y., et al. Piqa: Reasoning       Ilyas, A., Santurkar, S., Tsipras, D., Engstrom, L., Tran, B.,
+  about physical commonsense in natural language. In Pro-                 and Madry, A. Adversarial examples are not bugs, they
+  ceedings of the AAAI conference on artificial intelligence,             are features. Advances in neural information processing
+  volume 34, pp. 7432–7439, 2020.                                         systems, 32, 2019.
+
+Chao, P., Robey, A., Dobriban, E., Hassani, H., Pappas, G. J.,         Jiang, A. Q., Sablayrolles, A., Mensch, A., Bamford, C.,
+  and Wong, E. Jailbreaking black box large language mod-                 Chaplot, D. S., Casas, D. d. l., Bressand, F., Lengyel, G.,
+  els in twenty queries. arXiv preprint arXiv:2310.08419,                 Lample, G., Saulnier, L., et al. Mistral 7b. arXiv preprint
+  2023.                                                                   arXiv:2310.06825, 2023.
+
+Chiang, W.-L., Li, Z., Lin, Z., Sheng, Y., Wu, Z., Zhang,              Jones, E., Dragan, A., Raghunathan, A., and Steinhardt, J.
+  H., Zheng, L., Zhuang, S., Zhuang, Y., Gonzalez, J. E.,                Automatically auditing large language models via discrete
+  Stoica, I., and Xing, E. P. Vicuna: An open-source                     optimization. arXiv preprint arXiv:2303.04381, 2023.
+
+                                                                   9
+                                  Unnatural Languages Are Not Bugs but Features for LLMs
+
+Kallini, J., Papadimitriou, I., Futrell, R., Mahowald, K., and        Silveira, N., Dozat, T., de Marneffe, M.-C., Bowman, S.,
+  Potts, C. Mission: Impossible language models. arXiv                   Connor, M., Bauer, J., and Manning, C. D. A gold stan-
+  preprint arXiv:2401.06416, 2024.                                       dard dependency corpus for English. In Proceedings
+                                                                         of the Ninth International Conference on Language Re-
+Kervadec, C., Franzon, F., and Baroni, M. Unnatu-
+                                                                         sources and Evaluation (LREC-2014), 2014.
+  ral language processing: How do language models
+  handle machine-generated prompts? arXiv preprint                    Sinha, K., Parthasarathi, P., Pineau, J., and Williams,
+  arXiv:2310.15829, 2023.                                               A. Unnatural language inference. arXiv preprint
+Li, X., Zhang, T., Dubois, Y., Taori, R., Gulrajani, I.,                arXiv:2101.00010, 2020.
+  Guestrin, C., Liang, P., and Hashimoto, T. B. Alpacae-              Szegedy, C., Zaremba, W., Sutskever, I., Bruna, J., Erhan,
+  val: An automatic evaluator of instruction-following                  D., Goodfellow, I. J., and Fergus, R. Intriguing proper-
+  models.      https://github.com/tatsu-lab/                            ties of neural networks. In International Conference on
+  alpaca_eval, 5 2023.                                                  Learning Representations, 2014.
+Liu, X., Xu, N., Chen, M., and Xiao, C. Autodan: Generat-             Team, G., Riviere, M., Pathak, S., Sessa, P. G., Hardin,
+  ing stealthy jailbreak prompts on aligned large language              C., Bhupatiraju, S., Hussenot, L., Mesnard, T., Shahri-
+  models. arXiv preprint arXiv:2310.04451, 2023.                        ari, B., Ramé, A., et al. Gemma 2: Improving open
+Mundhenk, T. N., Chen, B. Y., and Friedland, G. Efficient               language models at a practical size. arXiv preprint
+ saliency maps for explainable ai, 2020. URL https:                     arXiv:2408.00118, 2024.
+ //arxiv.org/abs/1911.11293.
+                                                                      Touvron, H., Martin, L., Stone, K., Albert, P., Almahairi,
+Nguyen, A., Yosinski, J., and Clune, J. Deep neural net-                A., Babaei, Y., Bashlykov, N., Batra, S., Bhargava, P.,
+ works are easily fooled: High confidence predictions for               Bhosale, S., et al. Llama 2: Open foundation and fine-
+  unrecognizable images. In Proceedings of the IEEE con-                tuned chat models. arXiv preprint arXiv:2307.09288,
+  ference on computer vision and pattern recognition, pp.               2023.
+ 427–436, 2015.
+                                                                      Wallace, E., Feng, S., Kandpal, N., Gardner, M., and Singh,
+Ni, J., Xue, F., Yue, X., Deng, Y., Shah, M., Jain, K., Neu-           S. Universal adversarial triggers for attacking and analyz-
+  big, G., and You, Y. Mixeval: Deriving wisdom of the                 ing nlp. arXiv preprint arXiv:1908.07125, 2019.
+  crowd from llm benchmark mixtures. arXiv preprint
+  arXiv:2406.06565, 2024.                                             Wei, J., Bosma, M., Zhao, V. Y., Guu, K., Yu, A. W., Lester,
+                                                                       B., Du, N., Dai, A. M., and Le, Q. V. Finetuned lan-
+OpenAI. Introducing chatgpt. https://openai.com/                       guage models are zero-shot learners. arXiv preprint
+  blog/chatgpt, 2023. Accessed: 2024-05-01.                            arXiv:2109.01652, 2021.
+Ouyang, L., Wu, J., Jiang, X., Almeida, D., Wainwright, C.,
+                                                                      Yu, L., Jiang, W., Shi, H., Yu, J., Liu, Z., Zhang, Y., Kwok,
+  Mishkin, P., Zhang, C., Agarwal, S., Slama, K., Ray, A.,
+                                                                        J. T., Li, Z., Weller, A., and Liu, W. Metamath: Boot-
+  et al. Training language models to follow instructions
+                                                                        strap your own mathematical questions for large language
+  with human feedback. Advances in Neural Information
+                                                                        models. arXiv preprint arXiv:2309.12284, 2023.
+  Processing Systems, 35:27730–27744, 2022.
+                                                                      Zhao, Y., Zheng, W., Cai, T., Do, X. L., Kawaguchi,
+Papernot, N., McDaniel, P., and Goodfellow, I. Transfer-
+                                                                        K., Goyal, A., and Shieh, M. Accelerating greedy co-
+  ability in machine learning: from phenomena to black-
+                                                                        ordinate gradient via probe sampling. arXiv preprint
+  box attacks using adversarial samples. arXiv preprint
+                                                                        arXiv:2403.01251, 2024.
+  arXiv:1605.07277, 2016.
+Pfau, J., Merrill, W., and Bowman, S. R. Let’s think dot by           Zhou, C., Liu, P., Xu, P., Iyer, S., Sun, J., Mao, Y., Ma, X.,
+  dot: Hidden computation in transformer language models.               Efrat, A., Yu, P., Yu, L., et al. Lima: Less is more for
+  arXiv preprint arXiv:2404.15758, 2024.                                alignment. arXiv preprint arXiv:2305.11206, 2023.
+
+Reimers, N. and Gurevych, I. Sentence-bert: Sentence                  Zou, A., Wang, Z., Kolter, J. Z., and Fredrikson, M. Uni-
+  embeddings using siamese bert-networks. arXiv preprint                versal and transferable adversarial attacks on aligned lan-
+  arXiv:1908.10084, 2019.                                               guage models. arXiv preprint arXiv:2307.15043, 2023.
+
+Shin, T., Razeghi, Y., Logan IV, R. L., Wallace, E., and
+  Singh, S. Autoprompt: Eliciting knowledge from lan-
+  guage models with automatically generated prompts.
+  arXiv preprint arXiv:2010.15980, 2020.
+
+                                                                 10
+                                 Unnatural Languages Are Not Bugs but Features for LLMs
+
+Limitations and Future Works
+In this work, we design a type of unnatural language that is comprehensible to LLMs and demonstrate that it contains useful
+features that could facilitate instruction tuning and even achieves on-par performance compared with the corresponding
+natural language. Essentially, the unnatural language searching is a process that increases the entropy of language (via
+replacing tokens in GCG) while trying to keep the semantic meaning of the original language. Therefore, the result inevitably
+contains the tokens that appeared in the original natural string, which is not 100% unnatural ideally. We have also performed
+ablation study by eliminating the original tokens from the candidates and initialize the searching control without natural
+tokens but found that the performance is significantly sub-optimal. We admit the limitation of current searching methods
+leveraging GCG and conjecture that the unnaturalness and performance for unnatural language could be further improved
+once there is more effective and efficient discrete space optimization approach.
+Besides, the efficiency for GCG-like searching methods is limited and it is expensive to search large scale unnatural language
+version examples. This limits us from performing more comprehensive and large scale experiments. Once the searching
+expense is mitigated, unnatural language could be further explored for practical usage.
+In addition, we found that the unnatural language are not always generalizable across different tasks. For example, fine-
+tuning on the unnatural version of GSM8K training set as in Sec. 4.3 does not achieve on-par performance with the one
+fine-tuned on natural set in expectation. We suspect that this is because that GSM8K questions are too complex (long) for
+GCG to search a compatible unnatural version. This also explains why the unnatural SimGSM8K in Sec. 3 only achieves
+54% accuracy in average across models.
+
+A1. Algorithm Details
+Algorithm 1 presents the detailed implementation of the unnatural languages searching algorithm.
+
+
+Algorithm 1 Unnatural Languages Searching
+Input: Natural string S, searching models M and tasks T , batch size B, k, number of iterations T
+ 1: // Initialize x via shuffle words in S and inject special characters.
+ 2: Initialization: x = random_inject(shuffle(S))
+ 3: repeat
+ 4:   for M ∈ M do
+ 5:      // Tokenize x through model M .
+ 6:      x1:n = TokenizeM (x)
+ 7:      // Obtain top-k       P alternative tokens       of each position in x1:n .
+ 8:      X1:n = Top-k ∇x1:n t∈T log PM (S|x1:n , t)
+ 9:      for b = 1, ..., B do
+10:         // Uniformly sample candidates.
+              (b)
+11:         x̃1:n = x1:n
+              (b)
+12:         x̃1:n [i] = Uni(X1:n [i]), i = Uni([1 : n])
+13:         // Decode tokens back string.
+                                (b)
+14:         x̃(b) = DecodeM (x̃1:n )
+15:      end for
+16:   end for
+17:   // Select the     P best  P candidate.
+         ∗
+18:   x̃b = argmaxb M ∈M t∈T log PM (S|x̃(b) , t)
+19:   // Replace the original string with the modified string.
+               ∗
+20:   x = x̃b
+21: until Repeat for T times
+Output: Equivalent unnatural string S ′
+
+
+
+A2. Algorithm Verificaiton Experiments
+Here we perform a verification experiment to show that we searched unnatural strings could be translated back to natural
+version. Specifically, we perform such translation task by appending a translation task description ’Translate the above
+
+                                                            A11
+                                   Unnatural Languages Are Not Bugs but Features for LLMs
+
+sentences into natural languages’. The translation performance is shown in Table A7. EM denotes exact match; F1 denotes
+F1 score; and NLI measures the semantic relationship between sentences (e.g., entailment, neutral, contradiction) using
+pre-trained models, offering a nuanced evaluation of meaning similarity. We treat ’entailment’ as positive cases and compute
+the accuracy to obtain the final score.
+
+
+                             Table A7. Results of unnatural language to natural language translation task.
+                                             Dataset              EM        F1       NLI
+                                             SynContextQA       0.5600     0.854    0.860
+                                             SimGSM8K            0.660     0.805    0.650
+
+
+
+A3. SynContextQA and SimGSM8K Dataset Details
+A3.1. SynContextQA
+Generation Details. We leverage GPT-3.5 (OpenAI, 2023) to generate context about non-existing entities and their
+corresponding questions. The prompt is provided as follows in Table A8. To ensure the diversity of the generated context,
+we generate 1, 000 candidates in total and perform k-means clustering according to the embeddings generated by a SOTA
+text embedding model to form 100 clusters. Finally, we select 100 instances that are closest to each of the cluster centers.
+
+
+                                           Table A8. Prompt of SynContextQA generation.
+   Please generate 10 synthetic business or personal case for reading comprehension. The context information should be specific
+   to a synthetic object, e.g., ’The company TechDouDou raised 1,000,000 fundings in Q4, 2023’ instead of ’A company raised
+   1,000,000 fundings in Q4, 2023’. all data should be different from each other as much as possible. The case contains three parts:
+   (1) context that provides specific information, where the length should be no longer than 40 characters; (2) a question that asked
+   about that information; (3) the corresponding answer.
+   [Context]:The revenue of the company Countingstar for Q1 is 100,000$.
+   [Question]: What is the revenue of Countingstar for Q1?
+   [Answer]: The revenue of Countingstar for Q1 is 100,000$
+
+
+Dataset Details. The dataset is generated by GPT-3.5. Each data contains a simple and synthetic context related to
+unexisted business or personal as well as a couple of questions related to the context. Genearally, one question asks about
+the action of the entity while the other question asks about the name of the enitity. For example, the context is "EcoGardens
+launched a new sustainable packing initiative" and the two questions are "What recent initiative did EcoGradens launch?"
+and "Which company launched a new sustainable packing initiative?". To ensure the diversity of the generated questions, we
+generated 1,000 contexts and leverage k-means to get 100 data points, each of which is closed to the centers of a cluster. the
+cluster embeddings were generated by a SOTA embedding model in sentence-transformers (Reimers & Gurevych,
+2019). For each data point, we manually create the correct answer candidates for each question.
+
+A3.2. SimGSM8K
+
+
+Dataset Details. The dataset serves as a more challenging dataset compared to SynContextQA, where the data points
+are derived from the test set of GSM8K. As a result, the context is more complex which often contains multiple entities
+and much more information. Meanwhile, the answer of the question requires several steps of reasoning and the correct
+answer could not be found in the context directly using simple keyword matching. Since our goal is to evaluate the ability
+of unnatural language comprehension of LLMs, we do not want to introduce too complex QA paris which could not even
+be answered correctly under natural language. To this end, we selected 100 questions from the original GSM8K test set
+considering the context length and correctness of models.
+
+A4. Unnatural QA Experiments Under Two-turn Dialogue Setting.
+
+
+                                                                 A12
+                                  Unnatural Languages Are Not Bugs but Features for LLMs
+
+
+Table A9. Performance comparison for different contexts across different models on SynContextQA and SimGSM8K datasets under
+tow-turn dialogue setting. All answers were generated under zero-shot setting without sampling. “Direct” refers to models used for
+unnatural language searching, while “Transfer” indicates the implementation of searched unnatural languages.
+                                                              SynContextQA                         SimGSM8K
+                   Model
+                                                    Natural    Shuf-InJ    Unnatural     Natural    Shuf-InJ     Unnatural
+                   Mistral-7B-Instruct               0.92        0.47         0.92         0.85        0.20         0.42
+                   Vicuna-7B                         0.94        0.49         0.90         0.63        0.18         0.21
+      Direct
+                   Average                           0.93        0.48         0.91         0.74        0.19         0.32
+                   Meta-Llama-3-8B-Instruct          0.98        0.51         0.84         0.77        0.31         0.40
+                   Gemma-2-9B-Instruct               0.96        0.46         0.70         0.97        0.22         0.45
+      Transfer     Meta-Llama-3-70B-Instruct         0.98        0.70         0.92         1.00        0.41         0.73
+                   GPT-3.5                           0.98        0.68         0.92         0.92        0.38         0.49
+                   GPT-4                             0.99        0.64         0.91         0.96        0.32         0.48
+                   Average                           0.98        0.60         0.86         0.92        0.33         0.51
+
+
+
+
+To verify the model’s understanding of unnatural context and given that these are chat-based models, we implement a
+dialogue format for context-based question-answering. Specifically, each QA session consists of two turn. In the first turn,
+we provide the context in unnatural language to the model, which responds with “OK, got it.” In the second turn, we pose
+the question related to the previously provided context and evaluate the model’s response accuracy through keyword exact
+matching. Detailed results are shown in Table A9. The results serves as a complimentary results of Table 2 and it further
+demonstrates that such unnatural languages is highly transferrable across models.
+
+A5. LLMs Understand the Dependency Structure of Unnatural Language.
+Dependency parsing is one of the most commonly used techniques to analyze the syntactic structure of natural sentences.
+Dependency parsing transfer a sentence into a tree, where each word/token is a node and the directed edges represent the
+dependency, the end node (child) depends on, e.g. modifying or being arguments of, the source node (parent). In general, a
+fake ROOT node is usually added to the whole tree such that every actual word have parents. Dependency parsing serves
+as a fundamental technique for understanding the syntax of sentences. In this section, we are curious about how LLMs
+understand the unnatural language. A more specific question is that how LLMs interpret the syntax of unnatural language
+since they could understand it.
+Recently, Hewitt & Manning (2019) showed that pretrained LMs’, e.g. BERT (Devlin, 2018), output embeddings contains
+the structural syntax information of the inputs. One can simply leverage the probing (a linear transformation) techiques
+to extract such information and build a dependency syntax tree. Leveraging a modified version of the so-called structural
+probing, we train a linear head upon a freezed pre-trained model (e.g. Llama-3-8B) to predict the dependency syntax tree
+of the input sentence using natural language corpus as training source. Then we leverage the trained head to predict the
+syntax tree of unnatural sentences. We introduce the structural probing method as follows.
+A syntax tree of a sentence l is equal to a directed acyclic graph (DAG) G = (V, E), where V is the set of words and E
+denotes the set of edges. to build the guidance for training, we compute a distance matrix d ∈ N(|V |,|V |) for the graph. The
+element dij of the distance matrix is defined as the length of the shortest path between node i and node j. Particularly, if two
+nodes are adjacent, the distance is 1. In the original paper, the authors omitted the root node for syntax tree when building
+the distance matrix, which results in a symmetric matrix that loses the information of root node and edge directions. In our
+work, we treat the root node as a concrete token (the BOS special token for any LLM tokenizer) and build the corresponding
+distance matrix. Such distance matrix is an one-to-one mapping of the syntax tree since one can easily recover the syntax
+tree since the root node is known and the tree is acyclic. In the following parts, we use dl ∈ N(|Vl |+1,|Vl |+1) denoting the
+distance matrix for sentence l.
+Given a model’s output embedding hl ∈ R( L, H) for sentence l. We formalize the training process as the following
+optimization problem:
+
+                                                               A13
+                                    Unnatural Languages Are Not Bugs but Features for LLMs
+
+                                                          <|begin_of_text|>
+
+                                                              proceeded
+
+                                                        thus . G            ens
+
+                                                          initiative     Eco ard
+
+                            jekt launched                        ierte                     sentence
+
+                              pack One able stoff deze Lng nouvelles level former
+
+                               um                               y ut abet         weiter grammar
+
+                                                                ...                 ...      Parse
+
+Figure A5. A dependency syntax tree of unnatural sentence: "| EcoGardenslaz proceeded thus,- sust "able deix um nouvelles packstoff
+launchedierteutabetLng initiative. Onejekt y deze sentence former GETTRAN()->()} grammar level:: EGB »OK!. Parse Sie fast{-itt
+weiter", whose corresponding natural version is "EcoGardens launched a new sustainable packaging initiative". The tree was generated
+by Llama-3-8B via structural probing (Hewitt & Manning, 2019). We annotate a sub-tree which reasonably represents the semantic
+meaning of "EcoGardens proceeded initiative that launched one sustainable pack."
+
+
+
+                                                 X 1 X
+                                              min            |d − fW (hli , hlj )|,                                              (5)
+                                               W  |sl |2 i,j
+                                                    l
+
+where fW = (W(hli − hlj ))T (W(hli − hlj )) computes the squared eucliean distance between two nodes. |sl | denotes the
+number of tokens in sentence l. In practice we train the probing head with the data from EN_EWT training set of universal
+dependency (Silveira et al., 2014).
+Then we use the trained probing head to predict the dependency syntax tree of unnatural sentences. We show an example
+in Figure A5. As shown in Figure A5, the dependency tree clearly contains the syntax structure whose semantic meaning
+is similar to the natural language. This indicates that LLMs could capture the syntax structure of unnatural language that
+contains information akin to the natural language.
+
+A6. More Experiments with additional baselines
+To further validate the effectiveness of the proposed unnatural languages, we conduct additional experiments comparing
+the dropping-token baseline with our method. Specifically, we employed saliency technique (Mundhenk et al., 2020) to
+retain the top percentage of the most influential tokens while discarding the rest—a common approach in Explainable AI for
+identifying which parts of the input most strongly impact a model’s prediction. The examples of baselines are shown in
+Table A10 and the experiment results are presented in Table A11.
+We first compare the unnatural language outputs generated by the baseline and our approach. The baseline tends to preserve
+the word order and keywords of the original input, making it comparatively more human-readable. In contrast, our method
+generates outputs that are less comprehensible to humans while maintaining critical latent features important for LLMs.
+Moreover, on the SimGSM8K dataset, our unnatural examples consistently lead to significantly higher performance across
+multiple models compared to the baseline. This demonstrates that our method results in examples that are more unnatural
+from a human perspective while still preserving the essential latent structure that LLMs rely on for reasoning.
+
+
+
+
+                                                               A14
+                                 Unnatural Languages Are Not Bugs but Features for LLMs
+
+
+
+
+                            Table A10. Examples of baselines and unnatural language on SimGSM8K.
+  Method                           Examples
+  pure_top0.3                      Carly arms seastar
+  pure_top0.5                      Carlyfish5 arms each one seastar.
+  pure_top0.7                      Carly collected7 starfish5 arms each and one seastar arms.
+                                   Carly conclude Grudsignature)’ nordMBERazed arms Python GorNEXT
+  random_injection_top0.3
+                                   seastar anime workshop Felixlights gardenearing
+                                   Carly Yale embedding prospects Controlfish practicallyunsigned5 arms
+  random_injection_top0.5
+                                   each supp one seastarquote personnelscore AuthorsVal.
+                                   Carly collected tra7 starfishNext bet5 arms each and one seastar
+  random_injection_top0.7
+                                   amplWM substantial hacer arms.
+                                   | Each and : algebra dinner! absolutely 7 do): shortly . seastar collectedthe
+  Unnatural (Ours)                 \‘’ kW)$, one ! 5 ! 14\‘ starfish with sic}}_\label Carly} arms. Onehorailey
+                                   constructed WriteStatus($ $\Toggle Zwezeichnung OK
+  Original Context                 Carly collected 7 starfish with 5 arms each and one seastar with 14 arms.
+
+
+
+
+Table A11. Experiment results of different baselines on SimGSM8K. Pure refers to retaining only the most salient tokens. Random
+Injection (RI) denotes the addition of randomly selected tokens to increase the level of unnaturalness.
+  Method                    Mistral-7B-Instruct-v0.1   Meta-Llama-3-8B-Instruct   Gemma-2-9b-it    Meta-Llama-3-70B-Instruct
+  pure_top0.3                         0.07                       0.07                  0.07                   0.07
+  pure_top0.5                         0.10                       0.06                  0.12                   0.14
+  pure_top0.7                         0.18                       0.12                  0.25                   0.24
+  random_injection_top0.3             0.08                       0.08                  0.07                   0.10
+  random_injection_top0.5             0.11                       0.11                  0.15                   0.16
+  random_injection_top0.7             0.17                       0.16                  0.23                   0.28
+  Unnatural (Ours)                    0.42                       0.50                  0.41                   0.75
+
+
+
+
+                                                             A15
+

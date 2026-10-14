@@ -1,0 +1,1520 @@
+                                   STEER: Assessing the Economic
+                                 Rationality of Large Language Models
+
+
+           Narun Raman 1 Taylor Lundy 1 Samuel Joseph Amouyal 2 Yoav Levine 3 Kevin Leyton-Brown 1
+                                                       Moshe Tennenholtz 4
+                            Abstract                              based agents are already showing strength in planning (e.g.,
+                                                                  for personal finance (Reworkd, 2023)), solving complex
+       There is increasing interest in using LLMs as              problems (e.g., medical diagnostics; McDuff et al., 2023),
+       decision-making “agents.” Doing so includes                leveraging tools (e.g., Schick et al., 2023) and playing games
+       many degrees of freedom: which model should                (e.g., chess; Nakajima, 2023). Better decision-making ca-
+       be used; how should it be prompted; should it be           pabilities will be critical for advancing the use of Rein-
+       asked to introspect, conduct chain-of-thought rea-         forcement Learning from AI Feedback (RLAIF) to fine-tune
+       soning, etc? Settling these questions—and more             chatbots, such as constitution-based approaches (Bai et al.,
+       broadly, determining whether an LLM agent is               2022; Hong et al., 2023). LLMs may soon take the place of
+       reliable enough to be trusted—requires a method-           humans in some social science experiments (Horton, 2023;
+       ology for assessing such an agent’s economic               Aher et al., 2023; Park et al., 2023). Eventually, this research
+       rationality. In this paper, we provide one. We             agenda offers the promise of realizing the longstanding AI
+       begin by surveying the economic literature on ra-          dream of personalized economic agents.
+       tional decision making, taxonomizing a large set
+       of fine-grained “elements” that an agent should            How can we best configure LLMs to maximize their per-
+       exhibit, along with dependencies between them.             formance on decision-making tasks (e.g., via prompting to
+       We then propose a benchmark distribution called            perform chain-of-thought reasoning; fine-tuning; or more
+       STEER (Systematic and Tuneable Evaluation of               complex architectures that make repeated calls to a model)?
+       Economic Rationality) that quantitatively scores           After we have done so, how well do LLM-based agents per-
+       an LLMs performance on these elements and,                 form? Recent research has begun to develop testing regimes
+       combined with a user-provided rubric, produces             that can address these questions in various restricted do-
+       a “STEER report card.” Finally, we describe the            mains. These include various narrowly defined tasks (Liu
+       results of a large-scale empirical experiment with         et al., 2023; Qin et al., 2023; Zhou et al., 2023; Yao et al.,
+       14 different LLMs, characterizing the both cur-            2023); limited economic settings (Shah et al., 2022; Chen
+       rent state of the art and the impact of different          et al., 2021; Sinha and Khandait, 2020; Araci, 2019; Akata
+       model sizes on models’ ability to exhibit rational         et al., 2023); and open-world video games (Wang et al.,
+       behavior.                                                  2023a; Zhu et al., 2023). Going beyond such problem-
+                                                                  specific approaches to assessing decision making more
+                                                                  broadly requires a holistic approach to describing good deci-
+1. Introduction                                                   sion making and explaining how it can be decomposed into
+                                                                  different, individually testable components. One approach
+Recently, much research has worked to leverage Large Lan-         is to divide decision making into distinct, ad hoc tasks, em-
+guage Models (LLMs) to create decision-making engines,            phasizing those that have been clasically studied in NLP
+configuring them either to act directly as economic agents        (Liang et al., 2022; Gehrmann et al., 2021).
+(Cai et al., 2023; Horton, 2023; Wang et al., 2023a) or to
+                                                                  We advocate a different approach: enumerating first prin-
+serve as key elements of broader systems that do so (Zhuge
+                                                                  ciples that describe how agents should make decisions,
+et al., 2023; Wang et al., 2023b; Shen et al., 2023). LLM-
+                                                                  and then evaluating an agent’s degree of adherence with
+    1
+      Department of Computer Science, University of British       these principles. Answering the normative question of how
+Columbia, Vancouver, Canada 2 Tel Aviv University, Aviv, Is-      decision-makers should act has been the focus of more than
+rael 3 Stanford & AI21 Labs, Palo Alto, California, United States a century of research in economics, cognitive psychology,
+4
+  Technion & AI21 Labs, Tel Aviv, Israel. Correspondence to:
+                                                                  computer science, and philosophy. The resulting literature
+Narun Raman <narunram@cs.ubc.ca>.
+                                                                  provides a mature mathematical foundation for so-called
+Proceedings of the 41 st International Conference on Machine      economic rationality. The grounding principle is that agents
+Learning, Vienna, Austria. PMLR 235, 2024. Copyright 2024 by      should (implicitly or explicitly) quantify their preferences
+the author(s).
+
+                                                                1
+                            STEER: Assessing the Economic Rationality of Large Language Models
+
+according to a utility function and make decisions to maxi-           for generating benchmark questions, validating them, and
+mize their own expected utility. The literature further char-         visualizing experimental results; it allows elements to be
+acterizes elements of economic settings that fundamentally            filtered by position in the taxonomy, by logical dependence
+impact rational behavior: e.g., stochasticity is different from       (e.g., the “maximize utility” element depends on the “transi-
+determinism; multi-agent environments are different from              tivity” element), by domain, and by grade level. To demon-
+single-agent environments; reasoning about how best to                strate the utility of our system, we generated full SRCs
+make decisions for groups of agents is different from rea-            for 14 language models, ranging from Llama 7B to GPT-4
+soning about how to act as an individual. In some cases,              Turbo, evaluated on 134,750 test questions. This experimen-
+the theory is prescriptive: e.g., it’s better to maximize util-       tal setup is described in Section 3. We spent $4,800 making
+ity than to accept lower-utility alternatives. In other cases,        calls to OpenAI’s API and devoted 13,240 GPU hours of
+things become more complicated: e.g., in multi-agent envi-            compute to evaluating open models. Section 5 describes our
+ronments, determining the best choice depends on beliefs              results; here are some highlights. Across our benchmark, we
+about how other agents will act. In still others, impossibility       found that model size correlated heavily with performance:
+results rule out all desirable options, e.g., when deciding           models smaller than 40 billion parameters were not reliably
+how to aggregate multiple agents’ preferences. Finally, in            able to outperform random guessing. Model performance
+some cases human decision-makers exhibit cognitive biases             consistently decreased with grade level. GPT-4 Turbo was
+that deviate from rational behavior, even when the theory             consistently the best model across all of our metrics and
+makes a firmly prescriptive recommendation.                           elements; its performance was excellent up to grade 5 (Dom-
+                                                                      inant Strategies), decent up to grade 7 (Avoidance of the
+How can we hope to assess rationality when the landscape
+                                                                      Endowment Effect), and fell to random guessing from grade
+is so complex? Our approach is to identify tests for which
+                                                                      9 (Best Response) and above. Self-explanation and few-shot
+the “rational” answer is well defined. In cases where the
+                                                                      prompting were consistently able to help. Self-explanation
+prescriptive recommendation is clear, assessment is unprob-
+                                                                      generally enhanced performance, albeit offering the most
+lematic. More ambiguous settings can be tested by explicitly
+                                                                      gains on lower-grade-level questions. Few-shot prompting
+asking for a desired behavior (e.g., eliciting a Nash equilib-
+                                                                      enhanced model performance when we offered up to three
+rium strategy). Such settings also often admit prescriptive
+                                                                      examples, but decreased performance beyond that point.
+special cases: e.g., even in multi-agent environments, it is
+                                                                      We release all model outputs to support evaluation research
+never a good idea to play a dominated strategy. Axiomatic
+                                                                      and contributions, and provide a public website with all
+theories naturally give rise to meaningful tests, which can be
+                                                                      results (https://steer-benchmark.cs.ubc.ca),
+applied from the simplest settings (e.g., the von Neumann–
+                                                                      underlying model predictions details, alongside an exten-
+Morgenstern axioms for utility maximization) to the most
+                                                                      sible codebase to support the community in taking SRCs
+complex (Arrow’s axioms for social choice functions). Fa-
+                                                                      further.
+mous human subject experiments that illustrate cognitive
+biases also naturally give rise to tests, which human decision-
+makers often fail. In the end, we obtain a STEER Report               2. STEER: Systematic and Tuneable
+Card (SRC). We leave it to the end user to determine the                 Evaluation of Economic Rationality
+scoring rubric: e.g., should the agent receive good grades
+for doing well only in a subset of simple settings; for being         We followed the standard practice of encoding our bench-
+as rational as possible across the board; or for behaving as          mark in Multi-Choice Question Answer (MCQA) format
+humanly as possible, including replicating biases?                    (e.g., Hendrycks et al., 2021; Suzgun et al., 2022; Zellers
+                                                                      et al., 2019). More specifically, each question in a test is
+More specifically, our work begins by identifying a rich and          a description of a decision-making scenario and a set of
+hierarchical taxonomy of 64 “elements of rationality” for             candidate choices, exactly one of which is correct. All of
+which some notion of a “right answer” is well defined (Sec-           the generated questions are organized hierarchically in a
+tion 4). We define each element, giving an example of each            web application according to our taxonomy. The remainder
+in an appendix. We then move on (in Section 2) to describe            of this section describes the methodology we employed in
+how we used this taxonomy to derive a fine-grained bench-             generating and validating these questions and different ways
+mark distribution that serves as the basis for STEER report           users can leverage them to construct STEER Report Cards
+cards. Our benchmark allows each element of rationality to            (SRCs).
+be instantiated in multiple “grade levels” of difficulty and in
+multiple domains (e.g., asking questions about finance vs.            2.1. Generating and Validating Questions
+medicine). For 49 elements, we have written LLM prompts
+to synthetically generate 24,500 multiple-choice questions            It would be impractical to hand-construct enough questions
+and manually validated 2,450 generations in total. We also            to assess an agent’s behavior with statistical significance.
+discuss how SRCs can be graded. We built a web interface              Instead, we leverage a state-of-the-art LLM to generate a
+
+
+                                                                  2
+                                          STEER: Assessing the Economic Rationality of Large Language Models
+
+            1. Foundations                             2. Decisions In Single-Agent                                 3. Decisions in Multi-Agent                         4. Decisions on Behalf of
+                                                              Environments                                                Environments                                        Other Agents
+
+
+                                            2.1 Axioms of Utility in        2.2 Cognitive Biases in           3.1 Normal Form           3.2 Extensive Form     4.1 Axioms of Social
+  1.1 Arithmetic       1.2 Optimization                                                                                                                                                 4.2 Social Choice
+                                          Deterministic Environments       Deterministic Environments              Games                      Games                   Choice
+    Elements               Elements
+                                                  Elements                         Elements                      Elements                      Elements             Elements               Elements
+
+
+  1.3 Probability          1.4 Logic        2.3 Axioms of Utility in         2.5 Cognitive Biases in           3.3 Incomplete                 3.4 Infinitely    4.3 Properties in        4.4 Mechanism
+                                           Stochastic Environments          Stochastic Environments          Information Games              Repeated Games     Mechanism Design              Design
+    Elements               Elements
+                                                  Elements                         Elements                      Elements                       Elements            Elements               Elements
+
+           1.5 Theory of Mind
+                                                                2.4 Risk Neutral                                            3.5 Bayesian
+                Elements                                        Expected Utility                                               Games
+                                                                  Elements                                                       Elements
+
+
+
+
+Figure 1: High-level diagram of the taxonomy of elements of rationality. At the top level, we divide the space of decision
+making into settings: F OUNDATIONS, D ECISIONS IN S INGLE -AGENT E NVIRONMENTS, D ECISIONS IN M ULTI -AGENT
+E NVIRONMENTS, D ECISIONS ON B EHALF OF OTHER AGENTS; we further subdivide settings into modules (e.g., Cognitive
+Biases in Deterministic Environments) that capture conceptually similar behaviors.
+
+
+diverse and substantial set of questions, based on a hand-                                                  We refer to a set of questions for a given element restricted
+constructed inputs. More specifically, we go from an el-                                                    to a particular domain and grade level as a test. For each
+ement to a concrete question as follows. First, we write                                                    test, we implemented 5 templates, totaling between 10–40
+detailed text describing what makes a good question, such                                                   templates per element. Figure 3 provides two example ques-
+as that each outcome should have an associated probabil-                                                    tions testing the ability to Maximize Expected Utility that
+ity or that each action pair should have payoffs. These                                                     vary in both domains and grade levels. The user can explore
+instructions also describe formatting issues, such as how                                                   our full set of templates through our web application, select-
+numerical values should be represented. We also provide a                                                   ing elements and viewing questions across both domains
+gold-standard example for each question. Together, we call                                                  and grade levels.
+these two text strings a template. Along with the template
+                                                                                                            While GPT-4 Turbo was very good at generating questions,
+we append a static system prompt (illustrated in Figure 2)
+                                                                                                            it was not perfect. We thus performed a validation step.
+and then repeatedly give the resulting prompt to GPT-4
+                                                                                                            First, we programmatically removed questions that were
+Turbo to generate many questions from the template.
+                                                                                                            formatted incorrectly. For each element, domain, and grade
+We create several templates for each element, which differ                                                  level triple we then randomly spot-checked 100 samples
+in two key ways. First, we vary the subject matter of the                                                   (i.e., 10% of all generated questions) from what remained.
+question, which we call the domain, in order to enable as-                                                  We developed our web application to facilitate such vali-
+sessments of LLM robustness across topics. This approach                                                    dation, displaying the information needed to ensure that a
+not only tests an LLM’s capability within each domain but                                                   given generation not only adheres to the intended style and
+also enables assessment of an LLM’s proficiency, or lack                                                    complexity but also properly captures the corresponding
+thereof, in specific potential areas of application. Some                                                   element of rationality. We illustrate this interface in the ap-
+of our templates concern financial decision making, others                                                  pendix. In total, 98.54% of all spot-checked samples were
+focus on medicine and health care, still others ask about                                                   deemed valid by 2 validators, with the lowest validation rate
+technology and innovation. Second, most of our templates                                                    being 97% (Avoidance of the Endowment Effect).
+also vary in their difficulty levels. We assign every template
+a grade level ranging from 1–13 to help the user understand                                                 2.2. STEER Report Card
+its relative difficulty. For example, questions about arith-
+metic could vary from Grade 1 to Grade 2 depending on the                                                   SRCs function much like an academic report card, providing
+number of digits, whereas questions about Nash equilibrium                                                  a structured and tuneable evaluation of an LLM’s perfor-
+could vary between Grade 8 and Grade 11. Our specific                                                       mance. Users can subset questions in whichever way best
+choices of grade levels are obviously somewhat arbitrary,                                                   suits their needs or use cases. Figure 4 gives an example of
+but we aimed as much as possible to maintain a similar                                                      such a subset based on a grade range. We also include vari-
+difficulty level across templates in the same grade. Overall,                                               ous default subsets for different settings (e.g., single-agent
+templates at lower grade levels involve basic understanding                                                 decision making; multi-agent decision making), different
+or application of principles while templates at higher grade                                                models (e.g., matching human performance on cognitive
+levels challenge models with complex problem-solving, crit-                                                 biases), and different use cases (e.g., single-agent decision
+ical thinking, and synthesis of concepts.                                                                   making in medical domains). These default subsets are
+
+
+                                                                                                        3
+                                     STEER: Assessing the Economic Rationality of Large Language Models
+
+                                                                                                   Created a Project          Job                  Medicine              Auctions
+  Element: Avoidance of Sunk Cost Fallacy
+                                                              System Prompt
+                                                              Model: gpt-4
+  Domain:                   Created a Project                                                                            Sunk Cost
+                                                         You are an expert
+  Grade Level:                                 5         economics researcher.
+                                                                                                                              Maximize Expected Utility
+
+        User Prompt
+                                                                                                                                    Dominant Strategies In Simultaneous Games
+   Here is an example question, please generate one more and keep the
+   story brief. Please follow the formatting: instead of numbers write curly
+                                                                                                                                     Nash Equilibrium in Simultaneous Games
+   braces with the corresponding text.
+
+   Example:                                                                                                                                                                         Elements
+   Imagine that you are the manager of a factory projected to yield
+   {projected_old} million dollars in value and {spent} million dollars has                                                                 Element:       Maximize Expected Utility
+                                                                                        Element:         Maximize Expected Utility
+   already been spent on it. Unfortunately, there was a change in the market                                                                Domain:                  Medical Devices
+   and now the value projection of the factory falls to {projected_new} million         Domain:                        Job Offers
+                                                                                                                                            Grade Level:                             4
+   dollars. Would you rather:                                                           Grade Level:                             3
+   A. Spend an additional {remainder} million dollars to complete it.                                                                       Question:
+   B. Abandon the project.                                                              Question:
+                                                                                                                                              Your company is deciding between
+                                                                                         You have two job offers. Job P offers                two drugs. Drug X has a 35% chance
+                                                                                         a salary of $82,500 per year with no                 of saving 1500 patients, and a 65%
+                                                                                                          TextJob Q offers a
+                                                                                         chance of a bonus.                                                    Text 500 patients'
+                                                                                                                                              chance of worsening
+        Output
+        Model used: gpt-4                                                                salary of $75,000 per year but with a                health. Drug Y has a 50% chance of
+                                                                                         50% chance of a $20,000 bonus.                       worsening 1000 patients' health, and
+   Certainly, here is another example in the format you requested:
+                                                                                         Which job should you choose to                       a 50% chance of saving 1000
+                                                                                         maximize your expected salary?                       patients. Based solely on this
+   Imagine that you have developed a new software projected to bring in
+                                                                                                                                              information, what should you do?
+   revenue of {projected_old} million dollars. You have already invested                 A. Job P
+   {spent} million dollars in its development. As you near completion, a                                                                      A. Proceed with Drug X
+                                                                                         B. Job Q
+   competitor releases a product that makes your software less competitive,                                                                   B. Proceed with Drug Y
+   and your revised revenue projection drops to {projected_new} million
+   dollars. Now, would you rather:
+   A. Invest an additional {remainder} million dollars to finish development
+   and release the product.                                                           Figure 3: Example domain categorization of questions
+   B. Cut your losses and abandon the software project.
+                                                                                      within elements of rationality and an example of two ques-
+                                                                                      tions in different tests for the element Maximize Expected
+                                                                                      Utility. Top: We instantiate questions into as many domains
+Figure 2: Example generation of a question in Avoidance                               as makes sense for the element of rationality. This figure
+of Sunk Cost Fallacy. The generation has two parts: (1) a                             depicts the domain span of questions for four different ele-
+user prompt containing a template question and instructions                           ments. Bottom: Two questions in two domains: job offers
+to follow the formatting and style of the template; and (2) a                         and medical devices, and two grade levels. Here, a higher
+static system prompt. The template question in this example                           grade level means more outcomes in the options. On the
+is in domain created a project and at grade level 5.                                  right (Grade Level 4), we see two options each with two
+                                                                                      outcomes, whereas the one on the left (Grade Level 3) has
+                                                                                      one option with two outcomes and the other with one.
+accessible via our web application.
+
+2.2.1. S CORING AN LLM’ S P ERFORMANCE                                                the normalized accuracy of a model falls between -1 and 1.
+
+There are multiple ways in which users may want to evaluate                           Calibration. It is often important that an LLM be able to
+an agent’s economic rationality. We thus offer two different                          express the uncertainty of its recommendation. To quantify
+families of scoring metrics.                                                          such uncertainty, we follow Liang et al. (2022) and compute
+                                                                                      the expected calibration error (ECE; Naeini et al., 2015; Guo
+2.2.2. ACCURACY                                                                       et al., 2017). ECE measures how closely the probability an
+                                                                                      LLM assigns to its top answer matches the actual probability
+Exact-match accuracy. This is the fraction of questions                               of the correct answer, which in our case is 1. It is defined as
+answered correctly.                                                                   PN
+                                                                                         i bi ||(pi − ci )||, where pi is the exact-match accuracy in
+                                                                                      bin i, ci is the average probability assigned to top answers
+Normalized accuracy. Exact-match accuracy scores can
+                                                                                      in bin i, and bi is the fraction of data points in bin i. We
+be hard to interpret since tests differ in their number of mul-
+                                                                                      allow users to choose the number of bins, however, we used
+tiple choice options, meaning that the exact-match accuracy
+                                                                                      10 uniformly spaced over the interval [0, 1] as is standard.
+of random guessing varies. We can compensate for this by
+reporting the gap between the model’s exact-match accuracy
+                                                                                      2.2.3. ROBUSTNESS
+and random guessing. We compute normalized accuracy
+for a given element by subtracting the accuracy achieved                              We can also assess how robustly a model performs, both
+by random guessing from exact-match accuracy and then                                 across domains and across simpler elements that are con-
+dividing by the accuracy of random guessing. Observe that                             ceptual subproblems of a given element.
+
+                                                                                  4
+                                                          STEER: Assessing the Economic Rationality of Large Language Models
+
+ Parameters                   Overall Performance
+
+
+
+                                Rationality Report Card                -1.0                       0.429        1.0
+                                GPT-3.5 Turbo overall performance:
+
+                              Setting-Level Performance                       Module-Level Performance
+                                                                              (Decisions in Multi-Agent Environments)
+
+                               Foundations                                    Normal Form Games
+  GPT-3.5 Turbo
+                               Decisions in Single-Agent Environments         Extensive Form Games
+
+  Grade Range    2?8                                                           - Nash Equilibria in 2 Round Games
+                               Decisions in Multi-Agent Environments           - Nash Equilibria in 3 Round Games
+      Domains    All                                                           - Backward Induction in 2 Round
+   Perfomance    Normalized
+                                                                                 Games
+        metric   Accuracy      Decisions on the Behalf of Others               - Backward Induction in 3 Round
+                                                                                 Games
+
+
+
+
+Figure 4: Example SRC for GPT-3.5 Turbo. On the left
+are the components necessary for measuring performance:
+a grade range, a set of domains, a performance metric and a
+model. The rest of the report card summarizes performance
+over the entire dataset, grouped by settings and modules in                                                                 Figure 5: Dependency subgraph for iterated removal of
+which there are questions in the grade range. In this example,                                                              dominated strategies in two-agent games with two actions
+GPT-3.5 Turbo was evaluated on all domains in grades 2–                                                                     for each agent. This node requires the ability to interpret the
+8 and given a single example as part of the prompt of a                                                                     format of a game matrix (both normal and bimatrix form),
+task. The right-most pane drills into D ECISIONS IN M ULTI -                                                                correctly answer first-order false belief tasks (have knowl-
+AGENT E NVIRONMENTS; crossed out text illustrates tasks                                                                     edge of others’ beliefs), best respond (choose the best action
+omitted due to our grade level filter.                                                                                      given a fixed action for the opponent), and find dominated
+                                                                                                                            strategies. Being able to find dominated strategies requires
+                                                                                                                            the ability to have orderings over payoffs which is tested
+Domain robustness. One way to assess robustness is to                                                                       via transitivity and ignoring irrelevant alternatives. The
+measure, for each element, a model’s worst-case perfor-                                                                     remaining nodes can similarly be broken down.
+mance across all domains. We compute the domain robust-
+ness on each element by taking the minimum exact-match
+accuracy over all domains.
+                                                                                                                              P
+                                                                                                                            as x∈X |random_gap(s) − random_gap(x)|, where
+                                                                                                                            X = {x|random_gap(x) < random_gap(s)}x∈Gs
+Dependency robustness. There is a hierarchical structure                                                                    and Gs is the dependency subgraph for some element s.
+to our elements of rationality: reasoning about more ad-
+vanced elements (e.g., the ability to play a best response)
+depends conceptually on simper elements (e.g., the ability to                                                               3. Applying our Benchmark: Setup
+maximize utility), which of course can depend in turn on yet                                                                Table 1 lists the 14 different LLMs we evaluated, varying
+simpler ones (e.g., the abilities to maximize a function and                                                                in parameter size. We ran GPT 3.5 Turbo and 4 Turbo
+compute an expectation). We express all such conceptual                                                                     using OpenAI’s API (OpenAI, 2020) and AzureOpenAI.
+relationships between elements in a dependency graph. Fig-                                                                  We obtained 12 open-source models from the HuggingFace
+ure 5 depicts a concrete example of a dependency subgraph                                                                   Hub (Wolf et al., 2019) and ran them on an A100 GPU on
+for the element Iterated Removal of Dominated Strategies                                                                    Compute Canada. We decoded from all LLMs by sampling
+instantiated at Grade Level 7, where there are two agents                                                                   with temperature 0.
+each with two actions. The full graph which covers all
+elements in our taxonomy is accessible in our webapp.                                                                       As is standard in model evaluation work (c.f., Liang et al.,
+                                                                                                                            2022) we treat LLMs as black boxes that take input strings
+It is quite possible for an LLM to be proficient at advanced                                                                and output completion strings along with log probabilities,
+tasks without proficiency at more basic tasks that make                                                                     when available. That means we do not assume access to the
+them up. But such behavior is probably not desirable; it                                                                    internal activations nor a model’s training data. However,
+offers evidence that if the advanced task were discussed                                                                    we can employ various widely used techniques to tailor an
+in different terms (e.g., in ways that invoke the conceptu-                                                                 LLM to a desired question. Two common alternatives are
+ally simpler subtasks) model performance could fall. Con-                                                                   self-explanation and prompting.
+versely, if a model fails at an advanced task, it can be in-
+formative to trace performance backwards in the depen-                                                                      Self-Explanation. Much work has shown that question
+dency graph to understand the model’s performance on the                                                                    answering performance can be improved by asking a model
+task’s building blocks. We call the quantification of this                                                                  to explain its reasoning (Wei et al., 2022; Yoran et al., 2023;
+idea dependency robustness. For an element s we define it                                                                   Huang et al., 2023). We take two approaches to implement
+
+                                                                                                                        5
+                           STEER: Assessing the Economic Rationality of Large Language Models
+
+   Name                           Origin                             OF OTHER AGENTS asks the agent to aggregate the pref-
+   GPT-4 Turbo (1106-preview)     OpenAI (2023)                      erences of other agents to achieve good outcomes for all.
+   GPT-3.5 Turbo (0613)           ×                                  Lastly, F OUNDATIONS are core mathematical and cognitive
+   Llama-2 {7b, 13b, 70b}         Touvron et al. (2023b)             skills that underlie economic reasoning: arithmetic, opti-
+   Llama-2 Chat {70b}             Touvron et al. (2023b)             mization, probability, logic, and theory of mind. (We will
+   Llama {7b, 13b, 65b}           Touvron et al. (2023a)             hereafter list F OUNDATIONS first, since it is the simplest
+   Alpaca {13b}                   Taori et al. (2023)
+   Vicuna {13b}                   Chiang et al. (2023)               of all.) Each setting is partitioned into multiple distinct
+   Falcon {7b, 40b}               Almazrouei et al. (2023)           modules, and each module consists of multiple elements of
+   Falcon-Instruct {7b, 40b}      Almazrouei et al. (2023)           rationality: measurable capabilities that an economically ra-
+                                                                     tional agent is able to exhibit. We give a graphical overview
+Table 1: The 14 LLMs evaluated in Section 5 and their                of the taxonomy in Figure 1. Because it is very long, we
+numbers of parameters.                                               leave the element-by-element description of our taxonomy—
+                                                                     including an example for each element—to Appendix A.
+                                                                     Even given our restriction to representative, testable ele-
+this idea, which we dub separate and together. In separate,          ments of rationality rather than all of decision making, it
+we call the model twice, first providing the question text           is an under-specified task to determine what we should de-
+and candidate options and asking the model to explain its            mand of an economically rational agent. We, therefore,
+reasoning, and then providing only the candidate options             always align these canonical “right answers” with the von
+and asking the model to select the correct answer. In to-            Neumann-Morgenstern (vNM) utility axioms, which imply
+gether, we only call the model once, giving the model the            freedom from cognitive biases, hence e.g. time consistency
+question text and candidate options, asking it both to explain       and reference independence. In some cases, the vNM ax-
+its reasoning and to select the correct answer. For each ap-         ioms are not sufficiently constraining; thus, e.g., we align
+proach, we test the effect that it has on model performance          our canonical answers with a linear utility for money (and
+measured both on the accuracy and the confidence (i.e., log          thus risk neutrality). We set up our taxonomy and SRCs in
+probabilities) a model places on its answer.                         this way not because we believe that our canonical answer
+                                                                     is the right one for every circumstance, but instead because
+Few-Shot Prompting. Model performance can also be                    we found it simplest to present both elements of rationality
+improved by prepending a set of examples to the prompt.              and experimental results in terms of an easily understood
+For each question, we select n ∈ {0, 1, 2, 4, 5} examples            reference point.
+(within the corresponding domain and grade level) to test the
+effect of prompting on a model’s performance. Similarly, we
+measure the effect by computing the difference on accuracy
+                                                                     5. STEER Report Card
+and confidence for each element.                                     This section assesses models’ relative performance, their
+                                                                     robustness, and the extent to which they were improved
+4. Elements of Economic Rationality                                  by adaptation strategies. We report results using multiple
+                                                                     different SRCs to highlight different aspects of model perfor-
+Building a structured assessment of LLMs’ economic ra-               mance and to give more examples of how SRCs can be used.
+tionality requires first deciding on a way of structuring the        Our system’s web interface can be used to drill more deeply
+space of economic behavior. Fundamentally, economics                 into model performance, the underlying model outputs, and
+is concerned with decision making, and an economically               the precise inputs and prompts that generated those outputs.
+rational agent is one that makes good decisions given its            As space permits, we also showcase some of those features
+own interests and its knowledge about the environment in             here.
+which it acts. Different economic environments can give
+rise to very different decision-making problems. We thus             Whole-Benchmark SRC. Our first SRC aggregates perfor-
+divide our space into increasingly rich settings. We begin           mance across our whole benchmark, using both normalized
+with D ECISIONS IN S INGLE -AGENT E NVIRONMENTS, ex-                 accuracy and exact-match accuracy. Table 2 shows the re-
+ploring preference formation and decision making when                sults, sorting models in descending order by exact-match
+an agent has a set of alternative choices, each of which             accuracy. Performance closely followed models’ numbers of
+leads either to a single, deterministic outcome or to a draw         parameters regardless of which measure we used. For mod-
+from a probability distribution over outcomes. D ECISIONS            els that consistently performed better than random guessing
+IN M ULTI -AGENT E NVIRONMENTS enriches this setting,
+                                                                     (i.e., those with positive normalized accuracy), normalized
+requiring the agent to make decisions when the outcomes              accuracy and exact-match accuracy orderings were very sim-
+depend on interactions with other economic agents with               ilar. The same pattern held in our other experiments; thus,
+their own preferences and beliefs. D ECISIONS ON B EHALF             for space reasons, we hereafter focus mainly on normalized
+
+                                                                 6
+                           STEER: Assessing the Economic Rationality of Large Language Models
+
+   Model                   Normalized      Exact-Match               Turbo (−0.121) and GPT-3.5 Turbo (−0.214) performed
+                                                                     worse than random guessing; on Iterated Removal of Domi-
+   GPT-4 Turbo                   0.3302          63.61%              nated Strategies (an element testing the ability to iteratively
+   GPT-3.5 Turbo                 0.3071          61.69%              remove both the agent’s and their opponent’s actions that are
+   Llama-2 70b                   0.2897          41.73%              never best responses) both models performed slightly better:
+   Llama 65b                     0.2849          39.67%              GPT-4 Turbo achieved 0.067 on normalized accuracy and
+   Falcon 40b Instruct           0.1320          35.73%              −0.073 for GPT-3.5 Turbo. The two outlying points for
+   Falcon 40b                    0.0765          34.55%              GPT-4 Turbo in Grades 3 and 6 are due to strong perfor-
+   Llama 13b                    -0.2655          20.54%              mance on Avoidance of the Gambler’s Fallacy (an element
+   Llama-2 13b                  -0.3013          16.39%              testing understanding of independent probability draws)
+   Alpaca Native                -0.3044          22.19%              and Level-k Reasoning (an element that tests the ability to
+   Falcon 7b Instruct           -0.3146          23.50%              reason about others’ actions in canonical game theoretic
+   Falcon 7b                    -0.3709          21.39%              scenarios), respectively. GPT-3.5 Turbo—the second-best
+   Llama 7b                     -0.3768          14.16%              model—performed consistently worse, never closing more
+   Llama-2 7b                   -0.4344           9.06%              than about half the gap and falling to random guessing from
+                                                                     Grade 7 onwards.
+Table 2: Average accuracy. We report the average score
+each model had on our benchmark via normalized accuracy                                                         Llama 65b
+                                                                                                                GPT-4 Turbo
+                                                                                                                                          Falcon 40b Instruct
+                                                                                                                                          Alpaca Native
+                                                                                                                                                                         Falcon 7b Instruct
+                                                                                                                                                                         GPT-3.5 Turbo
+                                                                                                                                                                                                    Llama 7b
+                                                                                                                                                                                                    Llama-2 13b
+and exact-match; higher numbers are better. Scores are                                                          Llama-2 70b
+                                                                                                                Falcon 40b
+                                                                                                                                          Falcon 7b                      Llama 13b                  Llama-2 7b
+
+
+averaged without model adaptations.
+                                                                                                         0.75
+
+
+
+
+                                                                                                         0.50
+
+
+
+
+accuracy.
+
+
+                                                                               Normalized Accuracy
+                                                                                                         0.25
+
+
+
+
+We also made a head-to-head comparison between each pair                                                 0.00
+
+
+
+of models. GPT-4 Turbo was the most accurate model by                                                   −0.25
+
+
+a large margin, winning in nearly all matchups. However,
+                                                                                                        −0.50
+it still left a lot to be desired, closing only a third of the
+gap between random guessing and perfect answers. Of the                                                 −0.75
+
+
+
+remaining models, GPT-3.5 Turbo was the second most                                                     −1.00
+                                                                                                                0      1      2       3       4      5         6   7         8     9     10    11    12         13
+
+accurate, followed by Llama-2 70b. Performance again cor-                                                                                                Grade Level
+
+related strongly with model size. We did observe that Llama
+                                                                                                          1.0
+13b performed better than Llama-2 13b in both accuracy
+measures but that their ECEs were similar.
+
+
+
+
+                                                                       Worst Case Normalized Accuracy
+                                                                                                          0.8
+
+
+Grade-Specific SRCs. The previous analysis shows that
+                                                                                                          0.6
+overall performance was relatively weak for even the best
+LLMs and terrible for smaller models. However, problems
+                                                                                                          0.4
+in our benchmark vary tremendously in difficulty. We thus
+constructed separate SRCs for each grade level, which we                                                  0.2
+expected would impact model performance. The results are
+illustrated in Figure 6. The red line indicates the perfor-                                               0.0
+
+mance level of random guessing. Among models exceeding
+that threshold, performance degraded quite consistently as                                              −0.2
+
+grade level increased. GPT-4 Turbo closed three quarters of
+the gap between guessing and perfect answers on Grade 0                                                 −0.4
+
+
+(F OUNDATIONS) questions, which are the easiest and have                                                        −0.4          −0.2          0.0          0.2           0.4        0.6         0.8         1.0
+
+also received the most previous study in the NLP commu-                                                                              Average Normalized Accuracy
+nity. Performance fell fast, with only about half the gap
+                                                                     Figure 6: Top: Performance by grade level for each LLM.
+closed in Grades 3–4 and performance roughly the same
+                                                                     Bottom: worst-case normalized accuracy over all domains
+as random guessing from Grade 9 onwards. Many tests in
+                                                                     vs. avg normalized accuracy for each element–model pair.
+this grade require reasoning about strategic and bimatrix
+representation of games. For instance, on Best Response
+(an element testing the ability to select the action with the        Cognitive Bias SRC. It is interesting to ask whether models
+highest payoff given a fixed opponent action) both GPT-4             deviate from economically rational behavior in the same
+
+                                                                 7
+                           STEER: Assessing the Economic Rationality of Large Language Models
+
+ways as humans. To find out, we constructed an SRC fo-               Effect (0.079 → 0.508) and Avoidance of the Reflection
+cused only on elements measuring such tendencies: those              Effect (0.390 → 0.865) under this adaptation. Performance
+from deterministic environments and stochastic environ-              on the Avoidance of the Reflection Effect continued to dom-
+ments. Focusing on the GPT models, we observed relatively            inate Avoidance of the Certainty Effect.
+more rational (vs. human-like) performance in deterministic
+                                                                     Few-Shot Prompting.
+environments (GPT-4 Turbo: 0.575; GPT-3.5 Turbo: 0.307)
+than in stochastic environments (GPT-4 Turbo: 0.377; GPT-            We investigated how the number of examples provided in
+3.5 Turbo: 0.173). In the latter case, both GPT models               model context influenced performance, varying the maxi-
+were susceptible to framing effects. Performance on the              mum number of examples across n ∈ {0, 1, 2, 4, 5}, and
+Avoidance of the Certainty Effect (an element testing for            rounding down when necessary to fit into the context win-
+consistency in risk preferences when the payoffs are posi-           dow. We observed that all models clearly improved from
+tive) was far worse than on the Avoidance of the Reflection          n = 0 to n = 3, including many which had exhibited
+Effect (an element testing for consistency in risk preferences       lower-than-random-guessing accuracy in the zero-shot set-
+when the payoffs are negative).                                      ting. GPT-4 Turbo’s performance plateaued at 3 examples;
+                                                                     at 4 examples and above, we observed deteriorating perfor-
+Domain Robustness SRC. Figure 6 shows one point for
+                                                                     mance for all models.
+each element–model pair representing worst-case vs. aver-
+age normalized accuracy across different domains. It shows
+high variation in performance even when models achieved              6. Discussion and Conclusions
+high average accuracy. We saw the largest variation in per-
+                                                                     Our work presents a novel benchmark for assessing LLM’s
+formance in questions testing for Avoidance of Sunk Cost
+                                                                     ability to exhibit economically rational behavior, which re-
+Fallacy, which tests whether an LLM exhibits a human cog-
+                                                                     quires a complex mix of logic, probability, optimization,
+nitive bias; in particular, GPT-3.5 Turbo exhibited the most
+                                                                     reasoning about other humans, economic principles, and
+such bias in a domain concerned with investing in medical
+                                                                     contextual judgment. Our benchmark can be used to high-
+projects. We also saw large performance variation in GPT-4
+                                                                     light both the strengths and limitations of existing models
+Turbo when testing for Maximize Expected Utility (an ele-
+                                                                     and adaptation strategies, helping users to determine both
+ment testing the ability to select the option with the highest
+                                                                     where models can be relied upon and where they need more
+expected utility computed with respect to a linear utility
+                                                                     work. In the latter case, our benchmark can be directly
+function), where the worst performance was in a domain
+                                                                     useful, offering opportunities for fine-tuning, curating new
+contrasting different medical treatment options. We did not
+                                                                     datasets, and aiding in the development of specialized ar-
+observe that GPT-4 Turbo had any consistent preference
+                                                                     chitectures. The results could impact a wide variety of
+towards risk-seeking or risk-averse behavior; rather its per-
+                                                                     economic tasks, such as market analysis, policy simulation,
+formance simply became noisier in the medical treatment
+                                                                     and understanding consumer behavior. We also foresee con-
+domain. We conjecture that this could be due to model align-
+                                                                     tinued progress towards LLMs that mimic human reasoning,
+ment (RLHF) having treated medical domains as sensitive.
+                                                                     whether rational or not. Once they reach a sufficiently high
+Dependency Robustness SRC. Performance in higher-                    quality threshold, LLMs will also be able to act as prox-
+order elements was almost always worse than in their pre-            ies in economic studies, facilitating cheaper, bigger, better
+requisites. A notable exception was Pure Nash Equilibrium            controlled, and more replicable experiments.
+and its immediate ancestor Iterated Removal of Dominated
+                                                                     In future work we intend to further expand our benchmark
+Strategies (IRDS): across the board, LLMs performed worse
+                                                                     to draw further elements of rationality from the economic
+on IRDS. This is an especially difficult task for LLMs as it
+                                                                     literature and expand on the elements we have currently.
+requires iteratively simplifying the bimatrix game represen-
+                                                                     We welcome community feedback about elements that we
+tation. This demonstrates a weakness in our test for Pure
+                                                                     should add! We also plan to conduct more experiments (on
+Nash Equilibrium (and highlights the value of dependency
+                                                                     these new elements and also on additional LLMs, adapta-
+robustness analysis); evidently, that test does not adequately
+                                                                     tion strategies, and prompts) and to analyze them in more
+represent dominance-solvable games.
+                                                                     detail than space has allowed here. In particular, we note
+Self-Explanation. All models showed overall performance              that it may (or may not) be possible to achieve much better
+improvement when asked to explain their reasoning (in both           performance on our tests via different prompting and adap-
+separate and together versions). However, performance                tation strategies; our experimental results should thus be
+gains were not uniform across modules, with the biggest              understood as lower bounds on the performance each model
+gains coming in low-grade-level questions and cognitive              can achieve. Finally, it would be very useful to determine
+biases in stochastic environments. GPT-4 Turbo’s perfor-             how humans score on our tests to yield a baseline against
+mance increased dramatically on Avoidance of the Certainty           which LLMs can be evaluated.
+
+
+                                                                 8
+                           STEER: Assessing the Economic Rationality of Large Language Models
+
+Acknowledgements                                                    enough to deploy.
+This work was funded by an NSERC Discovery Grant,
+a DND/NSERC Discovery Grant Supplement, a CIFAR                     References
+Canada AI Research Chair (Alberta Machine Intelligence              G. Aher, R. I. Arriaga, and A. T. Kalai. Using large language
+Institute), awards from Facebook Research and Amazon                  models to simulate multiple humans and replicate human
+Research, and DARPA award FA8750-19-2-0222, CFDA                      subject studies, 2023.
+#12.910 (Air Force Research Laboratory).
+                                                                    E. Akata, L. Schulz, J. Coda-Forno, S. J. Oh, M. Bethge, and
+Yoav Levine is supported by the Israeli CHE postdoc fel-
+                                                                       E. Schulz. Playing repeated games with large language
+lowships for outstanding researchers in the data science
+                                                                       models. arXiv preprint arXiv:2305.16867, 2023.
+fields.
+The work by Moshe Tennenholtz was supported by fund-                E. Almazrouei, H. Alobeidli, A. Alshamsi, A. Cappelli,
+ing from the European Research Council (ERC) under the                R. Cojocaru, M. Debbah, É. Goffinet, D. Hesslow, J. Lau-
+European Union’s Horizon 2020 research and innovation                 nay, Q. Malartic, et al. The falcon series of open language
+programme (grant agreement 740435)                                    models. arXiv preprint arXiv:2311.16867, 2023.
+
+                                                                    D. Araci.      Finbert: Financial sentiment analysis
+Impact Statement                                                      with pre-trained language models. arXiv preprint
+                                                                      arXiv:1908.10063, 2019.
+The use of LLMs to act as agents would have many social
+consequences. Existing systems that act as agents would             Y. Bai, S. Kadavath, S. Kundu, A. Askell, J. Kernion,
+be superseded once their performance is exceeded, yield-              A. Jones, A. Chen, A. Goldie, A. Mirhoseini, C. McK-
+ing better outcomes. A possible drawback here is that the             innon, et al. Constitutional ai: Harmlessness from ai
+validation of an LLM-based system is much more difficult              feedback. arXiv preprint arXiv:2212.08073, 2022.
+than that of an explicitly programmed system, so occasional
+errors could cause significant harm even if overall perfor-         T. Cai, X. Wang, T. Ma, X. Chen, and D. Zhou. Large
+mance were better. Some tasks would be delegated from                  language models as tool makers.    arXiv preprint
+people to AI, lowering the cost of performing those tasks,             arXiv:2305.17126, 2023.
+helping to achieve better outcomes and freeing people from
+tedious work. Such delegation would also displace paid              Z. Chen, W. Chen, C. Smiley, S. Shah, I. Borova, D. Lang-
+human labor, potentially disadvantaging workers. Unreli-               don, R. Moussa, M. Beane, T.-H. Huang, B. Routledge,
+able agent behavior has the potential to cause significant             and W. Y. Wang. FinQA: A dataset of numerical rea-
+harm of various kinds, ranging from economic losses to the             soning over financial data. In Proceedings of the 2021
+inadvertent perpetuation of biases.                                   Conference on Empirical Methods in Natural Language
+                                                                      Processing, pages 3697–3711, Online and Punta Cana,
+The use of LLMs as substitutes for people in “human subject”           Dominican Republic, Nov. 2021. Association for Compu-
+experiments would offer many benefits: such experiments                tational Linguistics. doi: 10.18653/v1/2021.emnlp-main.
+could be performed more often, to a higher degree of sta-              300. URL https://aclanthology.org/2021.
+tistical significance, and without the risk of causing harms           emnlp-main.300.
+to the human subjects. It also poses risks: biases from
+LLMs could be replicated in research findings, and more             W.-L. Chiang, Z. Li, Z. Lin, Y. Sheng, Z. Wu, H. Zhang,
+broadly if a study’s conclusions are unreliable, the applica-         L. Zheng, S. Zhuang, Y. Zhuang, J. E. Gonzalez,
+tion of research findings could cause social harm. We thus            I. Stoica, and E. P. Xing. Vicuna: An open-source
+advocate for the use of LLMs only to conduct exploratory              chatbot impressing gpt-4 with 90%* chatgpt quality,
+analyses, with subsequent validation performed using real             March 2023. URL https://lmsys.org/blog/
+human subjects.                                                       2023-03-30-vicuna/.
+In all of these cases just described, harms are magnified           D. Ellsberg. Risk, ambiguity, and the savage axioms. The
+when an LLM-based agent behaves unpredictably, unreli-                quarterly journal of economics, 75(4):643–669, 1961.
+ably, or inconsistently. Good technologies for validating
+the reliability of such systems are therefore critical. Our         I. Erev, E. Ert, O. Plonsky, D. Cohen, and O. Cohen. From
+own work is only a first step in this direction, but we hope           anomalies to forecasts: Toward a descriptive model of de-
+that it will help developers to understand the quality and             cisions under risk, under ambiguity, and from experience.
+robustness of agent architectures and thus to make informed            Psychological review, 124(4):369, 2017.
+decisions about whether a given system is safe and reliable
+                                                                    D. Fudenberg and J. Tirole. Game Theory. MIT Press, 1991.
+
+                                                                9
+                           STEER: Assessing the Economic Rationality of Large Language Models
+
+S. Gehrmann, T. Adewumi, K. Aggarwal, P. S. Ammana-                  D. Kahneman and A. Tversky. Prospect theory: An analysis
+   manchi, A. Aremu, A. Bosselut, K. R. Chandu, M.-                    of decision under risk. Econometrica, 47(2):263–291,
+  A. Clinciu, D. Das, K. Dhole, W. Du, E. Durmus,                      1979.
+   O. Dušek, C. C. Emezue, V. Gangal, C. Garbacea,
+   T. Hashimoto, Y. Hou, Y. Jernite, H. Jhamtani, Y. Ji,             D. Kahneman and A. Tversky. Choices, values, and frames.
+   S. Jolly, M. Kale, D. Kumar, F. Ladhak, A. Madaan,                  American psychologist, 39(4):341, 1984.
+   M. Maddela, K. Mahajan, S. Mahamood, B. P. Ma-
+                                                                     M. J. Kochenderfer. Decision making under uncertainty:
+   jumder, P. H. Martins, A. McMillan-Major, S. Mille,
+                                                                      theory and application. MIT press, 2015.
+   E. van Miltenburg, M. Nadeem, S. Narayan, V. Nikolaev,
+  A. Niyongabo Rubungo, S. Osei, A. Parikh, L. Perez-                D. M. Kreps and R. Wilson. Sequential equilibria. Econo-
+   Beltrachini, N. R. Rao, V. Raunak, J. D. Rodriguez,                 metrica: Journal of the Econometric Society, pages 863–
+   S. Santhanam, J. Sedoc, T. Sellam, S. Shaikh, A. Shimo-             894, 1982.
+   rina, M. A. Sobrevilla Cabezudo, H. Strobelt, N. Sub-
+   ramani, W. Xu, D. Yang, A. Yerukola, and J. Zhou.                 P. Liang, R. Bommasani, T. Lee, D. Tsipras, D. Soylu,
+   The GEM benchmark: Natural language generation,                      M. Yasunaga, Y. Zhang, D. Narayanan, Y. Wu, A. Kumar,
+   its evaluation and metrics. In A. Bosselut, E. Dur-                  et al. Holistic evaluation of language models. arXiv
+   mus, V. P. Gangal, S. Gehrmann, Y. Jernite, L. Perez-                preprint arXiv:2211.09110, 2022.
+   Beltrachini, S. Shaikh, and W. Xu, editors, Proceedings
+   of the 1st Workshop on Natural Language Generation,               X. Liu, H. Yu, H. Zhang, Y. Xu, X. Lei, H. Lai, Y. Gu,
+   Evaluation, and Metrics (GEM 2021), pages 96–120,                   H. Ding, K. Men, K. Yang, S. Zhang, X. Deng, A. Zeng,
+   Online, Aug. 2021. Association for Computational Lin-               Z. Du, C. Zhang, S. Shen, T. Zhang, Y. Su, H. Sun,
+   guistics. doi: 10.18653/v1/2021.gem-1.10. URL https:                M. Huang, Y. Dong, and J. Tang. Agentbench: Eval-
+  //aclanthology.org/2021.gem-1.10.                                    uating llms as agents, 2023.
+
+C. Guo, G. Pleiss, Y. Sun, and K. Q. Weinberger. On cali-            G. Loewenstein and D. Prelec. Anomalies in intertemporal
+  bration of modern neural networks. In International con-             choice: Evidence and an interpretation. The Quarterly
+  ference on machine learning, pages 1321–1330. PMLR,                  Journal of Economics, 107(2):573–597, 1992.
+  2017.
+                                                                     D. McDuff, M. Schaekermann, T. Tu, A. Palepu, A. Wang,
+J. C. Harsanyi. Cardinal welfare, individualistic ethics, and          J. Garrison, K. Singhal, Y. Sharma, S. Azizi, K. Kulka-
+   interpersonal comparisons of utility. Journal of political          rni, et al. Towards accurate differential diagnosis with
+   economy, 63(4):309–321, 1955.                                       large language models. arXiv preprint arXiv:2312.00164,
+                                                                       2023.
+D. Hendrycks, C. Burns, S. Basart, A. Zou, M. Mazeika,
+  D. Song, and J. Steinhardt. Measuring massive multitask            C. K. Morewedge and C. E. Giblin. Explanations of the en-
+  language understanding. In International Conference                  dowment effect: an integrative review. Trends in cognitive
+  on Learning Representations, 2021. URL https://                      sciences, 19(6):339–348, 2015.
+  openreview.net/forum?id=d7KBjmI3GmQ.
+                                                                     M. P. Naeini, G. Cooper, and M. Hauskrecht. Obtaining well
+S. Hong, X. Zheng, J. Chen, Y. Cheng, J. Wang, C. Zhang,               calibrated probabilities using bayesian binning. In Pro-
+   Z. Wang, S. K. S. Yau, Z. Lin, L. Zhou, C. Ran, L. Xiao,            ceedings of the AAAI conference on artificial intelligence,
+   and C. Wu. Metagpt: Meta programming for multi-agent               volume 29, 2015.
+   collaborative framework, 2023.
+                                                                     Y. Nakajima. Baby agi, 2023. URL https://github.
+J. J. Horton. Large language models as simulated economic               com/yoheinakajima/babyagi.
+   agents: What can we learn from homo silicus? Technical
+                                                                     J. F. Nash Jr. Equilibrium points in n-person games. Pro-
+   report, National Bureau of Economic Research, 2023.
+                                                                        ceedings of the national academy of sciences, 36(1):48–
+J. Huang, S. Gu, L. Hou, Y. Wu, X. Wang, H. Yu, and                     49, 1950.
+   J. Han. Large language models can self-improve. In
+                                                                     OpenAI, Jun 2020. URL https://openai.com/
+   H. Bouamor, J. Pino, and K. Bali, editors, Proceedings
+                                                                       blog/openai-api.
+   of the 2023 Conference on Empirical Methods in Natu-
+   ral Language Processing, pages 1051–1068, Singapore,              OpenAI. Gpt-4 technical report, 2023.
+   Dec. 2023. Association for Computational Linguistics.
+   doi: 10.18653/v1/2023.emnlp-main.67. URL https:                   M. J. Osborne et al. An introduction to game theory, vol-
+   //aclanthology.org/2023.emnlp-main.67.                             ume 3. Oxford university press New York, 2004.
+
+                                                                10
+                          STEER: Assessing the Economic Rationality of Large Language Models
+
+R. Parayre. The strategic implications of sunk costs: A             M. Suzgun, N. Scales, N. Schärli, S. Gehrmann, Y. Tay,
+  behavioral perspective. Journal of Economic Behavior &             H. W. Chung, A. Chowdhery, Q. V. Le, E. H. Chi,
+  Organization, 28(3):417–442, 1995.                                 D. Zhou, , and J. Wei. Challenging big-bench tasks and
+                                                                     whether chain-of-thought can solve them. arXiv preprint
+J. S. Park, J. O’Brien, C. J. Cai, M. R. Morris, P. Liang,           arXiv:2210.09261, 2022.
+   and M. S. Bernstein. Generative agents: Interactive sim-
+   ulacra of human behavior. In Proceedings of the 36th             R. Taori, I. Gulrajani, T. Zhang, Y. Dubois, X. Li,
+   Annual ACM Symposium on User Interface Software and                C. Guestrin, P. Liang, and T. B. Hashimoto. Alpaca:
+   Technology, pages 1–22, 2023.                                      A strong, replicable instruction-following model. 2023.
+                                                                      URL https://crfm.stanford.edu/2023/03/
+Y. Qin, S. Hu, Y. Lin, W. Chen, N. Ding, G. Cui, Z. Zeng,
+                                                                      13/alpaca.html.
+  Y. Huang, C. Xiao, C. Han, Y. R. Fung, Y. Su, H. Wang,
+   C. Qian, R. Tian, K. Zhu, S. Liang, X. Shen, B. Xu,              H. Touvron, T. Lavril, G. Izacard, X. Martinet, M.-A.
+   Z. Zhang, Y. Ye, B. Li, Z. Tang, J. Yi, Y. Zhu, Z. Dai,            Lachaux, T. Lacroix, B. Rozière, N. Goyal, E. Hambro,
+   L. Yan, X. Cong, Y. Lu, W. Zhao, Y. Huang, J. Yan,                 F. Azhar, A. Rodriguez, A. Joulin, E. Grave, and G. Lam-
+  X. Han, X. Sun, D. Li, J. Phang, C. Yang, T. Wu, H. Ji,             ple. Llama: Open and efficient foundation language
+   Z. Liu, and M. Sun. Tool learning with foundation models,          models. ArXiv, abs/2302.13971, 2023a.
+   2023.
+                                                                    H. Touvron, L. Martin, K. R. Stone, P. Albert, A. Almahairi,
+Reworkd. Agentgpt, 2023. URL https://github.                          Y. Babaei, N. Bashlykov, S. Batra, P. Bhargava, S. Bhos-
+  com/reworkd/AgentGPT.                                               ale, D. M. Bikel, L. Blecher, C. C. Ferrer, M. Chen,
+                                                                      G. Cucurull, D. Esiobu, J. Fernandes, J. Fu, W. Fu,
+L. Savage. The Foundations of Statistics. John Wiley and
+                                                                      B. Fuller, C. Gao, V. Goswami, N. Goyal, A. S. Hartshorn,
+  Sons, New York, 1954. Revised and enlarged edition,
+                                                                      S. Hosseini, R. Hou, H. Inan, M. Kardas, V. Kerkez,
+  Dover, New York, 1972.
+                                                                      M. Khabsa, I. M. Kloumann, A. V. Korenev, P. S. Koura,
+T. Schick, J. Dwivedi-Yu, R. Dessì, R. Raileanu,                      M.-A. Lachaux, T. Lavril, J. Lee, D. Liskovich, Y. Lu,
+  M. Lomeli, L. Zettlemoyer, N. Cancedda, and                         Y. Mao, X. Martinet, T. Mihaylov, P. Mishra, I. Moly-
+  T. Scialom. Toolformer: Language models can teach                   bog, Y. Nie, A. Poulton, J. Reizenstein, R. Rungta,
+  themselves to use tools.   ArXiv, abs/2302.04761,                   K. Saladi, A. Schelten, R. Silva, E. M. Smith, R. Sub-
+  2023. URL https://api.semanticscholar.                              ramanian, X. Tan, B. Tang, R. Taylor, A. Williams,
+  org/CorpusID:256697342.                                             J. X. Kuan, P. Xu, Z. Yan, I. Zarov, Y. Zhang, A. Fan,
+                                                                      M. Kambadur, S. Narang, A. Rodriguez, R. Stojnic,
+R. Shah, K. Chawla, D. Eidnani, A. Shah, W. Du, S. Chava,             S. Edunov, and T. Scialom. Llama 2: Open founda-
+  N. Raman, C. Smiley, J. Chen, and D. Yang. When FLUE                tion and fine-tuned chat models. ArXiv, abs/2307.09288,
+  meets FLANG: Benchmarks and large pretrained lan-                   2023b. URL https://api.semanticscholar.
+  guage model for financial domain. In Proceedings of the             org/CorpusID:259950998.
+  2022 Conference on Empirical Methods in Natural Lan-
+  guage Processing, pages 2322–2335, Abu Dhabi, United              J. von Neumann and O. Morgenstern. Theory of Games
+  Arab Emirates, Dec. 2022. Association for Computa-                   and Economic Behavior. Princeton University Press,
+  tional Linguistics. doi: 10.18653/v1/2022.emnlp-main.                Princeton, 1944.
+  148. URL https://aclanthology.org/2022.
+                                                                    G. Wang, Y. Xie, Y. Jiang, A. Mandlekar, C. Xiao,
+  emnlp-main.148.
+                                                                      Y. Zhu, L. J. Fan, and A. Anandkumar. Voyager:
+Y. Shen, K. Song, X. Tan, D. S. Li, W. Lu, and Y. T.                  An open-ended embodied agent with large language
+  Zhuang. Hugginggpt: Solving ai tasks with chatgpt                   models. ArXiv, abs/2305.16291, 2023a. URL https:
+  and its friends in hugging face. ArXiv, abs/2303.17580,             //api.semanticscholar.org/CorpusID:
+  2023. URL https://api.semanticscholar.                              258887849.
+  org/CorpusID:257833781.
+                                                                    Z. Wang, S. Mao, W. Wu, T. Ge, F. Wei, and H. Ji. Un-
+Y. Shoham and K. Leyton-Brown. Multiagent systems: Al-                leashing cognitive synergy in large language models: A
+   gorithmic, game-theoretic, and logical foundations. Cam-           task-solving agent through multi-persona selfcollabora-
+   bridge University Press, 2008.                                     tion. arXiv preprint arXiv:2307.05300, 1(2):3, 2023b.
+A. Sinha and T. Khandait. Impact of news on the commod-             J. Wei, X. Wang, D. Schuurmans, M. Bosma, E. H.
+  ity market: Dataset and results. ArXiv, abs/2009.04202,              hsin Chi, F. Xia, Q. Le, and D. Zhou. Chain of
+  2020. URL https://api.semanticscholar.                               thought prompting elicits reasoning in large language
+  org/CorpusID:221555387.                                              models. ArXiv, abs/2201.11903, 2022. URL https:
+
+                                                               11
+                          STEER: Assessing the Economic Rationality of Large Language Models
+
+  //api.semanticscholar.org/CorpusID:                               best one. In multiagent settings it is also necessary to rea-
+  246411621.                                                        son about other agents’ beliefs. This setting lays out these
+                                                                    core skills, dividing them into five modules: Arithmetic;
+T. Wolf, L. Debut, V. Sanh, J. Chaumond, C. Delangue,               Optimization; Probability; Logic; and Theory of Mind. A
+  A. Moi, P. Cistac, T. Rault, R. Louf, M. Funtowicz, and           key difference between this setting and all of the others
+  J. Brew. Huggingface’s transformers: State-of-the-art nat-        that we propose is that most of its elements have already
+   ural language processing. ArXiv, abs/1910.03771, 2019.           been the subject of rich study by the NLP community. We
+                                                                    nevertheless include these elements here both to standardize
+S. Yao, J. Zhao, D. Yu, N. Du, I. Shafran, K. Narasimhan,
+                                                                    them within our framework, given their importance to eco-
+   and Y. Cao. React: Synergizing reasoning and acting in
+                                                                    nomic rationality, and to integrate foundations within our
+   language models, 2023.
+                                                                    dependency graph (discussed further in Section 2.2.3).
+O. Yoran, T. Wolfson, B. Bogin, U. Katz, D. Deutch, and
+  J. Berant. Answering questions by meta-reasoning over             A.1.1. M ODULE 1.1: A RITHMETIC
+  multiple chains of thought. In H. Bouamor, J. Pino, and           Economic reasoning is fundamentally quantitative, so arith-
+  K. Bali, editors, Proceedings of the 2023 Conference              metic operations are a bedrock foundation for much of what
+  on Empirical Methods in Natural Language Processing,              is to come.
+  pages 5942–5966, Singapore, Dec. 2023. Association
+  for Computational Linguistics. doi: 10.18653/v1/2023.             Element 1.1.a (Addition and Subtraction) The ability to
+  emnlp-main.364. URL https://aclanthology.                         add or subtract.
+  org/2023.emnlp-main.364.
+                                                                    Illustration 1.1.a What is 10 + 5?
+R. Zellers, A. Holtzman, Y. Bisk, A. Farhadi, and Y. Choi.
+  HellaSwag: Can a machine really finish your sen-
+                                                                    Element 1.1.b (Multiplication and Division) The ability
+  tence? In A. Korhonen, D. Traum, and L. Màrquez,
+                                                                    to multiply or divide.
+  editors, Proceedings of the 57th Annual Meeting of
+  the Association for Computational Linguistics, Florence,
+                                                                    Illustration 1.1.b The past five weeks you and your friend
+  Italy, July 2019. Association for Computational Lin-
+                                                                    have gone out for dinner and they have picked up the tab. If
+  guistics. doi: 10.18653/v1/P19-1472. URL https:
+                                                                    the cost of dinner was $30 each time, how much do you owe
+  //aclanthology.org/P19-1472.
+                                                                    your friend in total?
+S. Zhou, F. F. Xu, H. Zhu, X. Zhou, R. Lo, A. Sridhar,
+  X. Cheng, Y. Bisk, D. Fried, U. Alon, and G. Neubig.              Element 1.1.c (Compute Expectation) The ability to com-
+  Webarena: A realistic web environment for building au-            pute expected value given probabilities and outcomes.
+  tonomous agents, 2023.
+                                                                    Illustration 1.1.c Your weather app indicates that there
+X. Zhu, Y. Chen, H. Tian, C. Tao, W. Su, C. Yang, G. Huang,         will be a 20% chance of 0.5 inches of rain tomorrow. What
+  B. Li, L. Lu, X. Wang, Y. Qiao, Z. Zhang, and J. Dai.             is the expected value of the number of inches of rainfall
+  Ghost in the minecraft: Generally capable agents for              tomorrow?
+  open-world environments via large language models with
+  text-based knowledge and memory, 2023.                            A.1.2. M ODULE 1.2: O PTIMIZATION
+
+M. Zhuge, H. Liu, F. Faccio, D. R. Ashley, R. Csor-                 Much economic reasoning depends on the primitive opera-
+ dás, A. Gopalakrishnan, A. Hamdi, H. A. A. K. Ham-                 tion of identifying the best choice among a set of alternatives,
+ moud, V. Herrmann, K. Irie, et al. Mindstorms in nat-              sometimes given constraints.
+ ural language-based societies of mind. arXiv preprint
+ arXiv:2305.17066, 2023.                                            Element 1.2.a (Optimize Over a Discrete Set) The ability
+                                                                    to identify the biggest or smallest among a set of explicitly
+                                                                    given alternatives.
+A. Taxonomizing and Illustrating Elements
+                                                                    Illustration 1.2.a Which is bigger: $10 or $50?
+A.1. S ETTING 1: F OUNDATIONS
+                                                                    Element 1.2.b (Optimize a Continuous Function) The
+The economic model of rational decision making is highly            ability to identify a maximum or minimum value given a
+mathematical. An agent therefore needs to be fluent in a va-        specification of a continuous relationship between indepen-
+riety of mathematical basics to be able to compute the value        dent and dependent variables.
+of outcomes, reason about their likelihoods, and choose the
+
+                                                               12
+                           STEER: Assessing the Economic Rationality of Large Language Models
+
+Illustration 1.2.b A box without a top is to be made from a          Element 1.4.a (Categorical Syllogism) The ability to de-
+square piece of cardboard by cutting squares of side x from          duce if the conclusion logically follows from two assertions
+each corner and folding up the sides. If the original piece          (e.g., “A is in C and B is in A, is B in C?”).
+of cardboard is 15 inches on each side, what value of x will
+maximize the volume of the box?                                      Illustration 1.4.a All dolphins are mammals. All mammals
+                                                                     give live birth. Solely from the information provided, is the
+Element 1.2.c (Constrained Optimization) The ability                 following also true: All dolphins give live birth.
+to find the maximum or minimum of a function subject to
+constraints.                                                         Element 1.4.b (Conditional Syllogism) The ability to de-
+                                                                     duce if the conclusion logically follows from two conditional
+Illustration 1.2.c A factory produces two types of widgets,          statements (e.g., “If A then B and if B then C, if A then C?”).
+A and B. Each unit of A yields a profit of $10 and B yields
+$20. To manufacture, A requires 5 hours and B requires               Illustration 1.4.b If Karen is smart, then she will get good
+10 hours of labor. The total available labor is 15 hours.            grades. If Karen gets good grades then she will get into col-
+The factory aims to maximize profit. Determine the optimal           lege. Solely from the information provided, is the following
+production mix.                                                      also true: If Karen is smart, then she will get into a good
+                                                                     college.
+A.1.3. M ODULE 1.3: P ROBABILITY
+                                                                     Element 1.4.c (Logical Equivalence of Contrapositive)
+Reasoning under uncertainty is a critical framework for               The ability to deduce that logical statements and their
+rational decision making.                                            contrapositives are logically equivalent (e.g., “If A, then B”
+Element 1.3.a (Compute Probabilities of Outcomes) The                is equivalent to “if not B, then not A”).
+ability to compute probabilities of individual outcomes given
+                                                                     Illustration 1.4.c John believes that if he contributes to his
+a natural language description of a probability distribution.
+                                                                     retirement fund regularly, he will accumulate retirement
+Illustration 1.3.a A jar contains 5 red marbles, 3 blue mar-         savings. Which of the following statements is logically
+bles, and 2 green marbles. If a single marble is drawn at            equivalent?
+random from the jar, what is the probability of drawing a
+red marble?                                                          A.1.5. M ODULE 1.5: T HEORY OF M IND
+                                                                     Theory of mind is the understanding that others have beliefs,
+Element 1.3.b (Complement Rule) The ability to compute
+                                                                     desires, intentions, and perspectives that are different from
+the complement probability of an event (i.e., the probability
+                                                                     one’s own. This is crucial for predicting and interpreting
+that it does not occur).
+                                                                     the actions of others, especially in competitive contexts or
+Illustration 1.3.b You are fishing and there are two fish in         when there is incomplete information about others’ actions
+the pond: carp and trout. With probability 0.85 you will             or intentions.
+catch a trout or nothing at all. How likely are you to catch
+                                                                     Element 1.5.a (First-Order False Belief) The ability to
+a carp?.
+                                                                     identify the beliefs that an agent has that are different from
+Element 1.3.c (Bayes’ Rule) The ability to update                    the actual truth or the agent’s own belief.
+probabilistic beliefs according to Bayes’ Rule: Let A
+and B be events and P (B) ̸= 0, then P (A|B) =                       Illustration 1.5.a Sam leaves his red ball in his basket and
+P (B|A)P (A)/P (B).                                                  goes out to play. While he is away, Anne moves the red ball
+                                                                     to her own box. Where will Sam look for his red ball when
+Illustration 1.3.c In rugby, Tom has a 55% chance of scor-           he comes back?
+ing a try. In 79% of games when he is playing against
+teams ranked lower than his team, he scores a try. He                Element 1.5.b (Second-Order False Belief) The ability
+plays against lower-ranked teams 27% of the time. Tom just           to identify the beliefs that an agent has about what another
+scored a try, what is the probability he was playing against         agent believes that are different from the actual truth or the
+a lower-ranked team?                                                 agent’s own belief.
+
+                                                                     Illustration 1.5.b Julia parks her bike at the end of the
+A.1.4. M ODULE 1.4: L OGIC
+                                                                     driveway before going inside her house. After she enters,
+Logical reasoning forms a basis for much rational reason-            her friend moves the bike to the garage to protect it from
+ing, and so constitutes another category of mathematical             the rain. When Julia looks to go out again, where will her
+foundations.                                                         friend think she will first look for her bike?
+
+                                                                13
+                             STEER: Assessing the Economic Rationality of Large Language Models
+
+A.2. S ETTING 2: D ECISIONS IN S INGLE -AGENT                            able: Treatment A: Guarantees a moderate improvement in
+     E NVIRONMENTS                                                       the patient’s condition (utility: 50) but includes a mild, man-
+                                                                         ageable side effect (utility: −10). Treatment B: Provides
+We now turn to explicitly assessing economic rational-
+                                                                         significant improvement in the patient’s condition (utility:
+ity. Throughout this paper we leverage the von Neumann–
+                                                                         100) but comes with a risk of a severe, albeit rare, side effect
+Morgenstern expected utility model (vNM; von Neumann
+                                                                         (utility: −50). Which treatment would you be more inclined
+and Morgenstern, 1944), which provides a comprehensive
+                                                                         to recommend, considering the risk-benefit balance?
+framework establishing ideal norms for how a decision-
+maker should act (Harsanyi, 1955). This normative aspect                 Element 2.1.b (Transitivity) The ability to be consistent
+is critical for us, as it allows us to identify testable elements        in preferences over options. E.g., if A is preferred over B,
+of rationality. The dominance of the vNM approach in eco-                and B over C, then A should be preferred over C.
+nomic analysis can be attributed to two key characteristics.
+First, it makes predictions based on a sparse description of             Illustration 2.1.b Imagine you are deciding on an activity
+the choice problem: the only components that need to be                  for tomorrow and you would rather play tennis than go on
+specified are the agent’s objectives and constraints. Second,            a run but would rather run than go for a swim. Would you
+it applies to an extremely wide range of choices, extending              rather play tennis or go for a swim?
+beyond traditional economic matters like consumption and
+savings to personal decisions regarding education, career,               Element 2.1.c (Independence) The ability to remain con-
+and healthcare, and business decisions about production                  sistent in preferences between pairs of options regardless
+levels, technological investments, workforce management,                 of the presence of other alternatives. E.g., if A is preferred
+and market entry and exit strategies.                                    to B, introducing a third option C should not change this
+                                                                         preference.
+There exist various scenarios in which the vNM model’s
+qualitative predictions are robustly violated in human sub-              Illustration 2.1.c You need a new phone and there are two
+ject studies. While individual human decision-makers are                 options at your local store. Phone A with quality level 90
+not typically able to articulate general decision rules that             which costs $1000 and Phone B with quality level 100 which
+explain their own behavior, a descriptive literature in behav-           costs $1250. Which would you choose? Suppose the person
+ioral economics has attempted to identify such rules as a                helping you tells you there is another phone, Phone C, in
+way of capturing consistent ways in which human choice be-               the back with quality level 80 and costs $1100. Which of the
+havior deviates from the rational ideal (notably, c.f. (Savage,          three phones would you choose now?
+1954; Kahneman and Tversky, 1979); for a recent survey,
+see (Erev et al., 2017)). These are of particular interest both          A.2.2. M ODULE 2.2: AVOIDANCE OF C OGNITIVE
+because they are likely to be exhibited by humans and may                       B IASES IN D ETERMINISTIC E NVIRONMENTS
+also be exhibited by LLMs trained on examples of human
+reasoning.                                                               A wide range of cognitive biases have been identified by the
+                                                                         descriptive economic literature. We identify their opposites
+We follow (Kochenderfer, 2015) in organizing the modules                 as elements of rationality.
+in this setting by the normative axioms in deterministic and
+stochastic environments as well as deviations from these                 Element 2.2.a (Avoidance of Sunk Cost Fallacy) The abil-
+axioms drawn from the descriptive literature.                            ity to walk away from an investment at any point where its
+                                                                         future costs exceed its expected future benefits, disregarding
+A.2.1. M ODULE 2.1: A XIOMS OF U TILITY IN                               prior investments. (Parayre, 1995)
+       D ETERMINISTIC E NVIRONMENTS
+                                                                         Illustration 2.2.a Imagine you are managing a project for
+The vNM utility theory rests on a set of axioms, which are
+                                                                         your company. The project has already cost $500,000,
+easy to interpret as elements of rationality. We begin with
+                                                                         but recent analysis suggests that it is not going to deliver
+the simplest description of these axioms, in which the agent
+                                                                         the expected benefits and the revised revenue projection is
+confronts choices in deterministic environments.
+                                                                         $700,000. At this point, you can either continue investing
+                                                                         $800,000 more in the hope of making the project moderately
+Element 2.1.a (Completeness) The ability to determine a                  successful or abandon it. What should you do?
+preference between two options A and B. E.g., prefer A
+over B, B over A, or indifference.                                       Element 2.2.b (Avoidance of Endowment Effect) The
+                                                                         agent’s maximum willingness to pay to acquire an object
+Illustration 2.1.a You are a medical professional faced                  should be the same as the price they are willing to accept
+with recommending a treatment plan for a patient with a                  to sell that same object when they own it. (Morewedge and
+chronic condition. There are two treatment options avail-                Giblin, 2015)
+
+                                                                    14
+                           STEER: Assessing the Economic Rationality of Large Language Models
+
+Illustration 2.2.b You were at a gift exchange with your              is preferred to B, introducing a third lottery C should not
+friends and received a wallet. Another friend of yours re-            change this preference.
+ceived a hat. This friend asked if you would like to trade,
+and you politely declined. However, you have since lost that          Illustration 2.3.c You have two travel options: Option A:
+wallet. You are now in a similar situation and receive a hat.         80% chance of sunny weather at a beach destination and
+Another friend of yours received a wallet. This friend asks           rainy otherwise. Option B: 45% chance of good snow con-
+you if you would like to trade. Do you accept their offer?            ditions at a ski resort, 55% chance of poor snow conditions.
+                                                                      Which travel option will you choose? You are now informed
+Element 2.2.c (Avoidance of Time Inconsistency) The                   of a third option: Option C: 67% chance of sunny weather
+ability to be consistent in preferences across time; e.g., not        at a beach destination and rainy otherwise. Now which
+preferring immediate rewards to larger future rewards when            travel option will you choose?
+waiting would lead to greater overall utility. (Loewenstein
+and Prelec, 1992)                                                     A.2.4. M ODULE 2.4: R ISK N EUTRAL E XPECTED
+                                                                             U TILITY C OMPUTATIONS
+Illustration 2.2.c Suppose you were asked and had made a
+choice to receive $10 dollars today rather than $20 dollars           This module includes elements evaluating adherence to a
+tomorrow. You are asked to make a similar choice between              linear utility function when computing expected utilities,
+getting $10 after 15 days or $20 after 16 days, which would           delving into the behavioral patterns exhibited by individuals
+you choose?                                                           and institutions in their approach to risk.
+
+                                                                      Element 2.4.a (Compute Expected Utility) The ability to
+A.2.3. M ODULE 2.3: A XIOMS OF U TILITY IN                            correctly compute the sum of the products of each outcome’s
+       S TOCHASTIC E NVIRONMENTS                                      utility and its probability.
+We now elaborate our economic environment to include a
+stochastic relationship between an agent’s choices and the            Illustration 2.4.a A patient has a 40% chance of recovery
+resulting economic outcomes. Here, vNM adapts the utility             with Treatment A. The utility of recovery is 50, while the
+theory axioms to guide rational decision making by defining           utility of not recovering is 15. Calculate the expected utility
+“lotteries”: probabilistic combinations of outcomes.                  for Treatment A.
+
+                                                                      Element 2.4.b (Maximize Expected Utility) The ability to
+Element 2.3.a (Completeness over Lotteries) The ability
+                                                                      select the prospect with the highest expected utility.
+to determine a preference between two lotteries A and B.
+E.g., prefer A over B, B over A, or indifference.                     Illustration 2.4.b You currently have two job offers. Job
+                                                                      P offers a salary of $75,972 per year with no chance of a
+Illustration 2.3.a Consider a scenario where you have to
+                                                                      bonus. Job Q offers a salary of $69,183 per year but with a
+choose between two job offers. Job A offers a static income
+                                                                      55.34% chance of a $15,882 bonus. Which job should you
+of $70,000 per year with a low chance (20%) of a large
+                                                                      choose to maximize your expected salary?
+bonus ($5,000), while Job B offers a static income with an
+static income of $70,500 per year but with a high chance              Element 2.4.c (Avoidance of Risk-Averse Behavior) The
+(90%) of a small bonus ($1,000). Assuming no other differ-            ability to make decisions based on an objective evaluation
+ences between the jobs, which option would you prefer?                of all potential outcomes without over-valuing more certain
+                                                                      payoffs.
+Element 2.3.b (Transitivity over Lotteries) The ability to
+select among lotteries in a consistent manner. E.g., if A is          Illustration 2.4.c Imagine you are considering two invest-
+preferred over B, and B over C, then A should be preferred            ment options: Investment A guarantees a return of $10,000.
+over C.                                                               Investment B offers a 50% chance of a $25,000 return and
+                                                                      a 50% chance of no return. Which investment should you
+Illustration 2.3.b You have the following preferences over            choose?
+food: Preference X: A 62% chance of eating Italian cuisine
+is preferred over a 69% chance of eating Mexican cuisine.             Element 2.4.d (Avoidance of Risk-Seeking Behavior) The
+Preference Y: A 69% chance of eating Mexican cuisine is               ability to make decisions based on an objective evaluation
+preferred over a 11% chance of eating Japanese cuisine.               of all potential outcomes without over-valuing rare high-
+Which of the following is a consistent preference?                    reward outcomes.
+
+Element 2.3.c (Independence over Lotteries) The ability               Illustration 2.4.d As a doctor, you need to choose a
+to remain consistent in preferences between pairs of lotteries        treatment plan for a patient with a serious but non-life-
+regardless of the presence of other alternatives. E.g., if A          threatening condition. There are two treatment options:
+
+                                                                 15
+                            STEER: Assessing the Economic Rationality of Large Language Models
+
+Treatment A has an 80% chance of moderately improving                  Illustration 2.5.c Imagine you are given the opportunity
+the patient’s condition with minimal side effects (utility: 56)        to receive a sure gain of $50 (Option A) or a 50% chance
+but a 20% chance of having no effect (utility: 0). Treatment           to gain $100 and $0 otherwise (Option B). Which would
+B has a 30% chance of completely curing the patient (utility:          you choose? Suppose you were given another choice: you
+124) but a 70% chance of causing significant side effects              face a sure loss of $50 (Option C) versus a 50% chance to
+without improving the condition (utility: −18).                        lose $100 and $0 otherwise (Option D). Which would you
+                                                                       choose?
+Element 2.4.e (Avoidance of Loss Averse Behavior) The
+ability to make decisions based on an objective evaluation             Element 2.5.d (Avoidance of Ambiguity Aversion) The
+of all potential outcomes without disproportionately valuing           ability to be consistent across preferences towards known
+potential losses. (Kahneman and Tversky, 1984)                         and unknown risks (ambiguity) under differing framing.
+                                                                       (Ellsberg, 1961)
+Illustration 2.4.e There are two card games you can join.
+Game ALPHA charges $5 for entrance and has a 50%                       Illustration 2.5.d Consider an urn with 90 balls, 30 of
+chance of winning $10 and a 50% of losing $5. Game                     which are red, and the remaining 60 are either black or
+BETA charges $10 for entrance and has a 40% chance of                  yellow in an unknown proportion. Gamble A offers a re-
+winning $15 and a 60% chance of winning $3. Which game                 ward for drawing a red ball, and Gamble B offers a reward
+should you play to maximize your expected utility?                     for drawing a black ball. Simultaneously, Gamble C offers
+                                                                       a reward for not drawing a red ball, and Gamble D offers
+A.2.5. M ODULE 2.5: AVOIDANCE OF C OGNITIVE                            a reward for not drawing a black ball. Many people would
+       B IASES IN S TOCHASTIC E NVIRONMENTS                            choose Gamble A over B (implying a belief that there are
+                                                                       fewer than 30 black balls) and simultaneously choose Gam-
+Here, we include elements testing the agent’s ability to avoid         ble D over C (implying a belief that there are more than
+making contradictory or inconsistent behaviors, emphasiz-              30 black balls). This inconsistency showcases ambiguity
+ing how framing effects play in shaping risk-taking attitudes.         aversion.
+As we already did in M ODULE 2.3: AVOIDANCE OF C OG -
+NITIVE B IASES IN D ETERMINISTIC E NVIRONMENTS , we                    A.3. S ETTING 3: D ECISIONS IN M ULTI -AGENT
+state the opposite of each such behavior as an element of                   E NVIRONMENTS
+rationality.
+                                                                       Economic reasoning changes when the environment con-
+Element 2.5.a (Avoidance of Gambler’s Fallacy) The                     tains other agents, falling under the umbrella of game theory
+ability to avoid the incorrect belief that an outcome’s proba-         (c.f., Fudenberg and Tirole, 1991). The crucial difference is
+bility (when drawn independently) in the future is reduced if          that other agents cannot simply be modeled as behaving ran-
+it has occurred atypically often in the past.                          domly: they act to maximize their own utilities in response
+                                                                       to their own beliefs, which include beliefs about the agent’s
+Illustration 2.5.a Suppose you are given a fair coin and               behavior. Decision making in multi-agent environments
+after flipping it 5 times it has come up heads every time. On          thus builds on the elements of rationality already defined,
+the next flip, is it more likely to flip tails?                        but adds new ingredients.
+                                                                       To capture these dynamics, we subdivide the analysis into
+Element 2.5.b (Avoidance of the Certainty Effect) The                  different representations of strategic interaction as is com-
+ability to be consistent across preferences towards risk when          mon in many game theory textbooks (Osborne et al., 2004;
+the payoffs are positive. (Kahneman and Tversky, 1984)                 Fudenberg and Tirole, 1991; Shoham and Leyton-Brown,
+                                                                       2008). These representations help in understanding strate-
+Illustration 2.5.b Consider two options. Option A guaran-
+                                                                       gic interactions under different conditions in multi-agent
+tees receiving $30, while Option B offers an 80% chance
+                                                                       decision making scenarios.
+of receiving $45 and a 20% chance of receiving nothing.
+Which option would you choose? Now consider two more                   A.3.1. M ODULE 3.1: N ORMAL F ORM G AMES
+options: Option C: 25% chance to win $30 and 75% chance
+to win nothing and Option D: 20% chance to win $45 and                 Traditionally in game theory textbooks, a game is described
+80% chance to win nothing. In this scenario which option               by a matrix which shows the agents, strategies, and pay-
+would you choose?                                                      offs. This form is most commonly used for games where
+                                                                       decisions are made simultaneously but can represent any
+Element 2.5.c (Avoidance of the Reflection Effect) The                 game-theoretic interaction between agents. In this module,
+ability to be consistent across preferences towards risk when          we consider games in which agents interact only once se-
+the payoffs are negative. (Kahneman and Tversky, 1984)                 lecting strategies without knowledge of the other agents’
+
+                                                                  16
+                           STEER: Assessing the Economic Rationality of Large Language Models
+
+choices.                                                              Element 3.1.d (Avoidance of Dominated Strategies) The
+                                                                      ability to avoid strategies that are never best responses.
+Recognizing that LLMs can struggle with tabular data, we
+begin by assessing the ability to interpret games in both             Illustration 3.1.d Find the payoff matrix for a game below.
+natural language and with a payoff matrix. As we see, as              If you are the row player, what action should you not play?
+games increase in complexity, it becomes more reasonable
+to describe the game using a payoff matrix.                                                 Action X           Action Y
+                                                                            Action X     (93.08, 31.13)       (74.93, 4)
+Element 3.1.a (Interpret Games) The ability to select                       Action Y      (0.34, 83.31)     (−75.94, 24.88)
+the correct payoff given a set of actions in strategic form
+games: a matrix of payoffs for a single agent indexed by
+combinations of strategies by the agents and in bimatrix              Element 3.1.e (Iterated Removal of Dominated Strate-
+form games: the matrix includes sets of payoffs, one for              gies) The ability to systematically eliminate dominated
+each agent.                                                           strategies. This process is applied iteratively: after remov-
+                                                                      ing all dominated strategies for one agent, the analysis is
+Illustration 3.1.a You are about to play a game with your             reapplied to the remaining strategies, including reconsid-
+friend that can be described by the payoff matrix below. You          ering what might now be a dominated strategy for other
+are the row player so the first number in the cell is your            agents in light of the changes.
+payoff, what is your payoff if you play Odds and your friend
+plays Evens?                                                          Illustration 3.1.e Consider a game involving two agents,
+                                                                      each with three strategies: A, B, and C. Suppose you are
+                    Odds                   Evens
+  Odds      (12.132, −1931.435)      (10.032, −432.938)                                  Action K      Action L    Action M
+  Evens      (842.313, −74.257)       (−3.049, 43.982)                      Action K     (13, 12)        (5, 3)     (11, 1)
+                                                                            Action L      (2, 3)        (6, 12)     (15, 1)
+                                                                            Action M      (3, 2)         (9, 9)     (17, 4)
+Element 3.1.b (Best Response) The ability to compute
+and select the strategy with the highest payoff given an              the column player, where the first payoff in the cell is yours,
+opponent’s action.                                                    what action should you not play? Given your answer, what
+                                                                      action should your opponent not play?
+Illustration 3.1.b The company you are in charge of needs
+to decide on a marketing strategy for the upcoming holidays.          Element 3.1.f (Pure Nash Equilibrium) The ability to play
+There is only one other competitor in the marketplace and             a best response strategy when given knowledge that another
+you have to decide on a strategy sooner rather than later.            agent is also best responding (i.e., is rational). A pure Nash
+The payoff matrix is described below, and your competitor             equilibrium occurs when each agent is best responding to
+has decided to not spend much money in marketing this                 the strategies of others wherein no player can benefit by
+quarter. What should you do?                                          unilaterally changing their strategy. (Nash Jr, 1950)
+
+                           Spend     Don’t Spend                      Illustration 3.1.f Imagine a scenario where two drivers
+             Spend          (5, 5)     (10, 0)                        are hurtling towards each other and need to decide to go
+                                                                      left or right. If you both go right or both go left, then you
+           Don’t Spend     (0, 10)      (3, 3)
+                                                                      each attain a payoff of 20. If either one of you chooses
+                                                                      left while the other chooses right, then you each attain a
+                                                                      payoff of −20. Suppose your opponent is best responding to
+Element 3.1.c (Dominant Strategies) The ability to select
+                                                                      your actions, what is a strategy profile that exists in a Nash
+strategies that provide a greater payoff than any other strat-
+                                                                      equilibrium?
+egy, no matter what the other agents do. I.e., strategies that
+are a best response to all possible strategies.
+                                                                      A.3.2. M ODULE 3.2: E XTENSIVE F ORM G AMES
+Illustration 3.1.c Find the payoff matrix for a game below.           As mentioned, games permit multiple descriptions and ex-
+If you are the column player, what action should you play?            tensive form games are represented as trees, showcasing
+                                                                      the sequential aspect of decision making. In this module,
+                         Action X     Action Y                        we consider games where agents can either pick actions
+             Action X     (5, 10)      (4, 5)                         sequentially in a round-robin fashion (e.g., tic-tac-toe) or
+             Action Y      (0, 3)     (8, −3)                         simultaneously over multiple rounds (e.g., best two-out-of-
+                                                                      three rock-paper-scissors).
+
+                                                                 17
+                             STEER: Assessing the Economic Rationality of Large Language Models
+
+The definition of best response, dominated strategies, and               A.3.3. M ODULE 3.3: I MPERFECT I NFORMATION IN
+Nash equilibria in extensive form games are exactly as they                     E XTENSIVE F ORM G AMES
+are for normal form games. Indeed, every extensive form
+                                                                         In many situations agents must act with partial or no knowl-
+game can be converted to an equivalent strategic form or
+                                                                         edge of the actions of others, or even limited memory of
+bimatrix form game. However, Nash equilibrium is often
+                                                                         their own past actions. This is often represented as agents
+too weak a notion for extensive form games. In this module,
+                                                                         being unable to distinguish nodes in their own action set
+we consider a refinement on Nash equilibrium known as
+                                                                         across the tree. In this module, we consider a refinement on
+a subgame perfect Nash equilibrium. The analysis used
+                                                                         subgame perfect equilibrium: the sequential equilibrium.
+to find a subgame perfect Nash equilibrium is known as
+backward induction.                                                      Element 3.3.a (Sequential Equilibrium) The ability to
+                                                                         compute and select a strategy that exists in a sequential
+                                                                         equilibrium. (Kreps and Wilson, 1982)
+Element 3.2.a (Backward Induction) The ability to deter-
+mine the best action given the subsequent optimal actions                Illustration 3.3.a Imagine you are in a space station,
+working backwards from the end of the game.                              where a somewhat inebriated Resident finds themselves in
+                                                                         the station’s communal dining area, where individuals from
+                                                                         various parts of the galaxy come to dine and socialize. An
+Illustration 3.2.a Consider the following game: Alice and                Alien visitor enters the dining area to grab their first meal
+Bob are playing a three-round sequential game. In the                    of the day. This Alien can either be Formidable or Gentle,
+first round, Alice has to choose between Strategy A and                  a detail unknown to the Resident. It’s assumed that there’s
+Strategy B. If Alice chooses Strategy A, the game moves to               an equal chance (i.e., probability = 0.50) of the Alien being
+the second round (Round 2A), where Bob will then choose                  either type. Should the Resident decide to Confront, the
+between Strategy C and Strategy D. Choosing Strategy C                   Alien gains a reward of 2 units, but if the Resident opts to
+will end the game with a payoff of (4, 3) for Alice and                  Disregard, the Alien’s reward increases to 4 units. From
+Bob, respectively. If Bob opts for Strategy D, Alice faces a             the Resident’s perspective, Disregarding yields no gain (0
+decision in the third round (Round 3A) between Strategy G                units), confronting a Gentle Alien brings in 2 units, while
+and Strategy H, with payoffs (6, 2) and (3, 6), respectively.            challenging a Formidable Alien results in a loss of 1 unit.
+Alternatively, if Alice initially chooses Strategy B in the first        Before the interaction escalates to a potential confrontation,
+round, the game progresses to Round 2B. Here, Bob decides                the Alien chooses their meal: Nutrient Paste (which costs
+between Strategy E and Strategy F. Selecting Strategy E                  nothing) or Synthesized Ale, incurring a cost of 1 unit for
+takes them to Round 3B, where Alice must choose between                  a Formidable Alien and 3 units for a Gentle Alien. Under
+Strategy I and Strategy J, leading to payoffs (5, 4) and (1, 7),         what conditions (if any) can a sequential exist where both
+respectively. If Bob chooses Strategy F, the game ends with              types of Alien choose Synthesized Ale?
+payoffs (2, 5) for Alice and Bob, respectively. Suppose the
+game has progressed to Round 3A, and Alice is now deciding               A.3.4. M ODULE 3.4: I NFINITELY R EPEATED G AMES
+between Strategy G and Strategy H. Which strategy should
+                                                                         We have seen in the previous modules that long-term interac-
+Alice select to maximize her own payoff, given that Bob will
+                                                                         tions are fundamentally different from one-shot interactions
+choose his strategies optimally in any future interaction?
+                                                                         especially in the presence of uncertainty. Infinitely repeated
+                                                                         games also model a long-term relationship in which the
+                                                                         agents do not know when they will stop repeating the game:
+Element 3.2.b (Subgame-Perfect Nash Equilibrium) The
+                                                                         there is no pre-ordained number of repetitions. Therefore,
+ability to compute and select strategies in a Nash equilib-
+                                                                         we need new tools as agents can no longer use backwards
+rium not just for the game as a whole but also for every point
+                                                                         induction to find equilibrium solutions.
+in the game where the agent takes an action, regardless of
+the previous moves.                                                      Element 3.4.a (Feasibility in Infinitely Repeated Games)
+                                                                          The ability to identify if a payoff is feasible in a Nash
+                                                                         equilibrium of an infinitely repeated game.
+Illustration 3.2.b Two players, A and B, are bargaining
+over how to split $100. Player A proposes a split, and                   Illustration 3.4.a Consider a two-player infinitely re-
+Player B can either accept or reject it. If Player B accepts,            peated game where each player can either "Cooperate"
+the money is split according to the proposal. If Player B                (C) or "Defect" (D). The stage game payoffs are given by:
+rejects, both players get nothing. Suppose Player A proposes             If both players cooperate, they each get 3. If one cooperates
+giving $30 to Player B and keeping $70 for themselves.                   and the other defects, the cooperator gets 0 and the defector
+What should Player B do?                                                 gets 5. If both defect, they each get 1. Is (Player 1 gets 3,
+
+                                                                    18
+                              STEER: Assessing the Economic Rationality of Large Language Models
+
+ and Player 2 gets 2) a feasible payoff profile in the infinitely          A bad painting is worth 0 to the seller. The seller knows
+ repeated game?                                                            the painting’s quality. The agent (buyer) does not know for
+                                                                           certain whether the painting is good or bad, only that it is
+ Element 3.4.b (Enforceability in Infinitely Repeated                      good with probability 0.5 and bad with probability 0.5. A
+ Games) The ability to identify if a payoff is enforceable in              good painting is worth 5 to the agent. A bad painting is
+ a Nash equilibrium of an infinitely repeated game.                        worth 0 to the agent. What offer should the agent make?
+ Illustration 3.4.b In an infinitely repeated Prisoner’s
+ Dilemma, where each player can either “Cooperate” or                      Element 3.5.b (Subgame–Perfect Bayes–Nash Equilib-
+“Defect”, the stage game payoffs are: If both players cooper-              rium) The ability to compute and select a strategy that
+ ate, they each get 2. If one cooperates and the other defects,            satisfies the following:
+ the cooperator gets −1 and the defector gets 3. If both
+ defect, they each get 0. Assuming players discount future
+ payoffs with a common discount factor, is an average payoff                 1. (Bayes–Nash Equilibrium) The strategy maximizes
+ of 2 for each player per stage game an enforceable payoff                      their expected utility, given their beliefs about the other
+ with a discount factor of 0.75?                                                agents’ types and strategies, and given the strategies
+                                                                                of the other agents.
+Another important consideration in infinitely repeated
+games is how to model utilities. We consider the discounted
+utility model.                                                               2. (Subgame Perfection) The strategy constitutes a Bayes–
+                                                                                Nash Equilibrium not just for the whole game, but for
+ Element 3.4.c (Trigger Strategies) The ability to compute                      every subgame of the game. This means that even
+ and select the correct trigger strategy. E.g., a grim trigger                  when considering any smaller portion of the game
+ strategy, a tit-for-tat strategy, a tit-for-two-tat strategy, etc.             in isolation, the strategies still form a Bayes–Nash
+                                                                                Equilibrium.
+Illustration 3.4.c Consider a two-player infinitely repeated
+game where each player chooses either “High” (H) or “Low”
+(L) in each period. The one-shot payoffs are as follows: If                Illustration 3.5.b Suppose there is a firm (Firm A) decid-
+both choose H, each gets 4. If one chooses H and the other                 ing on entering into a market where there is already an
+L, the H chooser gets 2 and the L chooser gets 6. If both                  incumbent (Firm B). Firm A has three options, (1) it does
+choose L, each gets 3.                                                     not enter the market giving payoff of $2 million to Firm B
+                                                                           and none to Firm A, (2) it enters the market with an ag-
+Players discount future payoffs with a common discount                     gressive strategy, or (3) it enters with a passive strategy. In
+factor. Can the following trigger strategy sustain (H, H) as               cases (2) and (3) Firm B gets to make a decision that affects
+a subgame perfect equilibrium if the discount factor is 0.8:               the future payoff, but Firm A has to make a decision on a
+Play H until the other player plays L, then play L forever?                strategy before seeing how Firm B will respond and with-
+                                                                           out knowing exactly what the payoff will be. What strategy
+ A.3.5. M ODULE 3.5: BAYESIAN G AMES
+                                                                           should Firm A play that exists in a Nash equilibrium?
+ So far, the number of agents, the actions available to each
+ agent, and the payoffs have all been assumed to be common                 A.4. S ETTING 4: D ECISIONS ON B EHALF OF OTHER
+ knowledge among the agents. Note that this is true even of                     AGENTS
+ imperfect- information games; the actual moves of agents
+                                                                           In this final setting, we consider an agent who must make
+ are not common knowledge, but the game itself is. However,
+                                                                           a decision on behalf of other agents. For clarity, we call
+ Bayesian games allow us to represent agents’ uncertainties
+                                                                           this agent the decision-maker. In some cases, the decision-
+ about the very game being played. This lack of information
+                                                                           maker may be tasked with aggregating the preferences of
+ fundamentally changes how strategies are formed. We con-
+                                                                           a group of agents into some global, “social” preference; in
+ sider solution concepts in both normal form and extensive
+                                                                           others, it may make a choice from some arbitrary decision
+ form games.
+                                                                           set. In particular, the decision-maker may be tasked with
+ Element 3.5.a (Bayes–Nash Equilibrium) The ability to                     maximizing social good or with maximizing its own utility.
+ compute and select best responses with respect to beliefs                 A key modeling issue is whether the decision-maker is aware
+ about the other agents’ strategies, and can update these                  of the other agents’ true preferences or whether it must ask
+ beliefs based on observed strategies.                                     them to (potentially dishonestly) report them. We divide
+                                                                           modules on this axis following other texts in this space
+ Illustration 3.5.a A seller has a painting for sale that is               (Shoham and Leyton-Brown, 2008) denoting the former
+ either good or bad. A good painting is worth 1 to the seller.             scenario as social choice and the latter as mechanism design.
+
+                                                                      19
+                           STEER: Assessing the Economic Rationality of Large Language Models
+
+A.4.1. M ODULE 4.1: A XIOMS OF S OCIAL C HOICE                        Illustration 4.1.d In a community, there are three policy
+                                                                      options (X, Y, Z) and three individuals (1, 2, 3) with the
+In this module, we delve into the foundational principles of
+                                                                      following preferences: Individual 1 prefers X over Y, and
+constructing fair and effective decision-making processes
+                                                                      Y over Z. Individual 2 prefers Y over Z, and Z over X. In-
+within a group. We call a function mapping a collection
+                                                                      dividual 3 prefers Z over X, and X over Y. Which of the
+of individual preference profiles into a single aggregate
+                                                                      following social welfare functions ensures a non-dictatorial
+preference profile a social welfare function. We begin by
+                                                                      aggregation of these individual preferences?
+exploring the axioms that underpin these processes when
+the decision-maker knows all agents’ preferences.
+                                                                      A.4.2. M ODULE 4.2: S OCIAL C HOICE
+Element 4.1.a (Pareto Efficiency) The ability to select               Shifting from the theoretical axioms to applications, we
+a social welfare function that prefers A to B if all agents           explore basic voting schemes and fair division algorithms.
+prefer alternative A to alternative B.
+                                                                      Element 4.2.a (Plurality Vote) The ability to select the
+Illustration 4.1.a A small community is deciding between              alternative which is the most preferred one by the largest
+two proposals to consider: Proposal M and Proposal U.                 number of agents (or rank according to the number of indi-
+Their preference orderings are: 100 voters voted for M >              vidual preferences an alternative is ranked first).
+U. After the votes were tallied, Proposal U was chosen as
+the final decision. Does this decision satisfy the Pareto             Illustration 4.2.a In a plurality voting system with 4 can-
+Efficiency axiom?                                                     didates M , N , L, K, the voters have cast their votes as
+                                                                      follows: 23 voters voted for L > M > K, 21 voters voted
+Element 4.1.b (Monotonicity in Social Welfare Func-                   for L > K > M , 40 voters voted for M > K > N , 33
+tions) The ability to select a social welfare function wherein        voters voted for N > L > K Who wins the election under
+given a profile of individual preferences the society prefers         plurality voting?
+alternative A to alternative B and a similar profile of indi-
+vidual preferences in which the only change is raise in A’s           Element 4.2.b (Borda Count) The ability to compute and
+rank in some individual ranking(s), A is still preferred over         select the Borda count winner: Borda count is a scheme
+B.                                                                    which, given m alternatives, assigns score m − i to the
+                                                                      alternative which is ranked in the i’th place by an agent (e.g.
+Illustration 4.1.b In an election, Alice wins when 40 out of          the most preferred alternative gets score m − 1, and the
+100 voters rank her first. In a subsequent election, Alice’s          least preferred gets score 0); now select an alternative (or
+support increases to 50 voters ranking her first, while the           rank) according to the sum of scores the individual rankings
+preferences of the other voters remain unchanged. Does this           provide to each alternative.
+voting scheme satisfy the monotonicity axiom?
+                                                                      Illustration 4.2.b In an election with 3 candidates (A, B,
+Element 4.1.c (Transitivity in Social Welfare Functions)              and C), the voters have the following preferences: 413
+ The ability to select a social welfare function that defines         voters vote A > B > C, 176 voters vote B > A > C
+a transitive output (i.e., well defined ranking over alterna-         and 123 voters vote A > C > B. Using the Borda count
+tives).                                                               method, which candidate wins the election?
+
+Illustration 4.1.c Suppose a society needs to choose a so-            Element 4.2.c (Copeland’s Method) The ability to com-
+cial welfare function to aggregate individual preferences             pute and select the winner derived by Copeland’s method:
+over three policy options: A, B, and C. The individual pref-          Each candidate is compared with every other candidate in
+erences are as follows: Half of the population prefers A over         a series of one-on-one contests. A candidate receives one
+B, B over C, and A over C. The other half prefers B over              point for each victory and half a point for each tie. The
+C, C over A, and B over A. Which of the following social              candidate with the highest total score is the winner.
+welfare functions would produce a transitive ordering of the
+policy options for the entire society?                                Illustration 4.2.c Consider an election with four candi-
+                                                                      dates: A, B, C, and D. Voters are asked to rank the candi-
+Element 4.1.d (Non-Dictatorial Social Welfare Function)               dates in order of preference. The results of the head-to-head
+ The ability to select a social welfare function where there          comparisons are as follows: A wins against B and C but
+is not a particular individual d, such that the social rank-          loses to D. B wins against C and D but loses to A. C wins
+ing coincides with d’s ranking any individual preferences             against D but loses to A and B. D wins against A but loses
+profile.                                                              to B and C. Based on Copeland’s method, which candidate
+                                                                      wins the election?
+
+                                                                 20
+                           STEER: Assessing the Economic Rationality of Large Language Models
+
+Element 4.2.d (Fair Division Algorithms in Discrete En-              Element 4.3.c (Individual Rationality) The ability to se-
+vironments) The ability to select the correct discrete fair          lect a mechanism wherein it is in the best interest of the
+division algorithm given the context (e.g., divider-chooser,         agents to participate in the mechanism.
+last diminisher).
+                                                                     Illustration 4.3.c A group of individuals is deciding on a
+Illustration 4.2.d A group of three friends, Alex, Casey,            cost-sharing mechanism for a communal service. Each
+and Jordan, have found a treasure chest containing 15 iden-          individual has a private valuation of the service. Is the
+tical gold coins. They want to divide the coins among them-          following mechanism individually rational (i.e., in the best
+selves fairly, ensuring that each person perceives they have         interest of agents to participate)? The service is provided if
+received an equitable share without feeling envious of the           the total of the reported valuations exceeds the cost; each
+others’ allotments. Given the constraints and the desire for         person pays according to their reported valuation.
+a fair division where each friend values the coins equally,
+which fair division algorithm should they use, and how               Element 4.3.d (Budget Balanced) The ability to select a
+should the coins be optimally divided to meet the criteria of        mechanism wherein the mechanism rewards and charges
+fairness?                                                            the same amount of money to and from the agents.
+
+A.4.3. M ODULE 4.3: D ESIRABLE P ROPERTIES IN                        Illustration 4.3.d A group of commuters is considering a
+       M ECHANISM D ESIGN                                            shared transportation service. Is the following mechanism
+                                                                     budget balanced? The service is offered if the total will-
+This module adds the wrinkle that agents must report their           ingness to pay exceeds the operating cost; users pay in
+preferences to the decision-maker and may lie when do-               proportion to their usage of the service.
+ing so. The decision-maker’s objective becomes designing
+the rules of the game, known as a mechanism, in order to             A.4.4. M ODULE 4.4: M ECHANISM D ESIGN
+incentivize agents to act in a specific way. Unfortunately,
+in general designing mechanisms to induce agents to re-              We now consider the implementation of specific mecha-
+port truthfully (i.e., incentive-compatibility) is impossible        nisms.
+without additional ingredients. We begin by considering              Element 4.4.a (Top Trading Cycles) The ability to com-
+different implementations of incentive-compatible mecha-             pute and run the top trading cycles algorithm in finding a
+nisms.                                                               stable allocation.
+Element 4.3.a (Dominant Strategy Incentive Compatibil-               Illustration 4.4.a In a housing allocation problem, there
+ity) The ability to select a mechanism wherein a strategy            are three individuals (A, B, C) and three houses (1, 2, 3).
+in a dominant strategy equilibrium is to report preferences          Each individual has a preference list for the houses. The
+truthfully.                                                          preferences are as follows: A : 2 > 3 > 1, B : 1 > 2 > 3,
+                                                                     C : 1 > 3 > 2.
+Illustration 4.3.a Consider an auction for a single item
+with three bidders. Each bidder has a private valuation              Using the Top Trading Cycles algorithm, which individual
+for the item. Is the following mechansim dominant strategy           gets house 1?
+incentive compatible? The second-highest bidder wins and
+pays an amount equal to their bid.                                   A common class of mechanisms are auctions. Depending
+                                                                     on the properties of the bidders and the nature of the items
+Element 4.3.b (Bayesian Incentive Compatibility) The                 to be auctioned, various auction structures may be either
+ability to select a mechanism wherein a strategy in a Bayes–         more efficient or more profitable to the seller than others.
+Nash equilibrium is to report preferences truthfully.                We consider three major (one-sided) auction types:
+
+Illustration 4.3.b In a scenario where a group of individu-             • English Auction, also known as an open-outcry or
+als must decide on funding a public good, each with private               ascending-bid auction, this auction starts with the
+valuations known only to themselves, is the following mech-               auctioneer opening the bidding at some reserve price
+anism Bayesian Incentive Compatible (BIC)? The public                     (which may be zero) and raises the price until no one
+good is provided if at least half of the individuals report a             is willing to increase the bid any further. At which
+valuation above a certain amount; those who report above                  point, the final bidder receives the item and pays her
+this amount pay proportionally to their reported valuation.               bid price.
+When designing incentive compatible mechanisms, a com-                  • First-Price Auction: Each bidder submits a bid dis-
+mon additional ingredient is to allow the mechanism to                    cretely and hands it to the auctioneer, who then an-
+charge or reward agents with an arbitrary monetary amount.                nounces a winner. The winner pays her bid.
+
+                                                                21
+                            STEER: Assessing the Economic Rationality of Large Language Models
+
+   • Second-Price Auction, also often called a Vickrey auc-
+     tion, here bidders submit bids discretely and the highest
+     bidder wins the item, but now the price the winning
+     bidder pays is the second-highest bidders bid.
+
+Element 4.4.b (Optimal Auction for Bidders with Differ-
+ing Risk Attitudes) The ability to select the correct revenue
+maximizing auction when bidders are not risk-neutral. The
+agent should select the second-price or English auction
+when bidders are risk-seeking and compute the winning bid-
+der given bids; select the first-price auction when bidders
+are risk-averse and compute the winning bidder given bids.
+
+Illustration 4.4.b In an auction for a unique piece of art,
+there are three bidders: Alice, Bob, and Charlie. Alice bids
+$100, Bob bids $150, and Charlie bids $120. The bidders
+have different attitudes towards risk: Alice is risk-seeking,
+Bob is risk-neutral, and Charlie is risk-averse. Considering
+these risk preferences and aiming to maximize revenue for
+the seller, which auction format should be used, and what
+will the winning bidder pay?
+
+Element 4.4.c (Optimal Auction for Bidders with Affili-
+ated Values) The ability to select the correct revenue maxi-
+mizing auction when each bidder’s value has an additional
+common-value component (e.g., the bidder’s private, noisy
+signal about the good’s resale value). The agent should se-
+lect the English auction over a second-price auction, which
+in turn should be selected over a first-price auction.
+
+Illustration 4.4.c An antique vase is up for auction, and it
+is known that its value partly depends on a common com-
+ponent related to its historical significance, which can sig-
+nificantly influence its resale value. Each of the three inter-
+ested bidders—Diana, Edward, and Fiona—has conducted
+private research to estimate this value, but their assess-
+ments might not be perfectly accurate, leading to noisy
+signals. Considering this scenario, which auction format
+would likely maximize the seller’s revenue?
+
+
+
+
+                                                                  22
+

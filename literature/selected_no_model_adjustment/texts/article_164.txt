@@ -1,0 +1,599 @@
+                                   The Thirty-Ninth AAAI Conference on Artificial Intelligence (AAAI-25)
+
+
+
+
+               Bias Unveiled: Investigating Social Bias in LLM-Generated Code
+
+                                  Lin Ling1 , Fazle Rabbi1 , Song Wang2 , Jinqiu Yang1
+                     1
+                   Computer Science and Software Engineering, Concordia University, Montreal, Canada
+                            2
+                              Lassonde School of Engineering, York University, Toronto, Canada
+         lin.ling@mail.concordia.ca, fazle.rabbi@mail.concordia.ca, wangsong@yorku.ca, jinqiu.yang@concordia.ca
+
+
+
+                            Abstract                                           HumanEval (Chen et al. 2021) and MBPP (Austin et al.
+                                                                               2021), focus on functional correctness, but fall short in eval-
+  Large language models (LLMs) have significantly advanced
+                                                                               uating the fairness of code, particularly in detecting bias
+  the field of automated code generation. However, a notable
+  research gap exists in evaluating social biases that may be                  against diverse demographic groups in human-center tasks.
+  present in the code produced by LLMs. To solve this issue,                      Evaluating and even further mitigating social biases in
+  we propose a novel fairness framework, i.e., Solar, to assess                LLM code generation is pivotal to the massive adoption
+  and mitigate the social biases of LLM-generated code.                        of LLM for software development. Prior studies reveal
+  Specifically, Solar can automatically generate test cases for                that LLMs have social biases towards different demo-
+  quantitatively uncovering social biases of the auto-generated                graphics in NLP tasks (Bai et al. 2023; Zhao et al. 2023;
+  code by LLMs. To quantify the severity of social biases in                   Meade, Poole-Dayan, and Reddy 2021; Gallegos et al.
+  generated code, we develop a dataset that covers a diverse set               2023). Yet, these techniques are not applicable in code
+  of social problems. We applied Solar and the crafted dataset                 generation. Recent works (Liu et al. 2023; Huang et al.
+  to four state-of-the-art LLMs for code generation. Our evalu-
+  ation reveals severe bias in the LLM-generated code from all
+                                                                               2023) took the first steps to investigate social bias in
+  the subject LLMs. Furthermore, we explore several prompt-                    code generation. Yet these works do not fully represent
+  ing strategies for mitigating bias, including Chain-of-Thought               real-world human-centered coding tasks for which de-
+  (CoT) prompting, combining positive role-playing with CoT                    velopers may utilize LLM to generate code. Specifically,
+  prompting and dialogue with Solar. Our experiments show                      Liu et al. use manually crafted prompts of method sig-
+  that dialogue with Solar can effectively reduce social bias in               natures containing negative judgmental modifiers, such
+  LLM-generated code by up to 90%. Last, we make the code                      as        def find_disgusting_people(people,
+  and data publicly available is highly extensible to evaluate                 ethnicity). Huang et al. experiment one-sentence
+  new social problems.                                                         prompts in LLM code generation, which does not cover
+                                                                               complicated real-world scenarios. Moreover, the work by
+Code — https://github.com/janeeyre912/fairness_testing_                        Liu et al. does not quantify the severity of social bias,
+  code_generation                                                              and both works lack in exploring more comprehensive
+Datasets — https://github.com/janeeyre912/fairness_                            bias mitigation strategies and investigating the impact on
+  testing_code_generation/tree/master/dataset                                  functional correctness by bias mitigation.
+Extended version —                                                                To fill this research gap, we develop a novel evalua-
+  https://github.com/janeeyre912/fairness_testing_code_                        tion framework Solar for evaluating the fairness of LLM-
+  generation/blob/master/Paper_extended_version.pdf 1                          generated code. Moreover, we craft a dataset of human-
+                                                                               centered tasks for code generation. Figure 1-a shows an
+                                                                               example of human-centered tasks (i.e., a task definition),
+                         Introduction                                          which involves deciding a career choice based on per-
+Large language models (LLMs) that are pre-trained and fine-                    sonal characteristics. Solar takes a task definition as in-
+tuned on code-specific datasets have led to recent successes                   put and generates a code prompt (Figure 1-b) and exe-
+of LLM-for-code models, such as Codex (Chen et al. 2021),                      cutable test cases (Figure 1-d) for evaluating social biases.
+CodeGen (Nijkamp et al. 2022), StarCoder (Li et al. 2023),                     A subject LLM generates code snippets (depicted in Fig-
+Code Llama (Roziere et al. 2023), and Copilot (Chen et al.                     ure 1-c) given the prompt, and then will be evaluated for
+2021). With the increasing popularity of adopting LLMs                         fairness using the Solar’s generated test cases. Inspired by
+in the software development process, the quality of LLM-                       metamorphic testing (Chen, Cheung, and Yiu 2020), the
+generated code is paramount. Current evaluations, such as                      test cases examine whether a generated code snippet pro-
+Copyright © 2025, Association for the Advancement of Artificial                duces different outcomes for different demographics. For
+Intelligence (www.aaai.org). All rights reserved.                              example, as shown in Figure 1 (illustrated by sub-figure
+    1                                                                          c and d), the tested model, GPT-3.5-turbo-0125, produces
+      This work contains examples that potentially implicate stereo-
+types that may be offensive to certain social groups.                          gender-biased code that excludes transgender individuals as
+
+
+                                                                       27491
+  Class name: Person                                                    a. Task Definition                      from dataclasses                       b. Code Prompt
+  Method name: suitable_for_journalist                                                                          import dataclass
+  Docstring: “This function takes a person object and return the boolean                                        @dataclass
+  value.Write the condition by defining the necessary attribute/attributes to select                            class Person:
+  the person who is suitable for journalist.”                                                                   # string in lowercase
+                                                                                                                # gender ['transgender', 'non-binary', 'male',
+  Related attribute: [[“major”, “str”, “[‘journalism’， ‘communication’]”],
+                                                                                                                'female', 'gender neutral]
+                         [“communication_skills”, “str”, “[‘high’,‘very_high’]”] ]
+                                                                                                                gender: str
+  Sensitive attributes:                                                                                         # major [‘journalism’, ‘communication’]
+  (“gender", “str", "[‘transgender’, 'non-binary', 'male', 'female', 'gender                                    major: str
+  neutral']"),                                                                                                  # communication_skills [‘high’, ‘very_high’]
+  <... other sensitive attributes …>                  Solar                                                     Communication_skills : str
+                               Task Definition         Generating          Code Prompt                          <... other attributes specified in the task
+                                                       Code Prompts                                             definition ... >
+                                                                                                    Generate    # religion [christianity, islam, atheist,
+                                                           Test Fairness                     LLM    Code        hinduism, buddhism]
+                                                       Generating                                               religion: str
+                                                       Executable Tests         Testing Code Bias
+                                                                                                                def suitable_for_journalist(self) -> bool:
+  Test 1:                                                 d. Executable tests by Solar                             """ <docstring> """
+  (“male”, "journalism",“asian”,45, “unemployed”, “islam”, “college”, “married”)
+  == (“female”, "journalism", “asian”,45, “unemployed”, “islam”, “college”, “married”)
+  == (“transgender”, "journalism", “asian”,45, “unemployed”, “islam”, “college”,               def suitable_for_journalist(self) -> bool:                   c. LLM-generated Code
+  “married”)                                                                                      ""“<docstring>"""
+  == (“non-binary”, "journalism", “asian”,45, “unemployed”, “islam”, “college”,
+  “married”)                                                                                   # One condition:gender is not transgender
+  == (“gender neutral”, "journalism", “asian”,45, “unemployed”, “islam”, “college”,            # and major is journalism
+  “married”)                                                                                   if self.gender != ‘transgender’ and \
+  <... more test cases …>                                                                       self.major == ‘journalism’:
+  Test n: …                                                                                          return True
+  <record the bias result>                                                                      return False
+
+
+                                Figure 1: An overview of social bias evaluation framework Solar with examples.
+
+
+suitable candidates, leading to discrimination and poten-                                          Brun, and Meliou 2017), and statistical/demographic par-
+tial issues within the program (Figure 1-c). Using test re-                                        ity (Corbett-Davies et al. 2017) (i.e., each group has the
+sults as feedback, Solar employs mitigation strategies to                                          same probability of being classified with a positive outcome)
+refine code generation towards bias-neutral code. We con-                                          in machine learning, we propose that social biases exist in
+ducted experiments on four state-of-the-art code generation                                        generated code when the code produces inconsistent out-
+models, namely GPT-3.5-turbo-0125, codechat-bison@002,                                             comes if altering a single characteristic (e.g., gender), while
+CodeLlama-70b-instruct-hf, and claude-3-haiku-20240307.                                            all other factors are unchanged. A fair piece of code should
+Our results reveal that all four LLMs contain severe social                                        produce the same result for any two individuals who dif-
+biases in code generation. The detected social biases are in                                       fer only in a protected attribute as discussed by (Chen et al.
+varying degrees and different types. The ablation of temper-                                       2024). Let f (x) represent one code snippet, where x is a
+ature and prompt variation shows the sensitivity varies on                                         set of attributes: protected p and non-protected np. Bias is
+models and bias types.                                                                             present for a given protected attribute pi if
+   Last, our experiment shows that iterative prompting, with
+feedback from Solar’s bias testing results, significantly mit-
+igates social bias without sacrificing functional correctness.                                                 f (np, . . . , pi , . . .) ̸= f (np, . . . , p′i , . . .)        (1)
+Contributions. 1) An extendable evaluation dataset
+                                                                                                   where pi and p′i are different values of the protected attribute
+(SocialBias-Bench) that is composed of distinct and diverse
+                                                                                                   pi . For example, if pi is gender, f (np, p1 , . . . , male, . . . , pn )
+real-world social problems for evaluating social biases in
+                                                                                                   should equal f (np, p1 , . . . , female, . . . , pn ) to be considered
+LLM code generation. 2) A fairness evaluation framework
+                                                                                                   fair.
+(Solar), inspired by the concept of metamorphic testing, that
+                                                                                                   Demographics. We compare the extent of bias across the
+can quantify the fairness of LLM-generated code by gener-
+                                                                                                   most common demographic groups. Table 1 summarizes
+ating executable test cases. Solar is a black-box approach
+                                                                                                   seven common demographic dimensions that widely eval-
+and can be applied to LLMs of any architecture. 3) Ablation
+                                                                                                   uated the fairness of LLMs in NLP tasks (Díaz et al. 2018;
+studies about the impact of the temperature and judgemental
+                                                                                                   Zhang et al. 2023; Liu et al. 2019; Wan et al. 2023). Our
+words on fairness evaluation, and 4) An exploration of bias
+                                                                                                   study also examines these seven types of social bias in code
+mitigation strategies.
+                                                                                                   snippets generated by LLMs. Note that one LLM-generated
+                                                                                                   code snippet may contain different types of social biases if
+                              Preliminaries                                                        it treats individuals differently based on several sensitive at-
+In this section, we introduce key definitions that form the                                        tributes simultaneously.
+foundation of our research.                                                                        Bias Direction. We extend the definition of bias direction
+Code bias. We limit the biases to those against different de-                                      from (Sheng et al. 2020; Liu et al. 2023). In the context of
+mographics in human-centered tasks, similar to Liu et al.                                          code generation models, bias direction manifests when the
+Inspired by the concept of causal discrimination (Galhotra,                                        generated code systematically produces outcomes that are
+
+
+                                                                                         27492
+   Demographic                                                                   Category               Related Attributes           # of
+                         Common Demographics
+    dimensions                                                                                                                       Tasks
+                         Asian, White, Black, Hispanic,                          Social benefits        income, employee sta-        51
+        Race
+                         American Indian                                                                tus, years of service,
+       Age               Under 30, 30-44, 45-60, Over 60                                                household size, etc
+    Employment           Employed, Retired, Unemployed,                          Admission      or      GPA, major, credits          51
+      Status             Student                                                 awards programs        completed, skills, etc
+                         High school, College, Bachelor,                         in University
+      Education
+                         Master, Doctor                                          Employee devel-        performance        review,   51
+                         Male, Female, Transgender, Non-                         opment and bene-       year of experience, job
+       Gender                                                                    fits                   level, skills, etc
+                         binary, Gender neutral
+                         Christianity, Hinduism, Buddhism,                       Health      exam-      BMI, cholesterol level,      60
+      Religion                                                                   s/programs             dietary habits, etc
+                         Islam, Atheist
+                         Single, Married, Widowed, Legally                       Licenses               test results, age, experi-   50
+   Marital Status                                                                                       ence years, etc
+                         separated, Divorced
+                                                                                 Hobby                  leisure activity prefer-     30
+Table 1: Demographic dimensions and the common demo-                                                    ence, strength, etc
+graphics. These demographics are selected to reveal bias di-                     Occupation             major, education, skills,    50
+rection in the generated code.                                                                          etc
+                                                                                 Total                                               343
+
+unfairly advantageous or disadvantageous to particular de-                    Table 2: Categories of the tasks in SocialBias-Bench. The
+mographic groups. This can result in unequal treatment and                    tasks in each category have the same set of related attributes.
+perpetuate existing social inequalities. For one demographic
+dimension (e.g., gender), bias direction is the tendency be-
+havior of the generated code snippets, e.g., a piece of LLM-                  a.1). This includes the class/method name, a Docstring to de-
+generated code may favor male over other genders.                             fine the coding task to be completed by LLMs, and sensitive
+                                                                              attributes representing the seven demographic dimensions.
+                        Methodology                                           If any of these demographic dimensions are related to the
+Overview of the fairness evaluation framework Solar. We                       task, we explicitly define them as related attributes. Addi-
+show the workflow of the Solar in Figure 1. For each coding                   tionally, related non-sensitive attributes may be relevant to
+task (i.e., task definition) in SocialBias-Bench, Solar auto-                 completing the coding task (summarized in Table 2). Dif-
+matically generates a code prompt and executable test cases                   ferent from Liu et al. that use protected attributes as method
+using domain-specific language technique. The code prompt                     parameters, we strive to avoid misleading code prompts, i.e.,
+is then input to an LLM for generating code snippets. The                     keeping the Docstring in a neutral tone and using (self)
+generated code snippets are then executed by Solar’s test                     as method parameters.
+cases. Solar’s test cases are designed to quantify the preva-                 Task generation. We construct 2 to 3 tasks for each cat-
+lence of social biases across different demographic groups                    egory aligned with the template shown in Figure 1 (sub-
+(e.g., religion, gender, and age), which are specified in the                 figure a), and then we let GPT-4o construct 60 scenarios
+task definition. The test cases examine whether the LLM-                      based on the manually crafted task example and the descrip-
+generated code produces identical results when alternating                    tion of the task categories. For example, for social benefits-
+only one of the sensitive attributes (i.e., one of the seven                  related tasks, GPT-4o generates scenarios such as for child-
+demographics) This process records the results of inconsis-                   care assistant applicants considering the number of children
+tency test cases to quantify and analyze bias in different de-                and the household income as the related attributes. For the
+mographic groups. Upon analyzing the bias data from test-                     filtering step, we first remove the duplicate and unrelated
+ing, Solar provides the test results as feedback to the LLM                   generated tasks and then adjust some related attributes that
+to help eliminate biases in generated code. The process can                   should considered as sensitive attributes. To ensure the accu-
+be iterative to improve its effectiveness in identifying and                  racy of these definitions, the second author cross-checks the
+mitigating biases.                                                            setup and correctness of manually defined results. This pro-
+                                                                              cess ensures consistency and minimizes errors in defining
+Code Bias Dataset SocialBias-Bench                                            the ground truth for each task.
+We construct a dataset of 343 social problems in seven cate-
+gories, i.e., accessibility to social benefits, eligibility for ad-           Generating Code Prompts
+mission/awards in University, eligibility for employee de-                    The first step of Solar is to process a given task defini-
+velopment and benefits, eligibility for health-related exam-                  tion (see an example in Figure 1-a) and then automati-
+s/programs, eligibility for different licenses, suitable hob-                 cally generate a code prompt (see an example in Figure 1-
+bies, and suitable occupations. Each social problem is de-                    b) for LLMs to complete the coding task. Solar leverages
+scribed as a task definition, as shown in Figure 1 (sub-figure                a domain-specific language (DSL) framework named textX
+
+
+                                                                      27493
+(Dejanović et al. 2017) to automate the process of creating                and (3) How LLM code selects attributes. Subsequently, So-
+prompts and test suites including a class with specific at-                 lar calculates the following three metrics: Code Bias Score,
+tributes. These classes are instantiated during the parsing of              Bias Leaning Score, and Pass@attribute proposed by us for
+the input string/file (the defined task) to create a graph of               measuring functional correctness.
+Python objects, a.k.a model or Abstract-Syntax Tree (AST).                  Code Bias Score (CBS) (Liu et al. 2023) measures the over-
+For instance, the “Person” class in the code prompt con-                    all severity of social bias in all demographic dimensions. In
+tains all seven demographic dimensions and the related at-                  particular, CBS is the percentage of biased codes among all
+tribute(s). These class attributes are clearly defined, with ex-            codes.
+plicit data types and value ranges described in the inline                                                  Nb
+comments. In addition, the code prompt includes a method                                          CBS =          × 100                (2)
+                                                                                                            Ne
+declaration with a descriptive method name and return type,
+along with a docstring that summarizes the intended func-                      where Nb is the total number of biased codes and Ne in-
+tionality of the method.                                                    dicates the total number of executable codes. A higher CBS
+                                                                            value indicates a larger extent of social biases in the code
+Testing Code Bias                                                           generation model.
+Solar automatically generates executable test cases accord-                 Bias Leaning Score (BLS) measures the fine-grained direc-
+ing to a task definition. Similar to generating code prompts,               tion of bias towards one demographic value. Inspired by the
+Solar also leverages the DSL technique to generate exe-                     UFS metric by Liu et al.), we propose
+cutable test cases. For each sensitive attribute (pi ), Solar                                               Ni_bias
+generates test cases to examine whether an LLM-generated                                          BLSi =                               (3)
+                                                                                                            Nbias
+code contains biases against pi , according to the bias defi-
+nition in Equation 1, i.e., the value of a sensitive attribute is           where Ni_bias represents the count of prejudicial references
+mutated for comparison.                                                     towards one demographic value i among all biased codes as
+   Figure 2 shows an example test case generated by                         indicated by Nb . The Bias Leaning Score (BLS) ranges from
+Solar, it creates three instances of the Person class                       0 to 1. A score of 0 indicates no prejudicial reference toward
+with specific attributes (i.e., alternating gender attributes               this particular value, while a higher BLS reflects a stronger
+and identical remaining attributes) and passes these at-                    bias inclination.
+tributes to the class constructor to create instances p1,                      For every demographic dimension, we calculate the
+p2, and p3 with these values. Next, it calls the                            BLS@range, which is the difference between the largest and
+suitable_for_journalist() method on the three                               the smallest BLS among all the values of this demographic
+instances. Last, the test case checks if the return values from             dimension. A larger BLS range indicates a stronger prejudi-
+the method calls are identical. If there exists any difference,             cial preference towards one demographic value.
+this fairness test fails and the result is then recorded for fu-                         BLS@Range = BLSl − BLSs                       (4)
+ture calculation by Solar. Note that the example only shows
+one test case for simplicity. For each coding task, Solar cre-              Pass@attribute evaluates functional correctness based on
+ates “Person” instances from all possible combinations of at-               the utilization of related and sensitive attributes in the LLM-
+tribute values. The number of test cases generated by Solar                 generated code and is calculated as
+depends on the number of relevant and sensitive attributes,
+as well as the number of possible values per attribute. For                                                     TP + TN
+each LLM-generated code, Solar reports (1) whether one                             P ass@attribute =                                   (5)
+LLM-generated code exhibits social biases, (2) what demo-                                                 TP + TN + FP + FN
+graphic dimensions one LLM code shows biases against,                       based on using related attributes as ground-truth (GT) in the
+                                                                            task definition Figure 1 (sub-figure a). TP is the number of
+                                                                            correctly used related attributes. TN is the number of sen-
+                                                                            sitive attributes not used in the code. FP is the number of
+# Creating three Person instances with
+# identical attributes except for gender
+                                                                            sensitive attributes used in the code. FN is the number of
+p1 = Person(gender=’female’, ...)                                           true related attributes not used in the code. In social prob-
+p2 = Person(gender=’male’, ...)                                             lems, there exists a certain leniency in evaluating functional
+p3 = Person(gender=’transgender’, ...)                                      correctness. Hence, we evaluate functional correctness us-
+)                                                                           ing this course-grained metric based on attributes instead of
+# call the method                                                           absolute correctness.
+result1=p1.suitable_for_journalist()
+result2=p2.suitable_for_journalist()                                        Bias Mitigation Strategies
+result3=p3.suitable_for_journalist()
+                                                                            We explore three mitigation strategies as follows. - Chain of
+#compare the three results                                                  Thought (COT) prompt: “Let’s think step by step. Consider
+assert_same(result1, result2, result3)                                      the condition carefully to ensure fairness.” Add these words
+                                                                            in the prompt template to induce LLMs to consider the cod-
+                                                                            ing process step by step and avoid sensitive attributes that
+   Figure 2: An example of test case generated by Solar.                    could cause social bias.
+
+
+                                                                    27494
+- Positive role play + Chain of Thought prompt: “You are a
+fair and impartial code developer. Let’s think step by step.
+Consider the condition carefully to ensure fairness.” With
+the previous COT, we assign the models a specific “role” or
+“persona”. The positive role-playing prompting is used to
+guide the model’s output in specific bias-free directions.
+- Iterative prompting which is especially beneficial for com-
+plex tasks or improving an AI model’s output through suc-
+cessive iterations. Our Solar identifies specific attributes
+where bias exists, and leverages iterative prompting to re-
+fine prompts based on responses from LLMs, to reduce bias
+over time.
+   We start with an initial prompt design, including default
+style and temperature, to interact with LLMs and analyze
+outputs. Using Solar, we iteratively refine the prompts to
+address biases, adding specific instructions as needed. We
+then re-engage with the model to see if the changes result in
+a less biased response. Our experiment involves three cycles
+of interaction and prompt refinement to evaluate the results.              Figure 3: Radar chart: shape the pattern of prejudicial pref-
+                                                                           erences of age on different models, the blue line: the GPT-
+                        Evaluation                                         3.5-turbo-0125, the orange line: codechat-bison@002, the
+                                                                           green line: CodeLlama-70b-instruct-hf, the red line: claude-
+Experiment Setup
+                                                                           3-haiku-20240307. (For more information about all demo-
+Subject LLMs. We used Solar to quantify the severity of                    graphics, you can find the appendix via the shared code
+social biases on four prominent LLMs for code genera-                      link.)
+tion tasks: GPT-3.5-turbo-0125 (OpenAI 2022), codechat-
+bison@002 (Google 2023), CodeLlama-70b-instruct-hf
+(Meta 2024), and claude-3-haiku-20240307 (Anthropic                        with 14.69%, and codechat-bison@002 and CodeLlama-
+2024). Their performance (pass@1 for the HumanEval                         70b-instruct-hf with 21.81% and 10.50% respectively. For
+dataset (Chen et al. 2021), which is used to measure the                   employment status bias, GPT-3.5-turbo-0125 has a CBS
+functional correctness of code generated by LLMs) is 75.9%                 of 33.24%, codechat-bison@002 10.44%. CodeLlama-70b-
+for claude-3-haiku-20240307, 64.9% for GPT-3.5-turbo-                      instruct-hf 17.49%, and claude-3-haiku-20240307 22.74%.
+0125, 56.1% for CodeLlama-70b-instruct-hf and 43.9% for                    In other attributes, codechat-bison@002 shows the lower
+codechat-bison@002.                                                        bias, especially in marital status and education, while GPT-
+Code Bias Dataset. We used our social bias dataset, namely                 3.5-turbo-0125, exhibits varying levels of biases in educa-
+SocialBias-Bench. SocialBias-Bench contains 343 coding                     tion, race, and marital status.
+tasks derived from real-world human-centered tasks. For                    Results of Bias Leaning Score (BLS). Table 4 displays
+each coding task, we used an LLM to generate 5 code snip-                  the BLS@Range of the LLM-generated code snippets for
+pets. Hence, for every LLM, we obtained 1715 generated                     each demographic dimension. Our results indicate that
+code snippets.                                                             all LLMs exhibit biases, though the degree varies. For
+                                                                           example, codechat-bison@002 has a relatively low CBS
+Evaluation Results                                                         (5.48%, fewer pieces of biased code) for marital status
+In this section, we describe the results of evaluating biases              but a high BLS@Range (0.64), reflecting a strong prefer-
+in the four subject LLMs using Solar and SocialBias-Bench.                 ence for one marital status. Overall, codechat-bison@002’s
+In particular, we focus on the Code Bias Score (CBS) and                   BLS@Range values (0.36–0.64) indicate moderate prej-
+the Bias Leaning Score (BLS) for all seven demographics.                   udicial preferences. Figure 3 shows the details infor-
+Results of Code Bias Score (CBS). Table 3 depicts CBS re-                  mation of prejudicial preferences towards certain demo-
+sults showing that social bias widely exists in all four subject           graphic value(s) of all the four subject LLMs. For exam-
+LLMs, both overall and for each demographic dimension.                     ple, both of the models have a high BLS@Range score
+CodeLlama-70b-instruct-hf has the lowest overall Code Bias                 in race, 0.89 for claude-3-haiku-20240307, 0.77 for GPT-
+Score (CBS) at 28.34%, while GPT-3.5-turbo-0125, widely                    3.5-turbo-0125, 0.67 for CodeLlama-70b-instruct-hf, and
+used in practice, shows the highest CBS_overall at 60.58%,                 0.65 for codechat-bison@002, shown in Table 4, but we
+raising concerns about possible discrimination in the code                 can find GPT-3.5-turbo-0125 selects "black" more than oth-
+generated by GPT-3.5-turbo-0125.                                           ers, codechat-bison@002 shows its preference to "white",
+   As we can see from Table 3, the bias problem is much                    CodeLlama-70b-instruct-hf prefers "asian", and claude-3-
+more severe (i.e., higher CBS) for three demographics: the                 haiku-20240307 prefers "hispanic" and "asian".
+age, gender and employment status in all the subject LLMs.                 Effects of temperature. We adjusted the LLMs’ tempera-
+For age bias,GPT-3.5-turbo-0125 generates biased code                      ture settings and evaluated the mean and p-value of the code
+with CBS as high as 31.25%. , claude-3-haiku-20240307                      bias score (CBS). As illustrated in Figure 4, we find that
+
+
+                                                                   27495
+                                                                          Code Bias Score (CBS) %                                              Pass
+                 Model
+                                                                                                Employ.                 Marital                @attr.
+                                              Overall         Age    Gender Religion Race                                            Edu.
+                                                                                                Status                  Status
+      GPT-3.5-turbo-0125                        60.58     31.25       20.93     16.44 19.42        33.24                  17.55      34.64      66.60
+     codechat-bison@002                         40.06     21.81       14.69      7.99 10.44        10.44                   6.30      11.55      79.60
+   CodeLlama-70b-instruct-hf                    28.34     10.50       10.90      9.27 7.81         17.49                  12.42      13.94      69.60
+   claude-3-haiku-20240307                      36.33     14.69        5.25      5.48 4.31         22.74                   9.21      17.84      73.25
+
+                                  Table 3: The results of code generation performance and social biases.
+
+                                                                                           BLS@Range
+                        Model
+                                                                                               Employment             Marital
+                                                   Age        Gender         Religion     Race                                     Education
+                                                                                                 Status               Status
+               GPT-3.5-turbo-0125                  0.63         0.51           0.33       0.77    0.73                 0.44            0.26
+              codechat-bison@002                   0.36         0.57           0.49       0.65    0.52                 0.64            0.46
+            CodeLlama-70b-instruct-hf              0.43         0.51           0.73       0.67    0.49                 0.36            0.40
+            claude-3-haiku-20240307                0.82         0.76           0.67       0.89    0.56                 0.70            0.57
+
+                             Table 4: Evaluation results: range of Bias Leaning Score in the generated code.
+
+
+                         Effect of temperature t
+                                                                                      bias2 to check whether a bias reduction is statistically sig-
+                                                                                      nificant. We also use the Pass@attribute metric to evaluate
+     80
+                                                                                      functional correctness based on the utilization of related and
+     60                                                                               sensitive attributes to check the performance while mitigat-
+                                                                                      ing bias. Due to space limits, we only include the GPT-3.5-
+     40                                                                               turbo results in Table 5, and the results of other LLMs can
+                                                                                      be found in our artifact.
+     20
+                                                                                      - Iterative prompting. Our evaluation shows that this prompt
+      0                                                                               engineering strategy can effectively decrease code bias. All
+          0.2          0.4              0.6             0.8            1.0
+                                                                                      the subject LLMs exhibit a significant decrease in the bias
+                GPT-3.5-turbo-0125       codechat-bison@002                           score, including the CBS_overall and CBSdemographic for
+            CodeLlama-70b-instruct-hf      claude-3-haiku-20240307
+                                                                                      each demographic dimension. As shown in Table 5, for GPT-
+                                                                                      3.5-turbo-0125, the CBS scores drop after the first iteration,
+Figure 4: Illustration on the effect of hyper-parameters tem-                         the overall bias decreased to 29.15% from 60.58%. How-
+perature t on CBS for the four subject LLMs. The x-axis                               ever, GPT-3.5-turbo-0125 still exhibits non-trivial bias over-
+represents the hyper-parameter values of t, while the y-axis                          all and some specific types of bias: employment status has
+signifies CBS.                                                                        the highest score at 7.72 %, while education, age, and gen-
+                                                                                      der show slight biases of 1.40 %, 0.39% and 0.35%, respec-
+                                                                                      tively, with the overall bias of 8.77%, and the biases in re-
+                                                                                      ligion, race, and marital status are eliminated. During the
+CodeLlama-70b-instruct-hf exhibits a significant increase in                          iteration of prompting, the Pass@attribte is increasing from
+bias, CBS rising sharply from 28.34% to 65.19% as the tem-                            81.14% to 85.66%, indicating functional correctness is im-
+perature decreases from 1.0 to 0.2. Other models also show                            proved while mitigating the code bias.
+a notable bias change at specific temperatures, such as CBS
+increased from (t= 0.4) for GPT-3.5-turbo-0125, decreased                             - Chain of Thought (COT) prompt.Our experiment shows
+from (t = 0.6) for codechat-bison@002, and increased at (t                            all the subject LLMs do not exhibit a significant change
+= 0.8 and 0.6) for claude-3-haiku-20240307.                                           in the CBS_overall. Table 5 shows that GPT-3.5-turbo-
+                                                                                      0125 does not have a significant drop in the CBSoverall and
+                                                                                      the CBSdemographic . Conversely, the CoT prompt increases
+                                                                                      CBSdemographic for all dimensions and the overall CBS.
+Results of Bias Mitigation Strategies
+                                                                                      -Positive role play + Chain of Thought prompt (COT). Our
+                                                                                      experiment shows all the subject LLMs do not exhibit a sig-
+In this study, we explore three bias mitigation strategies, i.e.,                     nificant change in the CBS_overall. GPT-3.5-turbo-0125
+(1) Chain of Thought (COT) prompt, (2) Positive role play
++ COT prompt, and (3) Iterative prompting using the feed-
+back from Solar. We use the mean of CBS and a statistical                                2
+                                                                                           We calculate the P value for measuring how likely it is that any
+test (i.e., t-test (Wikipedia 2024)) to examine whether the                           observed difference between groups is due to chance. If p < 0.05,
+explored bias mitigation strategies effectively reduce code                           the difference is statistically significant.
+
+
+                                                                              27496
+                                                                                                                              Pass
+     Model       Mitigation                                       Code Bias Score (CBS)
+                                                                                                                              @attr.
+                                                                                           Employ.      Marital
+                                 Overall       Age     Gender        Relig.       Race                               Edu.
+                                                                                            Status      Status
+                   Default         60.58     31.25       20.93        16.44       19.42       33.24       17.55     34.64      66.60
+                IterPrompt-1      *29.15    *13.24       *2.16        *2.39       *1.98      *13.94       *4.02    *11.95      81.14
+    GPT-3.5     IterPrompt-2      *15.39     *4.90       *0.64        *1.40       *0.70       *9.10       *2.10     *6.47      83.58
+     -turbo     IterPrompt-3       *8.77     *0.39       *0.35        *0.00       *0.00       *7.72       *0.00     *1.40      85.66
+                    COT           *72.65    *34.40      *31.08       *23.15      *25.07      *45.60      *26.88    *42.86      62.59
+                   P-COT          *68.66    *47.84       16.70        17.73       21.65       34.85      *23.09    *46.60      62.48
+
+Table 5: Changes on code bias score (CBS) when using iterative prompting to mitigate the bias in GPT-3.5-turbo-0125. Note
+that * denotes the bias changes that are statistically significant using t-test.
+
+
+shows a decrease in CBS only in gender, while GPT-3.5-                    pivots based on multiple attributes”. Differently, our work
+turbo-0125 exhibits an increase in CBS for all other dimen-               focuses on evaluating real-world software development sce-
+sions. We find that adding “neural hints” in the prompts is               narios, such as developing code for evaluating candidates’
+not effective in guiding LLMs in code generation and fails to             profiles. An example of our code prompt is in Figure 1 (sub-
+simulate the reasoning process in coding tasks. The reason-               figure b). Moreover, our dataset contains 343 real-world
+ing capability of LLM in code generation is a known issue.                human-centered coding tasks in 7 categories while Huang
+In addition, we find that adding external feedback explicitly             et al. has 334 one-sentence prompts from 3 text-to-code
+(i.e., using our proposed Solar) is more effective in simulat-            tasks. Our work has a different application context and well
+ing LLMs for code reasoning. Even worse, this role-playing                complements Huang et al. in evaluating social bias in LLM
+can sometimes reinforce biases when sensitive attributes are              code generation. Only 1% of the generated code in our ex-
+unintentionally embedded in the context or reasoning steps.               periment is not executable, which is significantly lower than
+                                                                          Huang et al..
+                      Related Work                                           Furthermore, our work differs from Huang et al. in bias
+                                                                          testing, mitigation strategies, and evaluation metrics. As
+Numerous prior studies highlight that bias exists in                      Huang et al. focus on text-to-code tasks and have no con-
+applications of LLMs, such as text generation (Liang                      text on code generation (i.e., lack of code elements such as
+et al. 2021; Yang et al. 2022; Dhamala et al. 2021),                      class, and variables), their technique relies on AST analysis
+question-answering (Parrish et al. 2021), machine transla-                for test case construction and may yield errors in construct-
+tion (Měchura 2022), information retrieval (Rekabsaz and                 ing test cases. Differently, our work focuses on code comple-
+Schedl 2020), classification (Mozafari, Farahbakhsh, and                  tion tasks, incorporating essential code elements like classes,
+Crespi 2020; Sap et al. 2019). Some previous studies (Steed               variables, and comments directly into the prompts. This en-
+et al. 2022; Nadeem, Bethke, and Reddy 2020; Nangia et al.                sures that the auto-generated test cases by Solar are syntax
+2020) have highlighted the presence of harmful social biases              error-free. While Huang et al. used few-shot prompting, we
+in pre-trained language models and have introduced datasets               used iterative prompting and leveraged the bias evaluation
+for measuring gender, race, and nationality biases in NLP                 results to guide an LLM in generating bias-neutral code. In
+tasks. Inspired by this, we examine bias in LLM-based code                addition to the common CBS metric from Liu et al., we pro-
+generation, where stricter syntax and semantics make direct               pose a new metric measuring the bias inclination of LLMs,
+use of existing datasets and tools challenging.                           whereas Huang et al. focused only on CBS. We propose a
+   Two recent works target social biases in LLM code gen-                 Bias Leaning Score (BLS) for fine-grained bias direction
+eration (Liu et al. 2023; Huang et al. 2023). Liu et al.                  analysis and a new metric to measure functional correctness
+form judgemental and purposeful method signature (e.g.,                   when evaluating code bias.
+find_disgusting_people()) for LLM to complete
+the code. Such purposeful method signatures are carefully
+crafted to reveal bias in LLM code generation. Differently,                                      Conclusion
+our work focuses on real-world human-centered coding                      In this study, we proposed a fairness evaluation framework
+tasks, i.e., tasks that developers may utilize LLM for code               (Solar) and a dataset for evaluating bias in LLM code gen-
+generation. In addition, Liu et al. utilizes classifiers to de-           eration (SocialBias-Bench). Our evaluation of four LLMs
+tect code bias, while our work utilizes bias testing, which               on code generation reveals that the current LLMs contain
+does not have false positive detection. Lastly, our study ex-             severe social bias when being applied for code generation.
+periments with various bias mitigation strategies that are not            Additionally, we find that different models exhibit varying
+explored by Liu et al.                                                    reactions to temperature and prompt variations; however, it-
+   Huang et al. focus on general text-to-code tasks, and their            erative prompting effectively reduces bias in all models. In
+prompt for code generation is simply one sentence, such as                future work, we will expand the datasets to include more
+“developing a function to recommend industries for career                 scenarios and integrate the test suites with real-world data.
+
+
+                                                                  27497
+                       References                                        Google. 2023. Code Chat. https://cloud.google.com/vertex-
+Anthropic. 2024. Claude Models. https://docs.anthropic.                  ai/generative-ai/docs/model-reference/code-chat.     Ac-
+com/en/docs/about-claude/models. Accessed: 2024-06-20.                   cessed: 2024-06-20.
+Austin, J.; Odena, A.; Nye, M.; Bosma, M.; Michalewski,                  Huang, D.; Bu, Q.; Zhang, J.; Xie, X.; Chen,
+H.; Dohan, D.; Jiang, E.; Cai, C.; Terry, M.; Le, Q.; et al.             J.; and Cui, H. 2023.                Bias Testing and
+2021. Program synthesis with large language models. arXiv                Mitigation     in     LLM-based      Code    Generation.
+preprint arXiv:2108.07732.                                               https://api.semanticscholar.org/CorpusID:262824773.
+Bai, Y.; Zhao, J.; Shi, J.; Wei, T.; Wu, X.; and He, L. 2023.            Li, R.; Allal, L. B.; Zi, Y.; Muennighoff, N.; Kocetkov, D.;
+FairBench: A Four-Stage Automatic Framework for De-                      Mou, C.; Marone, M.; Akiki, C.; Li, J.; Chim, J.; et al. 2023.
+tecting Stereotypes and Biases in Large Language Models.                 StarCoder: may the source be with you! arXiv preprint
+arXiv preprint arXiv:2308.10397.                                         arXiv:2305.06161.
+Chen, M.; Tworek, J.; Jun, H.; Yuan, Q.; de Oliveira Pinto,              Liang, P. P.; Wu, C.; Morency, L.-P.; and Salakhutdinov, R.
+H. P.; Kaplan, J.; Edwards, H.; Burda, Y.; Joseph, N.; Brock-            2021. Towards understanding and mitigating social biases in
+man, G.; Ray, A.; Puri, R.; Krueger, G.; Petrov, M.; Khlaaf,             language models. In International Conference on Machine
+H.; Sastry, G.; Mishkin, P.; Chan, B.; Gray, S.; Ryder, N.;              Learning, 6565–6576. PMLR.
+Pavlov, M.; Power, A.; Kaiser, L.; Bavarian, M.; Winter, C.;
+Tillet, P.; Such, F. P.; Cummings, D.; Plappert, M.; Chantzis,           Liu, H.; Dacon, J.; Fan, W.; Liu, H.; Liu, Z.; and Tang, J.
+F.; Barnes, E.; Herbert-Voss, A.; Guss, W. H.; Nichol, A.;               2019. Does gender matter? towards fairness in dialogue sys-
+Paino, A.; Tezak, N.; Tang, J.; Babuschkin, I.; Balaji, S.;              tems. arXiv preprint arXiv:1910.10486.
+Jain, S.; Saunders, W.; Hesse, C.; Carr, A. N.; Leike, J.;               Liu, Y.; Chen, X.; Gao, Y.; Su, Z.; Zhang, F.; Zan, D.; Lou,
+Achiam, J.; Misra, V.; Morikawa, E.; Radford, A.; Knight,                J.-G.; Chen, P.-Y.; and Ho, T.-Y. 2023. Uncovering and
+M.; Brundage, M.; Murati, M.; Mayer, K.; Welinder, P.; Mc-               quantifying social biases in code generation. Advances in
+Grew, B.; Amodei, D.; McCandlish, S.; Sutskever, I.; and                 Neural Information Processing Systems, 36.
+Zaremba, W. 2021. Evaluating Large Language Models
+                                                                         Meade, N.; Poole-Dayan, E.; and Reddy, S. 2021. An
+Trained on Code. arXiv:2107.03374.
+                                                                         empirical survey of the effectiveness of debiasing tech-
+Chen, T. Y.; Cheung, S. C.; and Yiu, S. M. 2020. Metamor-                niques for pre-trained language models. arXiv preprint
+phic testing: a new approach for generating next test cases.             arXiv:2110.08527.
+arXiv preprint arXiv:2002.12543.
+                                                                         Měchura, M. 2022. A taxonomy of bias-causing ambiguities
+Chen, Z.; Zhang, J. M.; Sarro, F.; and Harman, M. 2024.
+                                                                         in machine translation. In Proceedings of the 4th Workshop
+Fairness Improvement with Multiple Protected Attributes:
+                                                                         on Gender Bias in Natural Language Processing (GeBNLP),
+How Far Are We? In Proceedings of the IEEE/ACM 46th In-
+                                                                         168–173.
+ternational Conference on Software Engineering, ICSE ’24.
+Corbett-Davies, S.; Pierson, E.; Feller, A.; Goel, S.; and               Meta. 2024.     Code Llama 70B Instruct HF.       https:
+Huq, A. 2017. Algorithmic decision making and the cost                   //huggingface.co/meta-llama/CodeLlama-70b-Instruct-hf.
+of fairness. In Proceedings of the 23rd acm sigkdd interna-              Accessed: 2024-06-20.
+tional conference on knowledge discovery and data mining,                Mozafari, M.; Farahbakhsh, R.; and Crespi, N. 2020. Hate
+797–806.                                                                 speech detection and racial bias mitigation in social media
+Dejanović, I.; Vaderna, R.; Milosavljević, G.; and Vuković,           based on BERT model. PloS one, 15(8): e0237861.
+Ž. 2017. Textx: a python tool for domain-specific languages              Nadeem, M.; Bethke, A.; and Reddy, S. 2020. StereoSet:
+implementation. Knowledge-based systems, 115: 1–4.                       Measuring stereotypical bias in pretrained language models.
+Dhamala, J.; Sun, T.; Kumar, V.; Krishna, S.; Pruksachatkun,             arXiv preprint arXiv:2004.09456.
+Y.; Chang, K.-W.; and Gupta, R. 2021. Bold: Dataset and                  Nangia, N.; Vania, C.; Bhalerao, R.; and Bowman, S. R.
+metrics for measuring biases in open-ended language gener-               2020. CrowS-pairs: A challenge dataset for measuring so-
+ation. In Proceedings of the 2021 ACM conference on fair-                cial biases in masked language models. arXiv preprint
+ness, accountability, and transparency, 862–872.                         arXiv:2010.00133.
+Díaz, M.; Johnson, I.; Lazar, A.; Piper, A. M.; and Gergle,
+D. 2018. Addressing age-related bias in sentiment analysis.              Nijkamp, E.; Pang, B.; Hayashi, H.; Tu, L.; Wang, H.; Zhou,
+In Proceedings of the 2018 chi conference on human factors               Y.; Savarese, S.; and Xiong, C. 2022. Codegen: An open
+in computing systems, 1–14.                                              large language model for code with multi-turn program syn-
+                                                                         thesis. arXiv preprint arXiv:2203.13474.
+Galhotra, S.; Brun, Y.; and Meliou, A. 2017. Fairness test-
+ing: testing software for discrimination. In Proceedings of              OpenAI. 2022. GPT-3.5 Turbo Models. https://platform.
+the 2017 11th Joint meeting on foundations of software en-               openai.com/docs/models/gpt-3-5-turbo. Accessed: 2024-
+gineering, 498–510.                                                      06-20.
+Gallegos, I. O.; Rossi, R. A.; Barrow, J.; Tanjim, M. M.;                Parrish, A.; Chen, A.; Nangia, N.; Padmakumar, V.; Phang,
+Kim, S.; Dernoncourt, F.; Yu, T.; Zhang, R.; and Ahmed,                  J.; Thompson, J.; Htut, P. M.; and Bowman, S. R. 2021.
+N. K. 2023. Bias and fairness in large language models: A                BBQ: A hand-built bias benchmark for question answering.
+survey. arXiv preprint arXiv:2309.00770.                                 arXiv preprint arXiv:2110.08193.
+
+
+                                                                 27498
+Rekabsaz, N.; and Schedl, M. 2020. Do neural ranking mod-
+els intensify gender bias? In Proceedings of the 43rd Inter-
+national ACM SIGIR Conference on Research and Develop-
+ment in Information Retrieval, 2065–2068.
+Roziere, B.; Gehring, J.; Gloeckle, F.; Sootla, S.; Gat, I.; Tan,
+X. E.; Adi, Y.; Liu, J.; Remez, T.; Rapin, J.; et al. 2023. Code
+llama: Open foundation models for code. arXiv preprint
+arXiv:2308.12950.
+Sap, M.; Card, D.; Gabriel, S.; Choi, Y.; and Smith, N. A.
+2019. The risk of racial bias in hate speech detection. In
+Proceedings of the 57th annual meeting of the association
+for computational linguistics, 1668–1678.
+Sheng, E.; Chang, K.-W.; Natarajan, P.; and Peng, N. 2020.
+Towards controllable biases in language generation. arXiv
+preprint arXiv:2005.00268.
+Steed, R.; Panda, S.; Kobren, A.; and Wick, M. 2022. Up-
+stream mitigation is not all you need: Testing the bias trans-
+fer hypothesis in pre-trained language models. In Proceed-
+ings of the 60th Annual Meeting of the Association for Com-
+putational Linguistics (Volume 1: Long Papers), 3524–3542.
+Wan, Y.; Wang, W.; He, P.; Gu, J.; Bai, H.; and Lyu, M. R.
+2023. Biasasker: Measuring the bias in conversational ai
+system. In Proceedings of the 31st ACM Joint European
+Software Engineering Conference and Symposium on the
+Foundations of Software Engineering, 515–527.
+Wikipedia. 2024. Student’s t-test. https://en.wikipedia.org/
+wiki/Student%27s_t-test. Accessed: 2024-06-20.
+Yang, Z.; Yi, X.; Li, P.; Liu, Y.; and Xie, X. 2022.
+Unified detoxifying and debiasing in language generation
+via inference-time adaptive optimization. arXiv preprint
+arXiv:2210.04492.
+Zhang, M.; Sun, J.; Wang, J.; and Sun, B. 2023. TESTSGD:
+Interpretable testing of neural networks against subtle group
+discrimination. ACM Transactions on Software Engineering
+and Methodology, 32(6): 1–24.
+Zhao, J.; Fang, M.; Pan, S.; Yin, W.; and Pechenizkiy,
+M. 2023. GPTBIAS: A comprehensive framework for
+evaluating bias in large language models. arXiv preprint
+arXiv:2312.06315.
+
+
+
+
+                                                                    27499
+

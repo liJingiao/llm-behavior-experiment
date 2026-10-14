@@ -1,0 +1,1173 @@
+      Minerva: A Programmable Memory Test Benchmark for Language Models
+
+
+                          Menglin Xia * 1 Victor Rühle 1 Saravan Rajmohan 1 Reza Shokri * 2
+
+
+                          Abstract                                      paper, we address a fundamental question that is critical to
+      How effectively can LLM-based AI assistants uti-                  improving AI assistants: What specific capabilities do large
+      lize their memory (context) to perform various                    language models demonstrate in utilizing their memory?
+      tasks? Traditional data benchmarks, which are                     One common approach to testing models is through data
+      often manually crafted, suffer from several limi-                 benchmarks. However, evaluating model capabilities using
+      tations: they are static, susceptible to overfitting,             static data benchmarks–based on some user queries, their
+      difficult to interpret, and lack actionable insights–             data, and expected outcomes–can be costly, imprecise, and
+      failing to pinpoint the specific capabilities a model             lacks scalability. Additionally, performing tasks in realistic
+      lacks when it does not pass a test. In this paper,                scenarios often requires multiple capabilities, making it
+      we present a framework for automatically generat-                 challenging to identify which specific capability a model
+      ing a comprehensive set of tests to evaluate mod-                 lacks when it fails a data benchmark. This limitation reduces
+      els’ abilities to use their memory effectively. Our               the effectiveness of these benchmarks in designing better
+      framework extends the range of capability tests                   models. Moreover, blindly optimizing models to improve
+      beyond the commonly explored (passkey, key-                       on such benchmarks risks overfitting, often rendering the
+      value, needle in the haystack) search, a dominant                 data benchmarks obsolete over time.
+      focus in the literature. Specifically, we evaluate
+      models on atomic tasks such as searching, recall-                 To address some of these concerns, recently, there have been
+      ing, editing, matching, comparing information                     many attempts to test models using automatically generated
+      in context memory, performing basic operations                    benchmarks, but these efforts have primarily focused on
+      when inputs are structured into distinct blocks,                  evaluating basic search capabilities (e.g., passkey or key-
+      and maintaining state while operating on mem-                     value search) in long-contexts (Kamradt, 2023; Liu et al.,
+      ory, simulating real-world data. Additionally, we                 2024; Zhang et al., 2024; Anthropic, 2024; Wu et al., 2024;
+      design composite tests to investigate the models’                 Li et al., 2024; Hsieh et al., 2024). In this paper, we go
+      ability to perform more complex, integrated tasks.                beyond simple search tasks and introduce a framework to
+      Our benchmark enables an interpretable, detailed                  test a comprehensive range of memory-related capabilities
+      assessment of memory capabilities of LLMs.                        in LLMs. Note that, we deliberately avoid conflating the
+                                                                        memory usage capabilities with the complex reasoning abil-
+                                                                        ities (e.g., complex mathematical or logical reasoning) in
+1. Introduction                                                         language models, as the latter is a separate skill that is cur-
+                                                                        rently the focus of extensive study (Clark et al., 2018; Cobbe
+What capabilities should we expect from AI assistants? The              et al., 2021; Hendrycks et al., 2021b; Suzgun et al., 2022).
+AI assistants are provided with a (large) input context con-
+taining all the available information that is potentially rele-         What are memory-usage capabilities? We define these as
+vant to the user’s request (e.g., all the prior emails, messages,       the abilities to retrieve relevant information, compose it for
+and confirmed calendar events). This input, commonly re-                the instructed task, and recall key details when synthesizing
+ferred to as the context (for the LLM), encapsulates what               the output. This process also involves creating associations
+the AI assistant knows about the world in which it is tasked            between the instruction and the stored information, as well
+to operate. This representation of the world, expressed in              as among different parts of the memory itself. Without ex-
+natural language, functions as the model’s memory. In this              tracting these relationships, the memory remains flat and
+                                                                        formless, rendering it less useful. Consequently, the model
+  *
+    Equal contribution 1 M365 Research, Microsoft 2 National Uni-       must be able to recognize differences, identify similarities,
+versity of Singapore. Correspondence to: Menglin Xia <mol-              and take appropriate actions based on them. We design a
+lyxia@microsoft.com>, Reza Shokri <reza@comp.nus.edu.sg>.
+                                                                        series of atomic tests aimed at evaluating each of these indi-
+Proceedings of the 42 nd International Conference on Machine            vidual capabilities in isolation, to the extent that isolating
+Learning, Vancouver, Canada. PMLR 267, 2025. Copyright 2025             such capabilities is possible.
+by the author(s).
+
+                                                                    1
+                          Minerva: A Programmable Memory Test Benchmark for Language Models
+
+To evaluate the more complex scenarios in memory usage,               this memory and execute potentially complex retrieval tasks.
+we construct composite tests that reflect real-world scenar-          Accordingly, we expect the AI assistant to demonstrate spe-
+ios, where memory is divided into multiple compartments               cific capabilities in memory utilization, including accurate
+(i.e., information relevant to distinct contexts). The model is       retrieval, effective synthesis of relevant information, and
+expected to recognize the boundaries of these compartments,           adaptability to evolving context. These capabilities include:
+trace the knowledge contained within them, and perform
+operations such as information retrieval, memory associ-                 • Information Retrieval and Localization: The ability
+ation, and other tasks while respecting these boundaries.                  to efficiently locate, search for, and extract relevant
+The complexity increases further when there is interaction                 information from the memory (i.e., input data) based
+between compartments. In such cases, information must                      on specific instructions or user queries.
+flow across boundaries–for example, when stories about two
+parallel events converge at a particular moment, when inter-             • Processing and Basic Reasoning: The capability to
+actions occur between different events, or when information                perform modifications, computations, and logical oper-
+known to certain entities in memory is shared with others.                 ations on the input data, including identifying patterns,
+Examples include AI assistants managing calendar events,                   recognizing repetitions, and understanding relation-
+tracking financial transactions, or suggesting medical di-                 ships within the memory.
+agnoses. Handling these scenarios is highly challenging,                 • Content Transfer and Synthesis: The ability to copy,
+yet it is essential for AI assistants to achieve practical and             rephrase, or generate synthesized output by integrating
+reliable performance. The core challenge is due to the fact                both original and modified elements from the input.
+that context memory, as provided to the model, flattens data
+from multiple parallel and potentially interrelated memory               • Structural Awareness and Organization: The capac-
+compartments. This requires the model to disentangle the                   ity to interpret the spatial, structural, or organizational
+content by leveraging the available labels and clues, and                  layout of the memory, such as distinguishing labeled
+tracking the state of relevant information throughout the                  fragments of text, sets, lists, or hierarchical structures.
+memory scanning, while performing the task.
+                                                                      In our benchmark, we focus on isolating the atomic memory-
+Table 1 presents an overview of the types of memory tests             related capabilities of LLMs. Success or failure in these
+included in our benchmark. For each test, we use ef-                  tests provides a clear and interpretable assessment of the
+ficient parametric programs to generate randomized test               strengths and limitations of the models. We design mul-
+cases. We run a comprehensive evaluation of several major             tiple atomic tests to measure fundamental skills without
+open-source and black-box models (e.g., GPT-4(o), Cohere,             interference from other factors. These tests are simple, tar-
+Gemma, LLaMA, Mistral, Phi). Our experimental results                 geted, and structured to assess specific abilities with clarity.
+show that while models perform relatively well on simple              Our benchmark includes the existing basic tests, notably the
+search tasks, they exhibit significant disparities across con-        needle-in-the-haystack tests and its variations, but it goes
+text utilization capabilities even at a context length of 4k          beyond the search methods and includes a diverse set of
+tokens. This indicates that strong performance in basic               atomic capabilities. In our benchmark, we focus on some
+retrieval does not necessarily translate to other context pro-        fundamental capabilities: search, recall and edit, match and
+cessing abilities. Our framework goes beyond search-based             compare, spot the differences, compute on sets and lists, and
+tests by incorporating atomic tests that pinpoint distinct ca-        stateful processing.
+pabilities, providing a more nuanced picture of the strengths
+and weaknesses of models in context processing. Moreover,             We also develop composite tests to evaluate how effectively
+composite tests, which combine multiple atomic capabili-              models can perform more complex, integrated tasks. These
+ties, resulted in substantial performance drops for all models.       tests assess the integration of multiple atomic capabilities
+These tests present the limitations of current models and             to simulate real-world scenarios. By combining elements
+provide valuable insights for guiding future model training           such as retrieval, reasoning, synthesis, and structural aware-
+and development.                                                      ness, composite tests measure how well an AI assistant can
+                                                                      coordinate different skills to execute complex operations.
+The code and data will be available at https://github.                We provide two class of composite tests: processing data
+com/microsoft/minerva_memory_test.                                    blocks, and composite-state tracking (theory of mind). Our
+                                                                      objective here is to test the composition of various atomic
+2. Benchmark for Memory Tests                                         operations and the ability to interpret segments of data (e.g.,
+                                                                      messages or paragraphs associated with a particular person
+We define the entirety of context data available to a large           or topic). These composite tests evaluate if the model can
+language model (LLM) as its memory. Users of an AI as-                make sense of the “spatial” structure of the memory, and
+sistant leveraging the LLM can instruct the model to parse            also keep track of its “temporal” changes (e.g., information
+
+                                                                  2
+                          Minerva: A Programmable Memory Test Benchmark for Language Models
+
+that gets updated across many emails). This can become                models show stronger all-around performance across the
+particularly challenging for the current architecture of major        capabilities. In contrast, other models excel at the search
+LLMs because the context has a flat structure.                        task but struggle significantly in other areas, leading to a
+                                                                      widening performance gap compared to stronger models.
+Table 1 presents the list and description of representative
+                                                                      This is especially evident in the Stateful Processing tasks,
+tests in each category. Appendix A presents the exact tem-
+                                                                      where models exhibit steep performance drops. Even within
+plates for all our tests. Our benchmark differs from tradi-
+                                                                      the GPT-4(o) models, there were noticeable variations in
+tional data benchmarks by allowing the generation of fresh,
+                                                                      performance across different tasks, despite them being the
+randomized test cases for each category. Each test acts as
+                                                                      best-performing models. This suggests that strong perfor-
+a programmable script that measures the model’s capabil-
+                                                                      mance in simple retrieval tasks does not imply effective
+ity while adjusting the hyperparameters that influence test
+                                                                      context processing, highlighting that using NIAH-like tests
+difficulty. The programmable tests also enable us compos-
+                                                                      alone for evaluating context utilization is not sufficient to
+ing them easily, which is one of the key advantages of our
+                                                                      capture the full spectrum of model capabilities. Our frame-
+benchmark. New categories, and new tests, can be easily
+                                                                      work instead reveals significant variability in performance
+added to this framework enabling a more diverse set of tests.
+                                                                      across distinct capability categories, offering a more nu-
+                                                                      anced understanding of model limitations.
+3. Evaluation
+                                                                      The following sections analyze each test type in detail, high-
+3.1. Experimental Setup                                               lighting key insights from the evaluations.
+We use the proposed framework to evaluate nine widely used
+                                                                      3.3. Analysis on Atomic Tests
+language models on a fixed snapshot of 1110 randomly gen-
+erated test samples. For all tests, we fixed the context length       Search All models performed relatively well on Search
+to 4k tokens, except in the Stateful Processing category,             tasks, which is unsurprising given the 4k context length.
+where the context length depends on the number of opera-              However, even at this length, model performance varied sig-
+tion steps. We set the number of steps as 200 for quantity            nificantly depending on the specific search type (see Table
+state and 100 for set state, corresponding to an approximate          2). For example, in the binary String Search task, models
+context length of 1.5k tokens. For evaluation, we use ex-             handled individual word searches well but struggled with
+act match accuracy for binary tasks, ROUGE-L(Lin, 2004)               subsequence searches, where queries consisted of multi-
+for tests that require sequence overlap measurement, and              word sequences. The performance drop can be attributed
+Jaccard similarity (Jaccard, 1901) for set overlap. Further           to two factors: (1) length of query affects the difficulty of
+details on the number of examples, hyperparameter configu-            precise memory access; (2) negative samples are created by
+rations, and evaluation metrics for the tests are provided in         replacing a single word in present subsequences, making
+Appendices B and C.                                                   absent longer subsequence more distracting.
+The evaluated models are divided into two groups:                     Figure 2 further analyzes subsequence search performance
+Black-box models: GPT-4-turbo, GPT-4o, GPT-4o-mini,                   for GPT-4o, Mistral, and Phi-3-medium. These models ex-
+and Cohere-command-rplus.                                             hibit distinct error patterns as the length of the subsequence
+                                                                      increases: GPT-4o has no false negative errors (it never
+Open-source models: Mistral-7b-instruct-v02, Phi-3-small-             misses a present subsequence) but makes more false posi-
+128k-instruct (7B), LLaMA-3.1-8b-instruct, Gemma-2-9b,                tive errors as the subsequence length grows, suggesting it
+and Phi-3-medium-128k-instruct (14B).                                 overestimates presence in more ambiguous cases. Mistral
+We set the max output token to 4096, temperature to 0, and            also makes no false negative errors but exhibits a decreasing
+top p to 1 for all model inference.                                   false positive rate, implying it struggles more with shorter
+                                                                      distractors. Phi-3-medium, in contrast, makes few false pos-
+                                                                      itive errors (rarely identifies an absent sequence as present),
+3.2. Model Performance Overview
+                                                                      but struggles more with false negatives, indicating a general
+Figure 1 summarizes the overall performance of the eval-              tendency to deny presence. These differing patterns sug-
+uated models on the memory test snapshot within 4k con-               gest that the models may employ different search strategies,
+text length. Notably, this context length is usually consid-          affecting their susceptibility to different types of errors.
+ered short for context utilization benchmarks, and many
+                                                                      For Batch Search and Key-Value Search tasks (analogous to
+models are expected to perform perfectly at this length.
+                                                                      multi-NIAH and NIAH, respectively), models like Mistral,
+However, our evaluation reveals significant disparities in
+                                                                      Phi-3, and Cohere show a notable performance drop, reveal-
+performance across the capabilities, even within this man-
+                                                                      ing their limitations in handling multiple memory accesses
+ageable context length. Overall, the GPT-4-turbo/GPT-4o
+                                                                      effectively.
+
+                                                                  3
+                             Minerva: A Programmable Memory Test Benchmark for Language Models
+
+       Search
+       String search (binary test)                 Is the string x in memory? x could be a word or a sequence.
+       Key-value search                            What is the word or phrase that is paired with keyword x?
+       Batch search                                For each of the keywords in the batch x1 , x2 , · · · , xk , perform the search
+                                                   and return the batch of corresponding responses.
+       Recall and Edit
+       Snapshot                                    Share a snapshot of the entire memory (as a verbatim copy).
+       Replace all                                 Share the entire memory after replacing all occurrences of x with y.
+       Overwrite positions                         Share the entire memory after overwriting the words that are on particular
+                                                   positions (e.g., every k th word) with y.
+       Functional updates                          Update every x with the output of a function f (x).
+       Match and Compare
+       Compare positions (binary test)             Does x appear before y?
+       Find duplicates                             Which word/string has duplicates in memory?
+       Count                                       How many times is x repeated in memory?
+       Check association (binary test)             Check if both x and y are associated with the same tag in memory
+                                                   (assuming every term is associated with a tag).
+       Spot the Differences
+       Compare two lists                           Give two lists X and Y of the same length (e.g., same number of words),
+                                                   report the difference (i.e., X − Y ).
+       Identify the odd group                      Given multiple sets, identify which one is different (assuming n − 1
+                                                   identical sets with shuffled elements, and 1 set with some differences).
+       Patch the difference                        A sequence of words is repeated multiple times, and then there is a partial
+                                                   sequence. What is the next k th element in the sequence?
+       Compute on Sets and Lists
+       Group membership                            Given k sets, identify which set includes x.
+       Group association                           Check if x and y belong to the same set.
+       Iterate                                     Given k lists, return the last element in each list.
+       Stateful Processing
+       Quantity                                    Keep track of the total quantity of items, based on a sequence of addition
+                                                   and subtraction operations (e.g., “add 10, subtract 2, add 7, ...”).
+       Set                                         Keep track of the items in a set, based on a sequence of addition and
+                                                   removal operation (e.g., “add apple, pear; add orange; remove apple;
+                                                   add lime, ...”).
+       Processing Data Blocks
+       Search, recall, and edit          The input contains alternating labeled lists of elements (e.g., “L1: a, b,
+                                         c; L2: h, f, i; L1: d, z, k; ...”). For a given list label (e.g., L1 or L2) and
+                                         a specified element within that list, return all the elements that appear
+                                         after that specified element in the same list.
+       Composite-State Tracking (Theory of Mind)
+       State tracking across data blocks Perform “Stateful Processing” for multiple agents, and report the final
+                                         set state for each agent. The input provides a list of operations by k
+                                         agents over time, including both independent actions (add/remove) and
+                                         interactive actions (swap) (e.g., “Alice: add apple, pear, remove orange,
+                                         add banana; Bob: add peach, berry, remove kiwi; Charley: add lime;
+                                         Bob: remove peach, swap berry with Alice for banana; ...”).
+
+Table 1. List of memory tests. We divide the tests into different categories based on the core expected capability for passing the test. Most
+the initial tests are atomic, i.e., the expected capability cannot be broken down into other meaningful capabilities. The tests at the bottom
+of the list are composite tests and require the model to have multiple atomic capabilities at the same time in order to succeed.
+
+
+Recall and Edit Figure 3 presents the results for the Re-                sic recall (Snapshot), their performance dropped sharply
+call and Edit tasks. While models performed well on ba-                  when tasked with making regular edits. A closer analysis
+
+                                                                     4
+                                Minerva: A Programmable Memory Test Benchmark for Language Models
+
+
+
+
+                  (a) Performance of the black-box models.                              (b) Performance of the open-source models.
+
+                    Figure 1. Overall performance of nine models on a snapshot within 4k context length of Minerva.
+
+
+ Models                  Word    Subsequence    Key-value       Batch                        gpt-4o (pos)          gpt-4o (neg)       mistral-7b (pos)
+                                                                                            mistral-7b (neg)   phi-3-medium (pos)   phi-3-medium (neg)
+ gpt-4-turbo             0.94    0.94 (-0.00)   1.00           1.00 (-0.00)
+ gpt-4o                  1.00    0.82 (-0.18)   1.00           1.00 (-0.00)             1
+ gpt-4o-mini             0.98    0.64 (-0.34)   1.00           0.96 (-0.04)
+ cohere-command-rplus    1.00    0.85 (-0.15)   0.98           0.87 (-0.11)           0.8
+ mistral-7b              0.78    0.80 (+0.02)   0.92           0.47 (-0.45)
+ phi-3-small             0.94    0.84 (-0.10)   0.94           0.77 (-0.17)           0.6
+ phi-3-medium            1.00    0.55 (-0.45)   1.00           0.72 (-0.28)
+ gemma-2-9b              1.00    0.60 (-0.40)   1.00           1.00 (-0.00)
+                                                                                      0.4
+ llama-3.1-8b            1.00    0.57 (-0.43)   1.00           0.99 (-0.01)
+                                                                                      0.2
+Table 2. Results for the Search tasks. The four columns represent:
+String Search (with word), String Search(with subsequence), Key-                        0
+                                                                                               8               16              32             64
+value Search, and Batch Search. Numbers in parentheses indicate
+comparative performance differences between String Search (with
+subsequence vs. word) and Batch Search vs. Key-Value Search.                      Figure 2. Analysis on String Search (with subsequence) across
+                                                                                  increasing subsequence lengths. This figure examines the behavior
+                                                                                  of models on positive samples (where the subsequence is present)
+          Model           String Search (word)         Snapshot                   and negative samples (where the subsequence is absent).
+          gpt-4-turbo     1.00 (0.06)                  1.00 (0.04)
+          gpt-4o          1.00 (0.00)                  1.00 (0.00)
+          gpt-4o-mini     0.94 (-0.04)                 1.00 (0.00)                that these models frequently deviated from instructions over
+          cohere          1.00 (0.00)                  1.00 (0.26)
+          mistral-7b      1.00 (0.22)                  0.96 (0.00)
+                                                                                  longer sequences, suggesting difficulties in maintaining con-
+          phi-3-small     1.00 (0.06)                  0.99 (0.04)                sistent rule applications over extended contexts.
+          phi-3-medium    0.98 (-0.02)                 0.87 (-0.09)
+          gemma-2-9b      0.96 (-0.04)                 0.96 (0.05)                Additionally, we conducted a separate ablation study on
+          llama-3.1-8b    0.98 (-0.02)                 1.00 (0.00)                Snapshot and String Search. In this study, we replaced
+                                                                                  meaningful words in the context with gibberish tokens con-
+           Table 3. Ablation study with gibberish context.                        sisting of randomly generated alphabetical characters. As
+                                                                                  shown in Table 3, performance remained largely unchanged,
+                                                                                  suggesting that semantic meaning was not a significant dis-
+of the generated outputs reveals that models struggled with                       tractor in these tasks.
+maintaining coherence during edits, often getting trapped
+in repetitive word loops. For the Functional Update task,                         Match and Compare As shown in Figure 4, model per-
+we deliberately selected simple numerical updates, such as                        formance in the Match and Compare tasks was relatively
+“Subtract 1 from every number,” to ensure the edits were                          consistent across different model sizes. Given that counting
+within the models’ capabilities. Nevertheless, when compar-                       is a well-known weakness in LLMs, it is unsurprising that
+ing performance on Snapshot (with numbers) to Functional                          all models struggled significantly with the counting task,
+Updates, all models exhibited a steep decline, especially                         though GPT models performed slightly better than others.
+for smaller ones. Analysis of generated outputs revealed                          However, models generally succeeded in identifying the
+
+                                                                              5
+                                                   Minerva: A Programmable Memory Test Benchmark for Language Models
+
+               Model                                          Group membership                             Group association              Group assoc. (alternating)                      Iterate
+               (Compared against)                             (Sub-string search)                          (Group membership)             (Group association)                             (Iterate (last))
+               gpt-4-turbo                                    0.96 (0.02)                                  0.75 (-0.21)                   0.68 (-0.07)                                    0.83 (-0.17)
+               gpt-4o                                         0.98 (-0.02)                                 0.65 (-0.33)                   0.52 (-0.13)                                    0.86 (-0.14)
+               gpt-4o-mini                                    0.96 (-0.02)                                 0.68 (-0.28)                   0.52 (-0.16)                                    0.67 (-0.33)
+               cohere-command-rplus                           0.93 (-0.07)                                 0.70 (-0.23)                   0.72 (0.02)                                     0.10 (-0.9)
+               mistral-7b                                     0.50 (-0.28)                                 0.57 (0.07)                    0.52 (-0.05)                                    0.04 (-0.25)
+               phi-3-small                                    0.52 (-0.42)                                 0.55 (0.03)                    0.68 (0.13)                                     0.04 (-0.7)
+               phi-3-medium                                   0.60 (-0.4)                                  0.72 (0.12)                    0.50 (-0.22)                                    0.04 (-0.69)
+               gemma-2-9b                                     0.80 (-0.2)                                  0.60 (-0.2)                    0.62 (0.02)                                     0.14 (-0.65)
+               llama-3.1-8b                                   0.84 (-0.16)                                 0.78 (-0.06)                   0.82 (0.04)                                     0.05 (-0.43)
+
+Table 4. Results for Compute on Sets and Lists. The numbers in parentheses indicate the performance difference compared to the
+corresponding tasks they are evalauted against.
+
+
+                                                                    mistral-7b       phi-3-small   phi-3-medium
+      gpt-4-turbo    gpt-4o    gpt-4o-mini    cohere
+                                                                   gemma-2-9b       llama-3.1-8b                             reliably identify it. This may stem from a combination
+                                                              1
+ 1                                                                                                                           of their inherent inclination to agree and the difficulty in
+0.8                                                          0.8                                                             recognizing relative comparisons and associations.
+0.6                                                          0.6
+                                                                                                                                          gpt-4-turbo         gpt-4o            gpt-4o-mini         cohere
+0.4                                                          0.4                                                                           mistral-7b       phi-3-small        phi-3-medium       gemma-2-9b
+                                                                                                                                         llama-3.1-8b
+0.2                                                          0.2
+                                                                                                                                  1
+ 0                                    s      )        s       0                                    s     )         s
+              ords
+                   )
+                        ll      ition   bers     date                      ords
+                                                                                )
+                                                                                     ll      ition   bers     date
+          t (w eplace a rite pos ot (num onal up                       t (w eplace a rite pos ot (num onal up
+     psho      R         rw     psh Functi                        psho      R         rw     psh Functi                          0.8
+ Sna                 Ove    Sna                               Sna                 Ove    Sna
+
+
+                                                                                                                                 0.6
+               Figure 3. Results for the Recall and Edit tasks.
+                                                                                                                                 0.4
+                                                                    mistral-7b       phi-3-small    phi-3-medium
+      gpt-4-turbo     gpt-4o    gpt-4o-mini     cohere
+                                                                   gemma-2-9b       llama-3.1-8b
+                                                                                                                                 0.2
+ 1                                                            1
+
+
+0.8                                                          0.8                                                                  0
+                                                                                                                                                           sts                        group                   nce
+                                                                                                                                               re two li                    the odd                 e differe
+0.6                                                          0.6                                                                       Compa                     Identify                  Patch th
+0.4                                                          0.4
+
+
+0.2                                                          0.2
+                                                                                                                                       Figure 5. Results for Spot the Differences tasks.
+
+ 0                                                            0
+                   ons         s                        on                      ons         s                       on
+             positi d duplicate Count            ociati                   positi d duplicate Count           ociati
+  Com
+      pare       Fin                  Chec
+                                           k ass              Com
+                                                                   pare        Fin                 Chec
+                                                                                                        k ass                Spot the Differences As shown in Figure 5, performance
+                                                                                                                             across all models are poor on Compare Two Lists, suggest-
+         Figure 4. Results for the Match and Compare tasks.                                                                  ing inherent difficulties in cross-referencing information
+                                                                                                                             across long contexts, even for larger models. GPT-4o and
+                                                                                                                             the LLaMA model significantly outperform the others in
+duplicates (in Find duplicates), and primarily struggled with                                                                the Identify the Odd Group task, highlighting a general
+the counting aspect, which requires tracking and updating                                                                    weakness in detecting contextual differences by the other
+an integer state, a skill that is more similar to stateful pro-                                                              models. However, an 8B LLaMA model outperforms both
+cessing. This suggests that relying solely on counting-based                                                                 equivalently-sized models and even GPT-4 in this task, sug-
+tests (Song et al., 2024) could overly bias the evaluation                                                                   gesting that model size alone was not the determining fac-
+and fail to capture broader model capabilities. The results                                                                  tor. This indicates that architectural differences, training
+also indicate that models exhibit some ability to recognize                                                                  objectives, or specific inductive biases may contribute to
+relative positions and group associations, but their accuracy                                                                improved performance in comparative memory utilization.
+remains limited (ranging between 0.6-0.8). A closer ex-
+amination of model generations reveals an overwhelming                                                                       Compute on Sets and Lists The tasks in this category
+tendency for the models to produce false positive errors –                                                                   require models to recognize and process group structures
+models often answer “yes” when the correct answer is “no”,                                                                   within the context, and performance gradually declines as
+while making very few false negative errors. This means                                                                      the complexity of the task increases (see Table 4). For in-
+that when the relationship is correct, the models can more                                                                   stance, in comparing the Group Membership task with the
+
+                                                                                                                         6
+                                      Minerva: A Programmable Memory Test Benchmark for Language Models
+
+              Model                   Quantity state           Set state                             Model            Processing Data Blocks   Theory of Mind
+              gpt-4-turbo                      0.8                   0.80                            gpt-4-turbo              0.31                   0.26
+              gpt-4o                           1.0                   0.65                            gpt-4o                   0.37                   0.38
+              gpt-4o-mini                      0.7                   0.24                            gpt-4o-mini              0.31                   0.21
+              cohere                           0.0                   0.58                            cohere                   0.26                   0.18
+              mistral-7b                       0.0                   0.08                            mistral-7b               0.18                   0.16
+              phi-3-small                      0.0                   0.13                            phi-3-small              0.21                   0.20
+              phi-3-medium                     0.0                   0.11                            phi-3-medium             0.18                   0.10
+              gemma-2-9b                       0.0                   0.24                            gemma-2-9b               0.26                   0.12
+              llama-3.1-8b                     0.0                   0.13                            llama-3.1-8b             0.15                   0.03
+
+           Table 5. Results for Stateful Processing tasks.                                                    Table 6. Results for the composite tests.
+
+      gpt-4-turbo    gpt-4o      phi-3-small           gpt-4-turbo       gpt-4o       cohere
+        cohere      mistral-7b                         mistral-7b      phi-3-small
+
+
+  1                                             1                                                  models struggle (near zero accuracy). For set state tracking,
+0.8                                            0.8                                                 larger models generally perform better.
+0.6                                            0.6                                                 We conducted an ablation study to examine how the number
+0.4                                            0.4                                                 of operation steps influences performance of five selected
+                                                                                                   models (Fig. 6). For quantity state tracking, GPT-4(o) mod-
+0.2                                            0.2
+                                                                                                   els perform well within fewer than 200 steps but experience
+  0                                             0
+      50200 400     800      1,200   1,600           50200 400        800     1,200   1,600        a sharp decline in accuracy beyond this threshold. For set
+                    Step                                              Step
+                                                                                                   state tracking, the performance decline is more gradual. The
+                                                                                                   differences in performance drop between the two tasks can
+Figure 6. Effect of context length (number of operation steps) on                                  be attributed to the nature of the two tasks. While tracking
+performance in the quantity state (left) and set state (right) tasks.
+                                                                                                   an integer state might seem simpler than tracking a set, it
+                                                                                                   actually requires the model to maintain and apply every op-
+String Search task, where the former requires identifying                                          eration sequentially to compute the final value. In contrast,
+which list a word belongs to rather than simply determining                                        for set state, the fixed size of the set makes more recent
+its presence, the performance of open-source models drops                                          operations more relevant to the final state, reducing the need
+considerably. Similarly, in comparing the Group Associa-                                           for exhaustive step-by-step tracking. Nevertheless, even in
+tion task with the Group Membership task, where the former                                         this scenario, all models show a clear inability to handle
+requires determining whether two words belong to the same                                          longer or more complex operation sequences effectively.
+group, all models exhibit a noticeable decline in perfor-                                          Interestingly, GPT-4 model outperformed GPT-4o at this
+mance. The decline becomes even more pronounced when                                               task, suggesting potential optimization trade-offs may have
+comparing the Group Association (alternating) variant of                                           affected its ability to manage set-based updates.
+the task to the standard Group Association task. Here, the                                         Overall, while larger models like GPT-4(o) exhibit some
+context involves alternating repeated groups rather than sim-                                      ability to track state over time, their effectiveness rapidly
+ple group structures, which further challenges the models’                                         deteriorates as task complexity increases. Smaller models,
+abilities to handle partitioned contexts effectively.                                              in particular, struggle to track operations over time, pointing
+An interesting observation was found during the Iterate task.                                      to significant gaps in their ability to manage and process
+In an ablation study, we modified the task to require re-                                          sequential dependencies critical for state tracking tasks.
+turning the first words in each list instead of the last words
+(making it more similar to the Batch Search task). The                                             3.4. Results on Composite Tests
+performance sharply declines when models are asked to re-                                          The composite tests significantly challenge the models by
+turn the last words, despite their strong information-fetching                                     combining multiple atomic capabilities into a single test. In
+capabilities. This suggests that, while the models can re-                                         the Processing Data Blocks task, the context is fixed at 4k
+trieve information effectively, they struggle to accurately                                        tokens, while for the Theory of Mind task, the number of
+recognize and process partitions within the context.                                               operation steps is set to 100. As shown in Table 6, model
+                                                                                                   performance on both tasks are generally low, showing a
+Stateful Processing Table 5 presents the results for the                                           broad inability to handle the more complex scenarios. Per-
+Stateful Processing tasks, where performance gaps among                                            formance across all models drop substantially on composite
+models are the most pronounced. The GPT-4(o) models                                                tasks compared to their performance on individual capability
+perform well on integer state tracking, while most other                                           tasks, such as search, recall, and group processing.
+
+                                                                                               7
+                          Minerva: A Programmable Memory Test Benchmark for Language Models
+
+Interestingly, some smaller models, like Mistral and Phi-3-         if the words ‘AAA’ and ‘BBB’ belong to the same list (Var
+small, exhibit slightly better performance on the Theory of         2)”.
+Mind task than on the set state tracking task. This anomaly
+                                                                    As shown in Table 8, performance differences between
+likely stems from their already weak state tracking ability,
+                                                                    prompt variants are generally small, suggesting that instruc-
+which limits their performance across both tasks. Addition-
+                                                                    tion interpretation is not the primary bottleneck in these
+ally, these models tend to generate longer answers in the set
+                                                                    tasks, rather, the main challenge lies in actually executing
+state task which reduces the set overlap.
+                                                                    the task correctly. Nevertheless, we recognize that more
+Notably, even the most capable models, such as GPT-4-               intensive prompt engineering could potentially affect model
+turbo and GPT-4o, struggle, showing that scaling model              performance. Given these findings, we standardized the
+size alone is not enough for solving these composite tasks.         prompts to a single, simple version (as shown in Appendix
+Additionally, the variation in performance among smaller            A) for all experiments in this paper to ensure consistency
+models suggests that their limitations stem not only from           and comparability across models. However, because the
+size but also from underlying architectural or training dif-        benchmark is programmable, researchers can easily swap
+ferences. This indicates that smaller models require more           in alternate prompts to explore additional prompt settings.
+targeted care to bridge the gap in effective memory use.            Appendix D provides additional examples on more tests for
+                                                                    prompt variations.
+3.5. Extending the benchmark to other configurations
+Our benchmark is fully programmable and supports flexi-             4. Related Work
+ble experimentation across a wide range of configurations,          LLM Evaluation with Benchmarks The evaluation of
+including varying context lengths, evaluation criteria, and         LLMs has traditionally relied on static benchmarks, from
+prompt phrasing. In this section, we illustrate how the             early benchmarks for perplexity-based evaluation (Marcus
+benchmark can be adapted beyond the default setup used in           et al., 1993) to datasets focused on specific downstream
+the main paper. These examples highlight its versatility in         tasks such as question answering (Kwiatkowski et al., 2019),
+probing model behavior under diverse conditions.                    summarization (Gliwa et al., 2019), math reasoning (Cobbe
+                                                                    et al., 2021), and code generation (Chen et al., 2021). As
+Context length In the main experiments, we fixed the                LLMs began to address a broader range of tasks across var-
+context length to 4K tokens to emphasize that models al-            ious domains (Wu et al., 2023; Wang et al., 2023), more
+ready exhibit notable failures at this moderate length across       comprehensive benchmark suites (Hendrycks et al., 2021a;
+many memory tasks. However, the benchmark is scalable               Zhong et al., 2023) were developed to assess general ca-
+to longer contexts. Table 7 presents additional results for         pabilities rather than individual task performance. Recent
+two representative tasks Functional updates and Counting            advancements in LLM evaluation have introduced the con-
+evaluated at various context lengths up to 16K tokens.              cept of LLM-as-a-judge, enabling the use of open-ended
+                                                                    benchmarks without predefined answers (Zheng et al., 2023).
+In both cases, we observe that model performance begins
+                                                                    However, these benchmarks remain static in nature and can
+to degrade significantly well before reaching what is typi-
+                                                                    easily get overfit. Recently, platforms like ChatBot Arena
+cally considered a “long” context window. These failures
+                                                                    (Zheng et al., 2023) utilize crowdsourcing to rank LLM
+reveal underlying limitations in how models manage long-
+                                                                    responses and provides more dynamic evaluations. How-
+range memory beyond simple retrieval. In contrast, mod-
+                                                                    ever, its reliance on human annotation makes it less scal-
+els tend to maintain strong performance on retrieval-style
+                                                                    able. Moreover, despite their utility, existing benchmarks
+tasks (e.g., String search) even at extended lengths, making
+                                                                    primarily assess downstream applications that usually re-
+such tasks less effective at distinguishing model capabili-
+                                                                    quire multiple capabilities, making it difficult to debug and
+ties. Additional results and task examples are provided in
+                                                                    understand model weaknesses.
+Appendix D.
+
+                                                                    Tests and Benchmarks for Evaluating Context Utiliza-
+Prompt Variation We also investigated the model perfor-
+                                                                    tion As LLMs become capable of processing increasingly
+mance sensitivity to minor variations in prompt phrasing.
+                                                                    long inputs, designing automated tests to evaluate their abil-
+Specifically, we tested different phrasings of task instruc-
+                                                                    ity to utilize context has become an area of active research.
+tions while keeping the underlying task logic unchanged.
+                                                                    A notable example is the needle-in-a-haystack (NIAH) task1 ,
+For instance, in the String search task, we compared “Given
+                                                                    where a small piece of information (the “needle”) is hid-
+the context, determine if XXX is present (Var 1)” versus
+                                                                    den within a long document, and the model needs to re-
+“Is XXX present in the context? (Var 2)”. Similarly, in the
+Group association task, we tested “Determine if word ‘AAA’            1
+                                                                        https://github.com/gkamradt/LLMTest_
+and word ‘BBB’ are in the same list (Var 1)” versus “Check          NeedleInAHaystack
+
+                                                                8
+                               Minerva: A Programmable Memory Test Benchmark for Language Models
+
+        Model           500       1K      2K      4K       8K                    Model                1K       2K      4K       8K      16K
+        gpt-4o          1.00     1.00    0.99     0.93    0.59                   gpt-4-turbo          0.52    0.44     0.40     0.32    0.28
+        gpt-4o-mini     0.69     0.66    0.42     0.24    0.10                   cohere               0.36    0.24     0.20     0.20    0.12
+        phi-3-small     0.49     0.45    0.21     0.07    0.03                   phi-3-medium         0.20    0.16     0.12     0.08    0.04
+              (a) Functional updates (ROUGE-L)                                                (b) Counting (Exact match)
+
+                                  Table 7. Performance across context lengths on two representative tasks.
+
+      Model           Var 1      CI95%        Var 2      CI95%                  Model         Var 1          CI95%      Var 2        CI95%
+      gpt-4o          1.00     (0.93, 1.00)    1.00    (0.93, 1.00)             gpt-4o         0.65     (0.50, 0.78)    0.63     (0.47, 0.76)
+      gpt-4o-mini     0.98     (0.90, 1.00)    0.98    (0.90, 1.00)             cohere         0.70     (0.55, 0.82)    0.75     (0.60, 0.86)
+      phi-3-medium    1.00     (0.93, 1.00)    1.00    (0.93, 1.00)             phi-3-small    0.55     (0.40, 0.69)    0.55     (0.40, 0.69)
+
+                (a) String search (Exact match)                                         (b) Group association (Exact match)
+
+Table 8. Prompt variation performance on the String search task (with 50 samples) and the Group association task (with 40 samples).
+Variation 1 and Variation 2 differ slightly in phrasing but preserve task intent.
+
+
+trieve it. Similar tests include key-value retrieval (Liu et al.,         2007; Nasreddine et al., 2005). By isolating distinct abil-
+2024) and passkey retrieval (Mohtashami & Jaggi, 2023).                   ities while minimizing confounding factors like attention,
+The simplicity and interpretability of NIAH have made it a                memory span, and reasoning (Kane et al., 2007), such tests
+standard for evaluating LLM context utilization, and it has               provide detailed profiles of cognitive functions, guiding in-
+since inspired various methods for improving long-context                 terventions and shaping broader theories of human thought.
+processing (Mohtashami & Jaggi, 2023; Ding et al., 2024;                  Inspired by this approach, we design atomic tests that sys-
+Xiong et al., 2023; Behrouz et al., 2024).                                tematically isolate core aspects of LLM context processing,
+                                                                          aiming for a fine-grained understanding of LLM memory-
+However, these tests focus solely on basic information re-
+                                                                          usage capabilities – analogous to memory testing in humans.
+trieval, without capturing more complex aspects of context
+processing. To address this limitation, other tests have been
+proposed. Needlebench (Li et al., 2024) extends simple                    5. Conclusions
+retrieval tasks to include multi-needle reasoning and a an-
+                                                                          AI assistants powered by LLMs are expected to handle nu-
+cestral trace task which requires navigating chains or graphs
+                                                                          merous operations involving memory. However, simple tests
+of information. Song et al. (2024) introduce the Count-
+                                                                          reveal that they often fall short of meeting user expectations,
+ing Stars task, which involves tallying numbers of stars
+                                                                          even in basic retrieval and processing tasks. For instance,
+embedded in phrases. Ruler (Hsieh et al., 2024) proposes
+                                                                          retrieving vacation schedules for each team member from
+additional tasks such as variable tracking and frequent word
+                                                                          a message history that includes evolving plans over time
+extraction. While these tests increase task complexity or
+                                                                          proves challenging. To enable targeted improvements, it
+broaden the range of evaluated tasks, they remain limited in
+                                                                          is essential to establish a comprehensive benchmark that
+scope for systematically evaluating contextual processing.
+                                                                          tests each capability in isolation while also allowing for pro-
+Beyond individual tests, several benchmarks explicitly tar-               grammable composition to evaluate more complex scenarios.
+get long-context processing, including InftyBench (Zhang                  Our benchmark provides a straightforward yet effective ap-
+et al., 2024), L-Eval (An et al., 2024), and LongBench (Bai               proach to achieving this goal. We primarily focus on short-
+et al., 2024). These benchmarks use NIAH-like tasks along-                context scenarios to demonstrate that current limitations
+side question answering, summarization, and code genera-                  are not solely attributable to the models’ challenges with
+tion over long contexts. However, like other benchmarks,                  parsing long contexts. Addressing these issues demands
+they remain static and primarily measure end-to-end perfor-               attention beyond merely solving the “attention” problem.
+mance rather than systematically dissecting capabilities.
+                                                                          Impact Statement
+Analogies to Human Cognitive Testing Memory tests
+                                                                          This paper contributes to the advancement of Machine
+are widely used in cognitive research to assess specific func-
+                                                                          Learning by introducing a systematic and programmable
+tions. Such assessments often involve evaluating short term
+                                                                          evaluation framework for assessing the contextual process-
+memory via recall tests (Crannell & Parrish, 1957; Towse
+                                                                          ing capabilities of large language models. Our work pro-
+et al., 2008), inductive reasoning via pattern recognition
+                                                                          vides insights into model strengths and limitations in han-
+tasks, or attention via instruction-following(Kane et al.,
+
+                                                                      9
+                          Minerva: A Programmable Memory Test Benchmark for Language Models
+
+dling various atomic and composite tasks, offering a struc-            W. Evaluating large language models trained on code.
+tured way to analyze model behavior. These contributions               2021.
+can guide future research in improving model efficiency and
+reliability.                                                         Clark, P., Cowhey, I., Etzioni, O., Khot, T., Sabharwal,
+                                                                       A., Schoenick, C., and Tafjord, O. Think you have
+We do not foresee any direct ethical concerns or negative so-          solved question answering? try arc, the ai2 reasoning
+cietal consequences arising from this work. Our evaluation             challenge, 2018. URL https://arxiv.org/abs/
+methodology is designed to be model-agnostic and does not              1803.05457.
+involve sensitive data or high-stakes applications.
+                                                                     Cobbe, K., Kosaraju, V., Bavarian, M., Chen, M., Jun, H.,
+References                                                             Kaiser, L., Plappert, M., Tworek, J., Hilton, J., Nakano,
+                                                                       R., Hesse, C., and Schulman, J. Training verifiers to solve
+An, C., Gong, S., Zhong, M., Zhao, X., Li, M., Zhang,                  math word problems. arXiv preprint arXiv:2110.14168,
+ J., Kong, L., and Qiu, X. L-eval: Instituting standard-               2021.
+  ized evaluation for long context language models. In
+  Ku, L.-W., Martins, A., and Srikumar, V. (eds.), Pro-              Crannell, C. and Parrish, J. A comparison of immediate
+  ceedings of the 62nd Annual Meeting of the Associa-                  memory span for digits, letters, and words. The Journal
+  tion for Computational Linguistics (Volume 1: Long                   of Psychology, 44(2):319–327, 1957.
+ Papers), pp. 14388–14411, Bangkok, Thailand, Au-
+  gust 2024. Association for Computational Linguistics.              Ding, Y., Zhang, L. L., Zhang, C., Xu, Y., Shang, N., Xu, J.,
+  doi: 10.18653/v1/2024.acl-long.776. URL https:                       Yang, F., and Yang, M. Longrope: Extending llm context
+ //aclanthology.org/2024.acl-long.776/.                                window beyond 2 million tokens, 2024.
+
+Anthropic.   Introducing the next generation of                      Gliwa, B., Mochol, I., Biesek, M., and Wawer, A. Sam-
+  claude. https://www.anthropic.com/news/                              sum corpus: A human-annotated dialogue dataset for
+  claude-3-family, 2024. Accessed: 2024-03-27.                         abstractive summarization. In Proceedings of the 2nd
+                                                                       Workshop on New Frontiers in Summarization. Asso-
+Bai, Y., Lv, X., Zhang, J., Lyu, H., Tang, J., Huang, Z., Du,          ciation for Computational Linguistics, 2019. doi: 10.
+  Z., Liu, X., Zeng, A., Hou, L., Dong, Y., Tang, J., and Li,          18653/v1/d19-5409. URL http://dx.doi.org/
+  J. LongBench: A bilingual, multitask benchmark for long              10.18653/v1/D19-5409.
+  context understanding. In Ku, L.-W., Martins, A., and
+  Srikumar, V. (eds.), Proceedings of the 62nd Annual Meet-          Hendrycks, D., Burns, C., Basart, S., Zou, A., Mazeika, M.,
+  ing of the Association for Computational Linguistics (Vol-           Song, D., and Steinhardt, J. Measuring massive multitask
+  ume 1: Long Papers), pp. 3119–3137, Bangkok, Thailand,               language understanding. In International Conference
+  August 2024. Association for Computational Linguis-                  on Learning Representations, 2021a. URL https://
+  tics. doi: 10.18653/v1/2024.acl-long.172. URL https:                 openreview.net/forum?id=d7KBjmI3GmQ.
+  //aclanthology.org/2024.acl-long.172/.
+                                                                     Hendrycks, D., Burns, C., Kadavath, S., Arora, A., Basart,
+                                                                       S., Tang, E., Song, D., and Steinhardt, J. Measuring math-
+Behrouz, A., Zhong, P., and Mirrokni, V. Titans: Learning
+                                                                       ematical problem solving with the math dataset. NeurIPS,
+  to memorize at test time, 2024. URL https://arxiv.
+                                                                       2021b.
+  org/abs/2501.00663.
+                                                                     Hsieh, C.-P., Sun, S., Kriman, S., Acharya, S., Rekesh, D.,
+Chen, M., Tworek, J., Jun, H., Yuan, Q., de Oliveira Pinto,            Jia, F., and Ginsburg, B. RULER: What’s the real context
+  H. P., Kaplan, J., Edwards, H., Burda, Y., Joseph, N.,               size of your long-context language models? In First
+  Brockman, G., Ray, A., Puri, R., Krueger, G., Petrov,                Conference on Language Modeling, 2024. URL https:
+  M., Khlaaf, H., Sastry, G., Mishkin, P., Chan, B., Gray,             //openreview.net/forum?id=kIoBbc76Sy.
+  S., Ryder, N., Pavlov, M., Power, A., Kaiser, L., Bavar-
+  ian, M., Winter, C., Tillet, P., Such, F. P., Cummings, D.,        Jaccard, P. Étude comparative de la distribution florale dans
+  Plappert, M., Chantzis, F., Barnes, E., Herbert-Voss, A.,            une portion des alpes et des jura. Bull Soc Vaudoise Sci
+  Guss, W. H., Nichol, A., Paino, A., Tezak, N., Tang,                 Nat, 37:547–579, 1901.
+  J., Babuschkin, I., Balaji, S., Jain, S., Saunders, W.,
+  Hesse, C., Carr, A. N., Leike, J., Achiam, J., Misra,              Kamradt, G.       Needle in a haystack - pres-
+  V., Morikawa, E., Radford, A., Knight, M., Brundage,                 sure testing llms.     GitHub, 2023.   URL
+  M., Murati, M., Mayer, K., Welinder, P., McGrew, B.,                 https://github.com/gkamradt/LLMTest_
+  Amodei, D., McCandlish, S., Sutskever, I., and Zaremba,              NeedleInAHaystack/tree/main.
+
+                                                                10
+                          Minerva: A Programmable Memory Test Benchmark for Language Models
+
+Kane, R. L., Roebuck-Spencer, T., Short, P., Kabat, M., and             whether chain-of-thought can solve them. arXiv preprint
+  Wilken, J. Identifying and monitoring cognitive deficits in           arXiv:2210.09261, 2022.
+  clinical populations using automated neuropsychological
+  assessment metrics (anam) tests. Archives of Clinical               Towse, J. N., Cowan, N., Hitch, G. J., and Horton, N. J. The
+  Neuropsychology, 22(Suppl 1):S115–S126, 2007.                         recall of information from working memory: Insights
+                                                                        from behavioural and chronometric perspectives. Experi-
+Kwiatkowski, T., Palomaki, J., Redfield, O., Collins, M.,               mental Psychology, 55(6):371–383, 2008.
+ Parikh, A., Alberti, C., Epstein, D., Polosukhin, I., Devlin,
+ J., Lee, K., et al. Natural questions: a benchmark for ques-         Wang, G., Xie, Y., Jiang, Y., Mandlekar, A., Xiao, C., Zhu,
+ tion answering research. Transactions of the Association              Y., Fan, L., and Anandkumar, A. Voyager: An open-
+ for Computational Linguistics, 7:453–466, 2019.                       ended embodied agent with large language models. arXiv
+                                                                       preprint arXiv: Arxiv-2305.16291, 2023.
+Li, M., Zhang, S., Liu, Y., and Chen, K. Needlebench:
+  Can llms do retrieval and reasoning in 1 million context            Wu, Q., Bansal, G., Zhang, J., Wu, Y., Li, B., Zhu, E., Jiang,
+  window?, 2024. URL https://arxiv.org/abs/                            L., Zhang, X., Zhang, S., Liu, J., Awadallah, A. H., White,
+  2407.11963.                                                          R. W., Burger, D., and Wang, C. Autogen: Enabling next-
+                                                                       gen llm applications via multi-agent conversation, 2023.
+Lin, C.-Y. ROUGE: A package for automatic evalua-                      URL https://arxiv.org/abs/2308.08155.
+  tion of summaries. In Text Summarization Branches
+                                                                      Wu, Y., Hee, M. S., Hu, Z., and Lee, R. K.-W. Longgen-
+  Out, pp. 74–81, Barcelona, Spain, July 2004. Asso-
+                                                                       bench: Benchmarking long-form generation in long con-
+  ciation for Computational Linguistics. URL https:
+                                                                       text llms. arXiv preprint arXiv:2409.02076, 2024.
+  //aclanthology.org/W04-1013/.
+                                                                      Xiong, W., Liu, J., Molybog, I., Zhang, H., Bhargava, P.,
+Liu, N. F., Lin, K., Hewitt, J., Paranjape, A., Bevilacqua,
+                                                                        Hou, R., Martin, L., Rungta, R., Sankararaman, K. A.,
+  M., Petroni, F., and Liang, P. Lost in the middle: How
+                                                                        Oguz, B., Khabsa, M., Fang, H., Mehdad, Y., Narang,
+  language models use long contexts. Transactions of
+                                                                        S., Malik, K., Fan, A., Bhosale, S., Edunov, S., Lewis,
+  the Association for Computational Linguistics, 12:157–
+                                                                        M., Wang, S., and Ma, H. Effective long-context scaling
+  173, 2024. doi: 10.1162/tacl a 00638. URL https:
+                                                                        of foundation models, 2023. URL https://arxiv.
+  //aclanthology.org/2024.tacl-1.9/.
+                                                                        org/abs/2309.16039.
+Marcus, M. P., Santorini, B., and Marcinkiewicz, M. A.
+                                                                      Zhang, X., Chen, Y., Hu, S., Xu, Z., Chen, J., Hao, M.,
+ Building a large annotated corpus of English: The
+                                                                        Han, X., Thai, Z., Wang, S., Liu, Z., and Sun, M. Infty-
+ Penn Treebank. Computational Linguistics, 19(2):313–
+                                                                        bench: Extending long context evaluation beyond 100K
+ 330, 1993. URL https://aclanthology.org/
+                                                                        tokens. In Ku, L.-W., Martins, A., and Srikumar, V.
+ J93-2004/.
+                                                                        (eds.), Proceedings of the 62nd Annual Meeting of the
+Mohtashami, A. and Jaggi, M. Random-access infi-                        Association for Computational Linguistics (Volume 1:
+ nite context length for transformers. In Thirty-seventh                Long Papers), pp. 15262–15277, Bangkok, Thailand,
+ Conference on Neural Information Processing Systems,                   August 2024. Association for Computational Linguis-
+ 2023. URL https://openreview.net/forum?                                tics. doi: 10.18653/v1/2024.acl-long.814. URL https:
+ id=7eHn64wOVy.                                                         //aclanthology.org/2024.acl-long.814/.
+
+Nasreddine, Z. S., Phillips, N. A., Bédirian, V., Charbon-           Zheng, L., Chiang, W.-L., Sheng, Y., Zhuang, S., Wu, Z.,
+  neau, S., Whitehead, V., Collin, I., Cummings, J. L., and             Zhuang, Y., Lin, Z., Li, Z., Li, D., Xing, E., Zhang, H.,
+  Chertkow, H. The montreal cognitive assessment, moca:                 Gonzalez, J. E., and Stoica, I. Judging LLM-as-a-judge
+  a brief screening tool for mild cognitive impairment. Jour-           with MT-bench and chatbot arena. In Thirty-seventh
+  nal of the American Geriatrics Society, 53(4):695–699,                Conference on Neural Information Processing Systems
+  2005.                                                                 Datasets and Benchmarks Track, 2023. URL https:
+                                                                        //openreview.net/forum?id=uccHPGDlao.
+Song, M., Zheng, M., and Luo, X. Counting-stars: A
+  multi-evidence, position-aware, and scalable benchmark              Zhong, W., Cui, R., Guo, Y., Liang, Y., Lu, S., Wang,
+  for evaluating long-context large language models, 2024.              Y., Saied, A., Chen, W., and Duan, N. Agieval: A
+  URL https://arxiv.org/abs/2403.11802.                                 human-centric benchmark for evaluating foundation mod-
+                                                                        els, 2023. URL https://arxiv.org/abs/2304.
+Suzgun, M., Scales, N., Schärli, N., Gehrmann, S., Tay,                06364.
+  Y., Chung, H. W., Chowdhery, A., Le, Q. V., Chi, E. H.,
+  Zhou, D., , and Wei, J. Challenging big-bench tasks and
+
+                                                                 11
+                          Minerva: A Programmable Memory Test Benchmark for Language Models
+
+A. Test Templates
+In this appendix, we provide the templates of the test prompts. Placeholder context words such as “aaa, bbb, ccc,” etc.,
+are used for illustration purposes. During testing, these context words are uniformly sampled from an English dictionary.
+Variable tokens in the instruction part are marked with the bold font.
+
+                                                           Search
+      Task name                 Prompt
+      String search (with       Context:
+      word)                     aaa, bbb, ccc, ...
+                                Instruction:
+                                Given the context, determine if the word “bbb” is present in the context. Answer with
+                                “yes” or ‘no”.
+                                Answer:
+      String search (with       Context:
+      subsequence)              aaa, bbb, ccc, ...
+                                Instruction:
+                                Given the list of words in the context, determine if the sequence “bbb, xxx, ddd”
+                                appears in the context. Answer with ‘yes’ or ’no’.
+                                Answer:
+      Key-value search          Context:
+                                aaa:bbb, ccc:ddd, ...
+                                Instruction:
+                                Given a list of word pairs formatted as “word 1: word 2” in the context, return the
+                                second word associated with the provided first word. For the first word “aaa”, the
+                                corresponding second word is:
+      Batch search              Context:
+                                aaa:bbb, ccc:ddd, ...
+                                Instruction:
+                                Given a list of word pairs formatted as “word 1: word 2” in the context, return the
+                                second word associated with the provided first words. For the first words: aaa, ccc, ...,
+                                the corresponding second words are:
+
+                                                       Recall and Edit
+      Task name                 Prompt
+      Snapshot                  Context:
+                                aaa, bbb, ccc, ...
+                                Instruction:
+                                Repeat the previous context exactly as it is, without making any additions or deletions.
+                                Answer:
+      Replace all (x to y)      Context:
+                                aaa, bbb, aaa, ccc, aaa, ddd, ...
+                                Instruction:
+                                Repeat the previous context and replace the word “aaa” with “zzz” each time it appears.
+                                Answer:
+      Replace all (x to null)   Context:
+                                aaa, bbb, aaa, ccc, aaa, ddd, ...
+                                Instruction:
+                                Repeat the previous context but skip the word “aaa” each time it appears.
+                                Answer:
+
+
+                                                              12
+                     Minerva: A Programmable Memory Test Benchmark for Language Models
+
+Overwrite positions      Context:
+(nth to y)               aaa, bbb, ccc, ...
+                         Instruction:
+                         Repeat the previous context and replace every third word with “zzz”.
+                         Answer:
+Overwrite positions      Context:
+(nth to null)            aaa, bbb, ccc, ...
+                         Instruction:
+                         Repeat the previous context and skip every other word.
+                         Answer:
+Functional updates       Context:
+                         111, 222, 333, ...
+                         Instruction:
+                         Add 3 to every number in the previous context.
+                         Answer:
+
+                                             Match and Compare
+Task name                Prompt
+Compare positions        Context:
+                         aaa, bbb, ccc, ...
+                         Instruction:
+                         Given the list of words in the context, determine the relative positions of two words.
+                         Does the word “aaa” appear before the word “ccc” in the list? Answer “yes” or “no”.
+                         Answer:
+Find duplicates          Context:
+                         aaa, bbb, aaa, ...
+                         Instruction:
+                         A word is repeated multiple times in the context. Your task is to identify the word that
+                         is repeated.
+                         The repeated word is:
+Count                    Context:
+                         aaa, bbb, aaa, ...
+                         Instruction:
+                         Count the number of times the word “aaa” appeared in the context.
+                         Answer: The word “aaa” appeared
+Check association        Context:
+                         aaa:attribute 1, bbb:attribute 2, ccc: attribute 2, ddd: attribute 1, ...
+                         Instruction:
+                         Given the list of words and their respective attributes in the format of “word:attribute”,
+                         determine if the word “aaa” and the word “ggg” have the same attribute. Answer with
+                         “yes” or “no”.
+                         Answer:
+
+                                              Spot the Differences
+Task name                Prompt
+
+
+
+
+                                                       13
+                    Minerva: A Programmable Memory Test Benchmark for Language Models
+
+Compare two lists       Context:
+                        List 1: aaa, bbb, ccc, ...
+                        List 2: aaa, ddd, ccc, ...
+                        Instruction:
+                        There are two lists of words in the context. The first list contains the original words.
+                        The second list is similar to the first but has some words replaced with different ones.
+                        Your task is to identify the words in the first/second list that are different from those in
+                        the other list. Provide the different words as your answer.
+                        Answer:
+Identify    the   odd   Context:
+group                   List 1: aaa, bbb, ccc, ...
+                        List 2: bbb, aaa, ccc, ...
+                        List 3: aaa, zzz, ccc, ...
+                        List 4: ccc, aaa, bbb, ...
+                        Instruction:
+                        Given the lists of words in the context, identify the list that is different from the others.
+                        Provide the list number as your answer. For example, if the Nth list is different, provide
+                        “List N” as your answer.
+                        Answer:
+Patch the difference    Context:
+                        aaa, bbb, ccc, aaa, bbb, ccc, ...
+                        Instruction:
+                        Given the sequence of words that follows a specific pattern in the context, predict the
+                        Nth word that appears after the final word in the given sequence.
+                        Answer: The Nth word that appears after the final word in the given sequence is
+
+                                         Compute on Sets and Lists
+Task name               Prompt
+Group membership        Context:
+                        List 1: aaa, bbb, ccc, ...
+                        List 2: ddd, eee, fff, ...
+                        ...
+                        Instruction:
+                        Given the lists of words in the context, determine which list contains the word “fff”. If
+                        the word is not present in either list, answer “no”.
+                        Answer:
+Group association       Context:
+                        List 1: aaa, bbb, ccc, ...
+                        List 2: ddd, eee, fff, ...
+                        ...
+                        Instruction:
+                        Given the lists of words in the context, determine if the word “aaa” and the word “eee”
+                        are in the same list. Answer with “yes” or “no”.
+                        Answer:
+
+
+
+
+                                                       14
+                   Minerva: A Programmable Memory Test Benchmark for Language Models
+
+Group association (al-   Context:
+ternating)               Role A: aaa, bbb, ...
+                         Role B: ccc, ddd, ...
+                         Role A: eee, fff, ...
+                         Role B: ggg, hhh, ...
+                         ...
+                         Instruction:
+                         Given the context with alternating roles and their respective context words, determine
+                         if the word “aaa” and the word “ggg” are in the same role. Answer with “yes” or “no”.
+                         Answer:
+Iterate                  Context:
+                         List 1: aaa, bbb, ccc, ...
+                         List 2: ddd, eee, fff, ...
+                         ...
+                         Instruction:
+                         Given the lists of words in the context, identify and recall the last word from each list.
+                         Provide your answer as a list of these words separated by commas.
+                         Answer:
+
+                                              Stateful Processing
+Task name                Prompt
+Quantity state           Context:
+                         Begin with the number xx. Perform the following operations:
+                         1. Add xx 2. Subtract xx 3. ...
+                         Instruction:
+                         In the context, you are given an initial number and a series of operations to perform on
+                         that number. Your task is to determine the final result of the operations. Write your
+                         final answer after the text “FINAL ANSWER:”. For example, “FINAL ANSWER:
+                         42”.
+                         FINAL ANSWER:
+Set state                Agent actions:
+                         Agent draws aaa, bbb, ccc
+                         Agent discards bbb, ccc
+                         Agent draws ddd, fff
+                         Agent discards ddd
+                         ...
+                         Instruction:
+                         Given the actions of the agent, your task is to determine the final list of words the agent
+                         ends up with after a series of actions. Write your final answer after the text “FINAL
+                         ANSWER:”. For example, “FINAL ANSWER: word1, word2, word3”.
+                         FINAL ANSWER:
+Processing Data Blocks
+Task name                Prompt
+
+
+
+
+                                                        15
+                          Minerva: A Programmable Memory Test Benchmark for Language Models
+
+      Processing        Data   Context:
+      Blocks                   Role 1: aaa, bbb, ccc, ...
+                               Role 2: ddd, eee, fff, ...
+                               Role 3: ggg, hhh, iii, ...
+                               Role 1: jjj, kkk, ...
+                               ...
+                               Instruction:
+                               The context consists of a series of alternating roles, each associated with a list of words.
+                               Your task is to identify and recall all the words from the role labeled “Role 2” that
+                               appear after the word “zzz” in the sequence. Please write your answer after the text
+                               “Answer:”. For example, “Answer: word1, word2, word3”.
+                               Answer:
+
+                                      Composite-State Tracking (Theory of Mind)
+      Task name                Prompt
+      Theory of Mind           Agents actions::
+                               Agent A starts with the following words: aaa, bbb, ccc, ...
+                               Agent B starts with the following words: ddd, eee, fff, ...
+                               Agent B starts with the following words: ggg, hhh, iii, ...
+                               Agent B swaps the following words “ddd” with Agent C for the following words “hhh”.
+                               Agent A discards the following words: ccc, zzz, ....
+                               Agent C draws the following words: xxx, yyy, ....
+                               ...
+                               Instruction:
+                               Given the actions of the agents, your task is to determine the final list of words each
+                               agent ends up with after a series of actions. Write your final answer after the text
+                               “FINAL ANSWER:”. For example, “FINAL ANSWER: Agent A: word1, word2,
+                               word3\nAgent B: word4, word5”.
+                               FINAL ANSWER:
+
+
+
+B. Task Details
+This appendix provides details for each task, including the number of examples, evaluation metrics, and configurable
+hyperparameters. The context length is fixed at 4k for almost all tasks, apart from Stateful Processing, where the context is
+determined by number of operation steps and set to 200 for quantity state and 100 for set state, which maps to around 1.5k
+context tokens.
+Here is an example of number of examples calculation String search (with word): 5 (query depth) * 2 (labels) * 5 (samples
+per parameter setting) = 50.
+
+             Table 10: Task Overview with Hyperparameters, Number of Examples, and Evaluation Metrics
+
+ Task Name                          Hyperparameters                                      # of Examples            Metric
+ Search
+ String search (word)               query depth = [0, 0.25, 0.5, 0.75, 1], label =              50             exact match
+                                    [positive, negative], samples = 5
+ String search (sequence)           sequence length = [8, 16, 32, 64], label = [posi-           80             exact match
+                                    tive, negative], samples = 10
+ Key-value search                   query depth = [0, 0.25, 0.5, 0.75, 1], samples =            50             exact match
+                                    10
+                                                                                                     Continued on next page
+
+
+                                                              16
+                            Minerva: A Programmable Memory Test Benchmark for Language Models
+
+ Task Name                              Hyperparameters                                         # of Examples             Metric
+ Batch search                           batch size = [4, 8, 16, 32], samples = 5                       20             rouge-L recall
+                                                                                           Number of Entries for Category: 200
+ Recall and Edit
+ Snapshot (words)                       samples = 10                                                   10                rouge-L
+ Replace all                            density = [0.2, 0.4, 0.6, 0.8], y = [random word,              40                rouge-L
+                                        null], samples = 5
+ Overwrite positions                    nth = [2, 3, 4], y = [random word, null], samples              30                rouge-L
+                                        =5
+ Snapshot (numbers)                     samples = 10                                                   10                rouge-L
+ Functional updates                     function type = [add (3), subtract (1), multiply               15                rouge-L
+                                        (2)], samples = 5
+                                                                                           Number of Entries for Category: 105
+ Match and Compare
+ Compare positions                      query 1 depth = [0, 0.25, 0.5, 0.75, 1], query 2               75              exact match
+                                        depth = [0, 0.25, 0.5, 0.75, 1], samples = 3
+ Find duplicates                        repetition = [2, 4, 8, 16, 32], samples = 5                    25              exact match
+ Count                                  repetition = [2, 4, 8, 16, 32], samples = 5                    25              exact match
+ Check association                      n attribute = [2, 4, 8, 16, 32], label = [positive,            50              exact match
+                                        negative], samples = 5
+                                                                                           Number of Entries for Category: 175
+ Spot the Differences
+ Compare two lists                      num different words = [1, 5, 10, 20], chosen                   80             rouge-L recall
+                                        list = [first, second], samples = 10
+ Identify the odd group                 words per group = [25, 50, 75, 100], percentage                60              exact match
+                                        of difference = [0, 0.25, 0.5], samples = 5
+ Patch the difference                   pattern length = [2, 15, 30], cut off depth = [0,            1202              exact match
+                                        0.5, 1], nth = [1, 3, 6], samples = 5
+                                                                                           Number of Entries for Category: 260
+ Compute on Sets and Lists
+ Group membership                       number of groups = [4, 8, 16, 32], query depth                100              exact match
+                                        = [0, 0.25, 0.5, 0.75, 1], samples = 5
+ Group association                      number of groups = [4, 8, 16, 32], label = [pos-               40              exact match
+                                        itive, negative], samples = 5
+ Group association (alternating)        number of groups = [2, 4, 8, 16, 32], number of                50              exact match
+                                        turns = 10, label = [positive, negative], sample
+                                        =5
+ Iterate                                number of groups = [4, 8, 16, 32], samples = 5                 20                rouge-L
+                                                                                           Number of Entries for Category: 210
+ Stateful Processing
+ Set state                              number of steps = 100, set size = [5, 10, 15,                  40           jaccard similarity
+                                        20], samples = 10
+ Quantity state                         number of steps = 200, samples = 10                            10              exact match
+                                                                                              Number of Entries for Category: 50
+                                                                                                            Continued on next page
+
+   2
+     For Patch the difference task with pattern length 2, there is only two cut off percentage options; therefore the total number of data
+points is 120 instead of 135.
+
+                                                                   17
+                          Minerva: A Programmable Memory Test Benchmark for Language Models
+
+ Task Name                          Hyperparameters                                   # of Examples           Metric
+ Composite
+ Processing data blocks             number of blocks = [2, 4, 8, 16, 32], number of          50               rouge-L
+                                    turns = 10, samples = 5
+ Theory of mind                     number of steps = 100, number of agents = [2,            60          jaccard similarity
+                                    3, 4], samples = [10, 20]
+                                                                                  Number of Entries for Category: 110
+                                                                                          Total Number of Entries: 1110
+
+
+
+C. Evaluation Metrics
+In this appendix section, we provide details about the evaluation metrics we have used in the tests.
+
+  • Exact Match: The exact match accuracy measures whether the generated answer exactly matches the reference answer.
+    It is computed as follows:
+                                             (
+                                              1 if reference answer = generated answer,
+                               Exact Match =
+                                              0 otherwise.
+
+  • ROUGE-L / ROUGE-L-recall: ROUGE (Recall-Oriented Understudy for Gisting Evaluation) (Lin, 2004) measures
+    the verbatim overlap between the reference and the generated answers. ROUGE-L specifically looks for the longest
+    common subsequence (LCS) between the two texts, which reflects the structure of the text and the longest sequence of
+    matching words. ROUGE-L recall focuses on the ability of the model to recall the content from the reference answer,
+    and it emphasizes matching the longest subsequences.
+     ROUGE-L-recall can be defined as:
+
+                                                     LCS(generated answer, reference answer)
+                               ROUGE-L-recall =
+                                                           length of reference answer
+
+     ROUGE-L is computed as the F1-score, which combines both precision and recall to provide a more balanced measure
+     of overlap.
+
+  • Jaccard Similarity: Jaccard similarity measures the overlap between two sets by comparing the intersection and union
+    of the sets. It is computed as:
+                                                                     |A ∩ B|
+                                                Jaccard Similarity =
+                                                                     |A ∪ B|
+     where A and B are sets representing the elements in the generated and reference answers, respectively. This metric
+     is used for tasks involving set-based comparisons or when the goal is to measure the similarity between two sets of
+     elements (e.g., word sets).
+
+
+D. More Examples for Context Length Variation and Prompt Variation
+In this section, we present additional examples illustrating the effects of context length and minor variations in prompt
+instructions on selected models.
+
+Length variation Table 11 reports results from three additional tasks: string search (word), replace all, and iterate. The
+results reaffirm that while models tend to perform well on the search task even at long context lengths, their performance on
+other tasks degrades significantly at much shorter lengths. This highlights a fundamental limitation in how effectively these
+models utilize long-range context for non-search tasks.
+
+                                                             18
+                           Minerva: A Programmable Memory Test Benchmark for Language Models
+
+  Model            2000    4000     8000       16000      32000                 Model           1000      2000     4000     8000    16000
+  gpt-4o           1.00    1.00     1.00       1.00       0.98                  gpt-4o          1.00      1.00     0.99     0.81    0.48
+  gpt-4o-mini      0.98    0.98     0.94       0.90       0.78                  gpt-4o-mini     0.99      0.91     0.84     0.71    0.42
+  phi-3-small      1.00    0.94     0.90       0.98       0.98                  phi-3-small     0.87      0.67     0.49     0.32    0.06
+                    (a) String search (word)                                                           (b) Replace all
+
+                                      Model              1000     2000      4000        8000    16000
+                                      gpt-4o             1.00     0.97      0.86        0.70    0.57
+                                      gpt-4o-mini        0.91     0.87      0.67        0.43    0.28
+                                      phi-3-small        0.15     0.09      0.04        0.01    0.01
+                                                                  (c) Iterate
+
+                             Table 11. Model performance across varying context lengths for three tasks.
+
+
+Prompt variation. We provide additional results examining how small changes in prompt phrasing affect model perfor-
+mance across three tasks (see Table 12). In general, we find that minor wording changes (e.g., in replace all and quantity
+state) do not significantly affect performance. This suggests that task accuracy is primarily driven by the model’s underlying
+capability to process memory rather than sensitivity to prompt wording. However, more substantial prompt changes, such as
+shown in check association task, can lead to notable differences in performance across models. To minimize the impact of
+prompt tuning, we standardize all prompts to the versions specified in the main paper.
+
+ Model           Var 1        CI95%        Var 2          CI95%             Model              Var 1        CI95%         Var 2      CI95%
+ gpt-4o            0.99    (0.93, 1.00)     0.98       (0.93, 1.00)         gpt-4o             0.72      (0.58, 0.83)      0.76    (0.63, 0.86)
+ gpt-4o-mini       0.84    (0.71, 0.94)     0.83       (0.71, 0.94)         gpt-4o-mini        0.60      (0.46, 0.72)      0.58    (0.42, 0.69)
+ phi-3-small       0.49    (0.32, 0.63)     0.51       (0.35, 0.65)         phi-3-small        0.70      (0.56, 0.81)      0.60    (0.46, 0.72)
+                 (a) Replace all (ROUGE-L)                                                (b) Check association (Exact match)
+
+                                    Model               Var 1        CI95%          Var 2        CI95%
+                                    gpt-4o              1.00      (0.72, 1.00)       1.00      (0.72, 1.00)
+                                    gpt-4o-mini         0.70      (0.40, 0.89)       0.80      (0.49, 0.94)
+                                    phi-3-small         0.00         (0.00)          0.00         (0.00)
+                                                      (c) Quantity state (Exact match)
+
+Table 12. Effect of prompt variations on model performance across three tasks. We report accuracy (or ROUGE-L) and 95% confidence
+intervals.
+
+Prompt variants used in the table above:
+
+   • Replace all
+        – Var 1: “Repeat the previous context and replace the word aaa with bbb.”
+        – Var 2: “Copy the previous context but replace the word aaa with bbb.”
+   • Check association
+        – Var 1: “Given the context with words and their assigned attributes in the format of word:                       ATT N, determine if
+          the word aaa has the same attribute as the word bbb?”
+        – Var 2: “Given the context”
+   • Quantity state
+        – Var 1: “Your task is to determine the final result of the operations.”
+        – Var 2: “Determine the final result after the operations.”
+
+                                                                      19
+

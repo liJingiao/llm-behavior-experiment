@@ -1,0 +1,1808 @@
+           Why Larger Language Models Do In-context Learning Differently?
+
+
+                                Zhenmei Shi 1 Junyi Wei 1 Zhuoyan Xu 1 Yingyu Liang 1 2
+
+
+                          Abstract                                  before evaluating some new input. More specifically, ICL is
+       Large language models (LLM) have emerged as                  a few-shot (Brown et al., 2020) evaluation method without
+       a powerful tool for AI, with the key ability of in-          updating parameters in LLM. Surprisingly, people find that,
+       context learning (ICL), where they can perform               through ICL, LLM can perform well on tasks that have never
+       well on unseen tasks based on a brief series of task         been seen before, even without any finetuning. It means
+       examples without necessitating any adjustments               LLM can adapt to wide-ranging downstream tasks under
+       to the model parameters. One recent interesting              efficient sample and computation complexity. The mecha-
+       mysterious observation is that models of different           nism of ICL is different from traditional machine learning,
+       scales may have different ICL behaviors: larger              such as supervised learning and unsupervised learning. For
+       models tend to be more sensitive to noise in the             example, in neural networks, learning usually occurs in gra-
+       test context. This work studies this observation             dient updates, whereas there is only a forward inference
+       theoretically aiming to improve the understanding            in ICL and no gradient updates. Several recent works, try-
+       of LLM and ICL. We analyze two stylized set-                 ing to answer why LLM can learn in-context, argue that
+       tings: (1) linear regression with one-layer single-          LLM secretly performs or simulates gradient descent as
+       head linear transformers and (2) parity classifica-          meta-optimizers with just a forward pass during ICL empir-
+       tion with two-layer multiple attention heads trans-          ically (Dai et al., 2022; Von Oswald et al., 2023; Malladi
+       formers (non-linear data and non-linear model).              et al., 2023) and theoretically (Zhang et al., 2023b; Ahn
+       In both settings, we give closed-form optimal so-            et al., 2023; Mahankali et al., 2023; Cheng et al., 2023; Bai
+       lutions and find that smaller models emphasize               et al., 2023; Huang et al., 2023; Li et al., 2023b; Guo et al.,
+       important hidden features while larger ones cover            2024; Wu et al., 2024). Although some insights have been
+       more hidden features; thus, smaller models are               obtained, the mechanism of ICL deserves further research
+       more robust to noise while larger ones are more              to gain a better understanding.
+       easily distracted, leading to different ICL behav-           Recently, there have been some important and surprising
+       iors. This sheds light on where transformers pay             observations (Min et al., 2022; Pan et al., 2023; Wei et al.,
+       attention to and how that affects ICL. Prelimi-              2023b; Shi et al., 2023a) that cannot be fully explained by
+       nary experimental results on large base and chat             existing studies. In particular, Shi et al. (2023a) finds that
+       models provide positive support for our analysis.            LLM is not robust during ICL and can be easily distracted
+                                                                    by an irrelevant context. Furthermore, Wei et al. (2023b)
+                                                                    shows that when we inject noise into the prompts, the larger
+1. Introduction                                                     language models may have a worse ICL ability than the
+As large language models (LLM), e.g., ChatGPT (OpenAI,              small language models, and conjectures that the larger lan-
+2022) and GPT4 (OpenAI, 2023), are transforming AI devel-           guage models may overfit into the prompts and forget the
+opment with potentially profound impact on our societies,           prior knowledge from pretraining, while small models tend
+it is critical to understand their mechanism for safe and           to follow the prior knowledge. On the other hand, Min et al.
+efficient deployment. An important emergent ability (Wei            (2022); Pan et al. (2023) demonstrate that injecting noise
+et al., 2022b; An et al., 2023), which makes LLM success-           does not affect the in-context learning that much for smaller
+ful, is in-context learning (ICL), where models are given           models, which have a more strong pretraining knowledge
+a few exemplars of input–label pairs as part of the prompt          bias. To improve the understanding of the ICL mechanism,
+                                                                    to shed light on the properties and inner workings of LLMs,
+   1
+    University of Wisconsin-Madison, 2 The University of Hong       and to inspire efficient and safe use of ICL, we are interested
+Kong. Correspondence to: Zhenmei Shi, Yingyu Liang <zhmeishi,       in the following question:
+yliang@cs.wisc.edu, yingyul@hku.hk>.
+
+Proceedings of the 41 st International Conference on Machine
+Learning, Vienna, Austria. PMLR 235, 2024. Copyright 2024 by          Why do larger language models do in-context learning
+the author(s).                                                                            differently?
+
+                                                                1
+                              Why Larger Language Models Do In-context Learning Differently?
+
+To answer this question, we study two settings: (1) one-              analysis or explain the different behaviors. In this work,
+layer single-head linear self-attention network (Schlag et al.,       (1) we extend the linear model linear data analysis to the
+2021; Von Oswald et al., 2023; Akyurek et al., 2023; Ahn              non-linear model and non-linear data setting, i.e., two-layer
+et al., 2023; Zhang et al., 2023b; Mahankali et al., 2023;            multiple-head transformers leaning ICL on sparse parity
+Wu et al., 2024) pretrained on linear regression in-context           classification and (2) we have a rigorous behavior difference
+tasks (Garg et al., 2022; Raventos et al., 2023; Von Oswald           analysis under two settings, which explains the empirical
+et al., 2023; Akyurek et al., 2023; Bai et al., 2023; Ma-             observations and provides more insights into the effect of
+hankali et al., 2023; Zhang et al., 2023b; Ahn et al., 2023;          attention mechanism in ICL.
+Li et al., 2023c; Huang et al., 2023; Wu et al., 2024), with
+rank constraint on the attention weight matrices for studying         2. Related Work
+the effect of the model scale; (2) two-layer multiple-head
+transformers (Li et al., 2023b) pretrained on sparse parity           Large language model. Transformer-based (Vaswani et al.,
+classification in-context tasks, comparing small or large             2017) neural networks have rapidly emerged as the primary
+head numbers for studying the effect of the model scale. In           machine learning architecture for tasks in natural language
+both settings, we give the closed-form optimal solutions.             processing. Pretrained transformers with billions of parame-
+We show that smaller models emphasize important hidden                ters on broad and varied datasets are called large language
+features while larger models cover more features, e.g., less          models (LLM) or foundation models (Bommasani et al.,
+important features or noisy features. Then, we show that              2021), e.g., BERT (Devlin et al., 2019), PaLM (Chowdhery
+smaller models are more robust to label noise and input               et al., 2022), Llama(Touvron et al., 2023a), ChatGPT (Ope-
+noise during evaluation, while larger models may easily               nAI, 2022), GPT4 (OpenAI, 2023) and so on. LLM has
+be distracted by such noises, so larger models may have a             shown powerful general intelligence (Bubeck et al., 2023)
+worse ICL ability than smaller ones.                                  in various downstream tasks. To better use the LLM for a
+                                                                      specific downstream task, there are many adaptation meth-
+We also conduct in-context learning experiments on five
+                                                                      ods, such as adaptor (Hu et al., 2022; Zhang et al., 2023c;
+prevalent NLP tasks utilizing various sizes of the Llama
+                                                                      Gao et al., 2023; Shi et al., 2023b), calibration (Zhao et al.,
+model families (Touvron et al., 2023a;b), whose results are
+                                                                      2021; Zhou et al., 2023a), multitask finetuning (Gao et al.,
+consistent with previous work (Min et al., 2022; Pan et al.,
+                                                                      2021b; Xu et al., 2023; Von Oswald et al., 2023; Xu et al.,
+2023; Wei et al., 2023b) and our analysis.
+                                                                      2024b), prompt tuning (Gao et al., 2021a; Lester et al.,
+Our contributions and novelty over existing work:                     2021), instruction tuning (Li & Liang, 2021; Chung et al.,
+                                                                      2022; Mishra et al., 2022), symbol tuning (Wei et al., 2023a),
+   • We formalize new stylized theoretical settings for               black-box tuning (Sun et al., 2022), chain-of-thoughts (Wei
+     studying ICL and the scaling effect of LLM. See Sec-             et al., 2022c; Khattab et al., 2022; Yao et al., 2023; Zheng
+     tion 4 for linear regression and Section 5 for parity.           et al., 2024), scratchpad (Nye et al., 2021), reinforcement
+                                                                      learning from human feedback (RLHF) (Ouyang et al.,
+   • We characterize the optimal solutions for both settings          2022) and many so on.
+     (Theorem 4.1 and Theorem 5.1).
+                                                                      In-context learning. One important emergent ability (Wei
+   • The characterizations of the optimal elucidate differ-           et al., 2022b) from LLM is in-context learning (ICL) (Brown
+     ent attention paid to different hidden features, which           et al., 2020). Specifically, when presented with a brief series
+     then leads to the different ICL behavior (Theorem 4.2,           of input-output pairings (known as a prompt) related to a
+     Theorem 4.3, Theorem 5.2).                                       certain task, they can generate predictions for test scenar-
+                                                                      ios without necessitating any adjustments to the model’s
+   • We further provide empirical evidence on large base              parameters. ICL is widely used in broad scenarios, e.g.,
+     and chat models corroborating our theoretical analysis           reasoning (Zhou et al., 2022), negotiation (Fu et al., 2023),
+     (Figure 1, Figure 2).                                            self-correction (Pourreza & Rafiei, 2023), machine transla-
+                                                                      tion (Agrawal et al., 2022) and so on. Many works trying to
+Note that previous ICL analysis paper may only focus on               improve the ICL and zero-shot ability of LLM (Min et al.,
+(1) the approximation power of transformers (Garg et al.,             2021; Wang et al., 2022; Wei et al., 2022a; Iyer et al., 2022).
+2022; Panigrahi et al., 2023; Guo et al., 2024; Bai et al.,           There is a line of insightful works to study the mechanism
+2023; Cheng et al., 2023), e.g., constructing a transformer           of transformer learning (Geva et al., 2021; Xie et al., 2022;
+by hands which can do ICL, or (2) considering one-layer               Garg et al., 2022; Jelassi et al., 2022; Arora & Goyal, 2023;
+single-head linear self-attention network learning ICL on             Li et al., 2023a;d; Allen-Zhu & Li, 2023; Luo et al., 2023;
+linear regression (Von Oswald et al., 2023; Akyurek et al.,           Tian et al., 2023a;b; Zhou et al., 2023b; Bietti et al., 2023;
+2023; Mahankali et al., 2023; Zhang et al., 2023b; Ahn et al.,        Xu et al., 2024a; Gu et al., 2024a;b;c;d;e) and in-context
+2023; Wu et al., 2024), and may not focus on the robustness
+
+                                                                  2
+                               Why Larger Language Models Do In-context Learning Differently?
+
+learning (Dai et al., 2022; Mahankali et al., 2023; Raventos              settings. It is defined as:
+et al., 2023; Bai et al., 2023; Ahn et al., 2023; Von Oswald
+                                                                                                         E⊤ WKQ E
+                                                                                                                 
+                                                                                                      PV
+et al., 2023; Pan et al., 2023; Li et al., 2023b;c;e; Akyurek                    fLSA,θ (E) = E + W E ·             ,                (1)
+et al., 2023; Zhang et al., 2023a;b; Huang et al., 2023; Cheng                                               ρ
+et al., 2023; Wibisono & Wang, 2023; Wu et al., 2024; Guo                 where θ = (WP V , WKQ ), E ∈ R(d+1)×(N +1) is the em-
+et al., 2024; Reddy, 2024) empirically and theoretically. On              bedding matrix of the input prompt, and ρ is a normalization
+the basis of these works, our analysis takes a step forward               factor set to be the length of examples, i.e., ρ = N during
+to show the ICL behavior difference under different scales                pretraining. Similar to existing work, for simplicity, we
+of language models.                                                       have merged the projection and value matrices into WP V ,
+                                                                          and merged the key and query matrices into WKQ , and
+3. Preliminary                                                            have a residual connection in our LSA network. The pre-
+                                                                          diction of the network for the query token xτ,q will be the
+Notations. We denote [n] := {1, 2, . . . , n}. For a positive             bottom right entry of the matrix output, i.e., the entry at lo-
+semidefinite matrix A, we denote ∥x∥2A := x⊤ Ax as the                    cation (d + 1), (N + 1), while other entries are not relevant
+norm induced by a positive definite matrix A. We denote                   to our study and thus are ignored. So only part of the model
+∥ · ∥F as the Frobenius norm. diag() function will map a                  parameters are relevant. To see this, let us denote
+vector to a diagonal matrix or map a matrix to a vector with                                    PV       PV
+                                                                                                             
+its diagonal terms.                                                                          W11       w12
+                                                                               WP V =          PV ⊤       PV   ∈ R(d+1)×(d+1) ,
+                                                                                            (w21  )     w22
+In-context learning. We follow the setup and notation of                                        KQ       KQ 
+                                                                                             W11        w12
+the problem in Zhang et al. (2023b); Mahankali et al. (2023);                  WKQ =            KQ ⊤      KQ    ∈ R(d+1)×(d+1) ,
+Ahn et al. (2023); Huang et al. (2023); Wu et al. (2024). In                                (w21   )    w22
+the pretraining stage of ICL, the model is pretrained on                           PV     KQ                        KQ      KQ
+                                                                          where W11   , W11  ∈ Rd×d ; w12
+                                                                                                       PV    PV
+                                                                                                          , w21  , w12   , w21 ∈
+prompts. A prompt from a task τ is formed by N examples                    d       PV    KQ
+                                                                          R ; and w22 , w22 ∈ R. Then the prediction is:
+(xτ,1 , yτ,1 ), . . . , (xτ,N , yτ,N ) and a query token xτ,q for
+prediction, where for any i ∈ [N ] we have yτ,i ∈ R and                     ybτ,q =fLSA,θ (E)(d+1),(N +1)                   (2)
+xτ,i , xτ,q ∈ Rd . The embedding matrix Eτ , the label vector                                          
+                                                                                                      EE   ⊤
+                                                                                                                 KQ  
+                                                                                       PV ⊤       PV             W11
+yτ , and the input matrix Xτ are defined as:                                      = (w21   )    w22               KQ ⊤ xτ,q .
+                                                                                                        ρ     (w21 )
+           xτ,1 xτ,2 . . . xτ,N xτ,q
+ Eτ :=                                            ∈ R(d+1)×(N +1) ,
+           yτ,1 yτ,2 . . . yτ,N              0                            4. Linear Regression
+                         ⊤      N
+ yτ :=[yτ,1 , . . . , yτ,N ] ∈ R ,           yτ,q ∈ R,                    In this section, we consider the linear regression task for in-
+                         ⊤        N ×d
+Xτ :=[xτ,1 , . . . , xτ,N ] ∈ R          ,   xτ,q ∈ Rd .                  context learning which is widely studied empirically (Garg
+                                                                          et al., 2022; Raventos et al., 2023; Von Oswald et al., 2023;
+Given prompts represented as Eτ ’s and the corresponding
+                                                                          Akyurek et al., 2023; Bai et al., 2023) and theoretically (Ma-
+true labels yτ,q ’s, the pretraining aims to find a model whose
+                                                                          hankali et al., 2023; Zhang et al., 2023b; Ahn et al., 2023;
+output on Eτ matches yτ,q . After pretraining, the evaluation
+                                                                          Li et al., 2023c; Huang et al., 2023; Wu et al., 2024).
+stage applies the model to a new test prompt (potentially
+from a different task) and compares the model output to the               Data and task. For each task τ , we assume for any i ∈ [N ]
+true label on the query token.                                                               i.i.d.
+                                                                          tokens xτ,i , xτ,q ∼ N (0, Λ), where Λ is the covariance
+                                                                                                                                     i.i.d.
+Note that our pretraining stage is also called learning to                matrix. We also assume a d-dimension task weight wτ ∼
+learn in-context (Min et al., 2021) or in-context training                N (0, Id×d ) and the labels are given by yτ,i = ⟨wτ , xτ,i ⟩
+warmup (Dong et al., 2022) in existing work. Learning to                  and yτ,q = ⟨wτ , xτ,q ⟩.
+learn in-context is the first step to understanding the mecha-
+                                                                          Model and loss. We study a one-layer single-head linear
+nism of ICL in LLM following previous works (Raventos
+                                                                          self-attention transformer (LSA) defined in Equation (1)
+et al., 2023; Zhou et al., 2023b; Zhang et al., 2023b; Ma-
+                                                                          and we use ybτ,q := fLSA,θ (E)(d+1),(N +1) as the prediction.
+hankali et al., 2023; Ahn et al., 2023; Huang et al., 2023; Li
+                                                                          We consider the mean square error (MSE) loss so that the
+et al., 2023b; Wu et al., 2024).
+                                                                          empirical risk over B independent prompts is defined as
+Linear self-attention networks. The linear self-attention                                           B
+network has been widely studied (Schlag et al., 2021;                              b θ ) := 1
+                                                                                              X                         2
+                                                                                   L(f              yτ,q − ⟨wτ , xτ,q ⟩) .
+                                                                                                   (b
+Von Oswald et al., 2023; Akyurek et al., 2023; Ahn et al.,                                 2B τ =1
+2023; Zhang et al., 2023b; Mahankali et al., 2023; Wu et al.,
+2024; Ahn et al., 2024), and will be used as the learning                 Measure model scale by rank. We first introduce a lemma
+model or a component of the model in our two theoretical                  from previous work that simplifies the MSE and justifies our
+
+                                                                      3
+                                   Why Larger Language Models Do In-context Learning Differently?
+
+measurement of the model scale. For notation simplicity,                   Proof sketch of Theorem 4.1. We defer the full proof to Ap-
+                 KQ        PV
+we denote U = W11   , u = w22  .                                           pendix B.1. The proof idea is that we can decompose the
+                                                                           loss function into different ranks, so we can keep the direc-
+Lemma 4.1 (Lemma A.1 in Zhang et al. (2023b)). Let
+                                                                           tion by their sorted “variance”, i.e.,
+Γ := 1 + N1 Λ + N1 tr(Λ)Id×d ∈ Rd×d . Let
+                                                                                                                   d                      2
+                                                                                                                   X
+                                                                                                                                    ∗   1
+L(fLSA,θ ) = lim L(f
+                 b LSA,θ )                                                         argmin             ℓ̃(U, u) =         Ti λ2i    vi −       ,
+              B→∞                                                          U∈Rd×d ,rank(U)≤r,u∈R                   i=1
+                                                                                                                                        Ti
+             1                            h
+                                                            2
+                                                                   i
+                                        yτ,q − ⟨wτ , xτ,q ⟩) ,
+           = Ewτ ,xτ,1 ,...,xτ,N ,xτ,q (b
+             2                                                            where Ti = 1 + N λi + tr(D)
+                                                                                                1                                ∗
+                                                                                                  
+                                                                                                             N . We have that vi ≥ 0
+                 1                                                                                    ∗                 ∗    1
+                                                                           for any i ∈ [d] and if vi > 0, we have vi = Ti . Denote
+  ℓ̃(U, u) = tr u2 ΓΛUΛU⊤ − uΛ2 U⊤ ,
+                 2
+                                                                                                          
+                                                                                      2           1
+                                                                           g(x) = x                          . We get the conclusion by
+                                                                                          (1+ N1 )x+ tr(D)
+                                                                                                       N
+we have L(fLSA,θ ) = ℓ̃(U, u) + C, where C is a constant                   g(x) is an increasing function on [0, ∞).
+independent with θ.
+                                                                           Theorem 4.1 gives the closed-form optimal rank-r solution
+Lemma 4.1 tells us that the loss only depends on uU. If we                 of one-layer single-head linear self-attention transformer
+consider non-zero u, w.l.o.g, letting u = 1, then we can see               learning linear regression ICL tasks. Let fLSA,θ denote the
+that the loss only depends on U ∈ Rd×d ,                                   optimal rank-r solution corresponding to the U∗ , u∗ above.
+                                                                         In detail, the optimal rank-r solution fLSA,θ satisfies
+                                 1
+         L(fLSA,θ ) = tr           ΓΛUΛU⊤ − Λ2 U⊤ .                                                                ∗         
+                                 2                                               ∗P V       0d×d 0d         ∗KQ       U 0d
+                                                                              W         =               ,W        =                . (3)
+                                                                                             0⊤
+                                                                                              d     u                 0⊤d     0
+                     KQ
+Note that U = W11        , then it is natural to measure the
+size of the model by rank of U. Recall that we merge the                   What hidden features does the model pay attention to?
+key matrix and the query matrix in attention together, i.e.,               Theorem 4.1 shows that the optimal rank-r solution indeed
+WKQ = (WK )⊤ WQ . Thus, a low-rank U is equivalent                         is the truncated version of the optimal full-rank solution,
+to the constraint WK , WQ ∈ Rr×d where r ≪ d. The                          keeping only the most important feature directions (i.e.,
+low-rank key and query matrix are practical and have been                  the first r eigenvectors of the token covariance matrix). In
+widely studied (Hu et al., 2022; Chen et al., 2021; Bhojana-               detail, (1) for the optimal full-rank solution, we have for
+palli et al., 2020; Fan et al., 2021; Dass et al., 2023; Shi               any i ∈ [d], vi∗ = (N +1)λNi +tr(D) ; (2) for the optimal rank-r
+et al., 2023c). Therefore, we use r = rank(U) to measure
+                                                                           solution, we have for any i ≤ r, vi∗ = (N +1)λNi +tr(D) and
+the scale of the model, i.e., larger r representing larger mod-
+                                                                           for any i > r, vi∗ = 0. That is, the small rank-r model
+els. To study the behavior difference under different model
+                                                                           keeps only the first r eigenvectors (viewed as hidden feature
+scale, we will analyze U under different rank constraints.
+                                                                           directions) and does not cover the others, while larger ranks
+                                                                           cover more hidden features, and the large full rank model
+4.1. Low Rank Optimal Solution
+                                                                           covers all features.
+Since the token covariance matrix Λ is positive semidefi-                  Recall that the prediction depends on U∗ xτ,q =
+nite symmetric, we have eigendecomposition Λ = QDQ⊤ ,                      cQV∗ Q⊤ xτ,q ; see Equation (2) and (3). So the optimal
+where Q is an orthonormal matrix containing eigenvec-                      rank-r model only uses the components on the first r eigen-
+tors of Λ and D is a sorted diagonal matrix with non-                      vector directions to do the prediction in evaluations. When
+negative entries containing eigenvalues of Λ, denoting as                  there is noise distributed in all directions, a smaller model
+D = diag([λ1 , . . . , λd ]), where λ1 ≥ · · · ≥ λd ≥ 0. Then,             can ignore noise and signals along less important directions
+we have the following theorem.                                             but still keep the most important directions. Then it can be
+                                                                           less sensitive to the noise, as empirically observed. This
+ Theorem 4.1 (Optimal rank-r solution for regression).
+                                                                           insight is formalized in the next subsection.
+ Recall the loss function ℓ̃ in Lemma 4.1. Let
+
+         U∗ , u∗ =               argmin        ℓ̃(U, u).                   4.2. Behavior Difference
+                     U∈Rd×d ,rank(U)≤r,u∈R
+                                                                           We now formalize our insight into the behavior difference
+          ∗          ∗   ⊤
+ Then U = cQV Q , u = 1c , where c is any nonzero                          based on our analysis on the optimal solutions. We consider
+ constant, and V∗ = diag([v1∗ , . . . , vd∗ ]) satisfies for any           the evaluation prompt to have M examples (may not be
+ i ≤ r, vi∗ = (N +1)λNi +tr(D) and for any i > r, vi∗ = 0.                 equal to the number of examples N during pretraining for
+                                                                           a general evaluation setting), and assume noise in labels to
+
+                                                                       4
+                               Why Larger Language Models Do In-context Learning Differently?
+
+facilitate the study of the behavior difference (our results           r the first term decreases while the second term increases.
+can be applied to the noiseless case by considering noise              This depends on whether more signals are covered or more
+level σ = 0). Formally, the evaluation prompt is:                      noise is kept when increasing the rank r.
+          
+            x1 x2 . . . xM xq
+                                                                      To further illustrate the insights, we consider the special
+   E :=
+    b                                  ∈ R(d+1)×(M +1)                 case when the model already covers all useful signals in the
+            y1 y2 . . . y M 0
+                                                                     evaluation task: w = Qs, i.e., the label only depends on
+                  x1        ...        xM         xq                   the top r features (like “positive”, “negative” tokens). Our
+        =                                               ,
+            ⟨w, x1 ⟩ + ϵ1 . . . ⟨w, xM ⟩ + ϵM 0                        above analysis implies that a larger model will cover more
+where w is the weight for the evaluation task, and for any             useless features and keep more noise, and thus will have
+                             i.i.d.                                    worse performance. This is formalized in the following
+i ∈ [M ], the label noise ϵi ∼ N (0, σ 2 ).                            theorem (proved in Appendix B.2).
+Recall Q are eigenvectors of Λ, i.e., Λ = QDQ⊤ and
+D = diag([λ1 , . . . , λd ]). In practice, we can view the large       Theorem 4.3 (Behavior difference for regression, special
+variance part of x (top r directions in Q) as a useful signal          case). Let 0 ≤ r ≤ r′ ≤ d and w = Qs where s is r-dim
+(like words “positive”, “negative”), and the small variance            truncated vector. Denote the optimal rank-r solution as
+part (bottom d − r directions in Q) as the less important or           f1 and the optimal rank-r′ solution as f2 . Then,
+useless information (like words “even”, “just”).                                 b − L(f1 ; E)
+                                                                          L(f2 ; E)         b
+Based on such intuition, we can decompose the evaluation                                    ′
+                                                                                               r                       2
+                                                                                                                           
+task weight w accordingly: w = Q(s+ξ), where the r-dim                     1                  X            N  λ i
+                                                                              ∥s∥2D + σ 2 
+                                                                                         
+                                                                        =                                                  .
+truncated vector s ∈ Rd has si = 0 for any r < i ≤ d, and                 M                  i=r+1
+                                                                                                     (N + 1) λi + tr(D)
+the residual vector ξ ∈ Rd has ξi = 0 for any 1 ≤ i ≤ r.
+The following theorem (proved in Appendix B.2) quantifies
+                                                                       Implications. By Theorem 4.3, in this case,
+the evaluation loss at different model scales r which can
+explain the scale’s effect.                                                                          r′ − r         r′ − r 2
+                                                                           L(f2 ; b
+                                                                                  E) − L(f1 ; b
+                                                                                              E) ≈          ∥s∥2D +       σ .
+Theorem 4.2 (Behavior difference for regression). Let                                                | M {z     } | M{z }
+                                                                                                       input noise    label noise
+w = Q(s + ξ) ∈ Rd where s, ξ ∈ Rd are truncated and
+residual vectors defined above. The optimal rank-r                     We can decompose the above equation to input noise and
+solution fLSA,θ in Theorem 4.1 satisfies:                              label noise, and we know that ∥s∥2D + σ 2 only depends on
+                                                                       the intrinsic property of evaluation data and is independent
+     L(fLSA,θ ; b
+                E)
+                                                2                    of the model size. When we have a larger model (larger r′ ),
+                                   E) − ⟨w, xq ⟩
+ :=Ex1 ,ϵ1 ,...,xM ,ϵM ,xq fLSA,θ ( b                                  we will have a larger evaluation loss gap between the large
+                                                                       and small models. It means larger language models may
+     1                  1                                              be easily affected by the label noise and input noise and
+       ∥s∥2(V∗ )2 D3 +       ∥s + ξ∥2D + σ 2 tr (V∗ )2 D2
+                                                         
+ =
+     M                  M                                              may have worse in-context learning ability, while smaller
+                 X                     2
+          2
+     + ∥ξ∥D +        si λi (λi vi∗ − 1) .
+                      2                                                models may be more robust to these noises as they only
+                i∈[r]                                                  emphasize important signals. Moreover, if we increase the
+                                                                       label noise scale σ 2 on purpose, the larger models will be
+Implications. If N is large enough with N λr ≫ tr(D)                   more sensitive to the injected label noise. This is consistent
+(which is practical as we usually pretrain networks on long            with the observation in Wei et al. (2023b); Shi et al. (2023a)
+text), then                                                            and our experimental results in Section 6.
+
+                         1
+           E)≈∥ξ∥2D +      (r + 1)∥s∥2D + r∥ξ∥2D + rσ 2 .
+                                                       
+L(fLSA,θ ; b                                                           5. Sparse Parity Classification
+                         M
+                                                                       We further consider a more sophisticated setting with non-
+The first term ∥ξ∥2D is due to the residual features not cov-          linear data which necessitates nonlinear models. Viewing
+ered by the network, so it decreases for larger r and becomes          sentences as generated from various kinds of thoughts and
+                                            1
+0 for full-rank r = d. The second term M      (·) is significant       knowledge that can be represented as vectors in some hid-
+since we typically have limited examples in evaluation, e.g.,          den feature space, we consider the classic data model of
+M = 16 ≪ N . Within it, (r + 1)∥s∥2D corresponds to the                dictionary learning or sparse coding, which has been widely
+first r directions, and rσ 2 corresponds to the label noise.           used for text and images (Olshausen & Field, 1997; Vinje
+These increase for larger r. So there is a trade-off between           & Gallant, 2000; Blei et al., 2003). Furthermore, beyond
+the two error terms when scaling up the model: for larger              linear separability, we assume the labels are given by the
+
+                                                                   5
+                                 Why Larger Language Models Do In-context Learning Differently?
+
+(d, 2)-sparse parity on the hidden feature vector, which is the       Measure model scale by head number. We use the at-
+high-dimensional generalization of the classic XOR prob-              tention head number m to measure the model scale, as a
+lem. Parities are a canonical family of highly non-linear             larger m means the transformer can learn more attention
+learning problems and recently have been used in many re-             patterns. We consider hinge loss ℓ(z) = max(0, 1 − z), and
+cent studies on neural network learning (Daniely & Malach,            the population loss with weight-decay regularization:
+2020; Barak et al., 2022; Shi et al., 2022; 2023d).                                                                        
+Data and task. Let X = Rd be the input space, and
+                                                                                                               X
+                                                                       Lλ (g) =E [ℓ (yq · g(X, y, xq ))] + λ     ∥W(i) ∥2F  .
+Y = {±1} be the label space. Suppose G ∈ Rd×d is                                                                   i∈[m]
+an unknown dictionary with d columns that can be regarded
+as features; for simplicity, assume G is orthonormal. Let             Suppose N → ∞ and let the optimal solution of Lλ (g) be
+ϕ ∈ {±1}d be a hidden vector that indicates the presence
+                                                                                      g ∗ = argmin        lim Lλ (g).
+of each feature. The data are generated as follows: for each                                      g      λ→0+
+task τ , generate two task indices tτ = (iτ , jτ ) which deter-
+mines a distribution Tτ ; then for this task, draw examples           5.1. Optimal Solution
+by ϕ ∼ Tτ , and setting x = Gϕ (i.e., dictionary learning
+data), y = ϕiτ ϕjτ (i.e., XOR labels).                                We first introduce some notations to describe the optimal.
+                                                                      Let bin(·) be the integer to binary function, e.g., bin(6) =
+We now specify how to generate tτ and ϕ. As some of                   110. Let digit(z, i) denote the digit at the i-th position
+the hidden features are more important than others, we let            (from right to left) of z, e.g., digit(01000, 4) = 1. We
+A = [k] denote a subset of size k corresponding to the                are now ready to characterize the optimal solution (proved
+important features. We denote the important task set as               in Appendix C.1).
+S1 := A × A \ {(l, l) : l ∈ A} and less important task
+set as S2 := [d] × [d] \ ({(l, l) : l ∈ [d]} ∪ S1 ). Then tτ          Theorem 5.1 (Optimal solution for parity). Consider
+is drawn uniformly from S1 with probability 1 − pT , and              k = 2ν1 , d = 2ν2 , and let g1∗ and g2∗ denote the optimal
+uniformly from S2 with probability pT , where pT ∈ [0, 12 )           solutions for m = 2(ν1 + 1) and m = 2(ν2 + 1),
+is the less-important task rate. For the distribution of ϕ,           respectively.
+we assume ϕ[d]\{iτ ,jτ } is drawn uniformly from {±1}d−2 ,            When 0 < pT < d(d−1) 41
+                                                                                                1
+                                                                                                  −γ
+                                                                                                              , g1∗ neurons are a
+                                                                                                        1
+and assume ϕ{iτ ,jτ } has good correlation (measured by a                                     2   ( 4 +γ)+ 4 −γ
+                                                                       subset of g2∗ neurons. Specifically, for any i ∈ [2(ν2 + 1)],
+parameter γ ∈ (0, 14 )) with the label to facilitate learning.
+                                                                       let V∗,(i) be diagonal matrix and
+Independently, we have
+                                                                          • For any i ∈ [ν2 ] and iτ ∈ [d], let a∗i = −1 and
+          Pr[(ϕiτ , ϕjτ ) = (1, 1)] = 1/4 + γ,                                ∗,(i)
+                                                                            Viτ ,iτ = (2 digit(bin(iτ − 1), i) − 1)/(4γ).
+          Pr[(ϕiτ , ϕjτ ) = (1, −1)] = 1/4,
+          Pr[(ϕiτ , ϕjτ ) = (−1, 1)] = 1/4,                               • For i = ν2 + 1 and any iτ ∈ [d], let a∗i = +1 and
+                                                                              ∗,(i)
+                                                                            Viτ ,iτ = −νj /(4γ) for gj∗ .
+          Pr[(ϕiτ , ϕjτ ) = (−1, −1)] = 1/4 − γ.
+                                                                          • For i ∈ [2(ν2 + 1)] \ [ν2 + 1], let a∗i = a∗i−ν2 −1 and
+Note that without correlation (γ = 0), it is well-known                     V∗,(i) = −V∗,(i−ν2 −1) .
+sparse parities will be hard to learn, so we consider γ > 0.
+                                                                       Let W∗,(i) = GV∗,(i) G⊤ . Up to permutations, g2∗ has
+Model. Following Wu et al. (2024), we consider the reduced
+                                                ⊤                      neurons (a∗ , W∗,(1) , . . . , W∗,(m) ) and g1∗ has the
+linear self-attention fLSA,θ (X, y, xq ) = y NX WKQ xq                 {1, . . . , ν1 , ν2 + 1, ν2 + 2 . . . , ν2 + ν1 + 1, 2ν2 + 2}-th
+(which is a reduced version of Equation (1)), and also denote          neurons of g2∗ .
+WKQ as W for simplicity. It is used as the neuron in our
+two-layer multiple-head transformers:
+                                                                      Proof sketch of Theorem 5.1. The proof is challenging as
+                                      y⊤ X (i)
+                                              
+                         X                                            the non-linear model and non-linear data. We defer the full
+        g(X, y, xq ) =           ai σ     W xq ,
+                                       N                              proof to Appendix C.1. The high-level intuition is transfer-
+                         i∈[m]
+                                                                      ring the optimal solution to patterns covering problems. For
+                                                                      small pT , the model will “prefer” to cover all patterns in
+where σ is ReLU activation, a = [a1 , . . . , am ]⊤ ∈
+                                                                      S1 first. When the model becomes larger, by checking the
+[−1, 1]m , W(i) ∈ Rd×d and m is the number of attention
+                                                                      sufficient and necessary conditions, it will continually learn
+heads. Denote its parameters as θ = (a, W(1) , . . . , W(m) ).
+                                                                      to cover non-important features. Thus, the smaller model
+This model is more complicated as it uses non-linear activa-          will mainly focus on important features, while the larger
+tion, and also has two layers with multiple heads.                    model will focus on all features.
+
+                                                                  6
+                               Why Larger Language Models Do In-context Learning Differently?
+
+Example for Theorem 5.1. When ν2 = 3, the optimal has                   Theorem 5.2 (Behavior difference for parity). Assume the
+a1 = a2 = a3 = −1, a4 = +1 and,                                         same condition as Theorem 5.1. For j ∈ {1, 2}, Let θj
+                                                                        denote the parameters of gj∗ . For l ∈ [M ],Plet ξl be
+ V(1) = 1/4γ · diag([−1, +1, −1, +1, −1, +1, −1, +1])                                                                          ξl
+                                                                        uniformly drawn from {±1}d , and Ξ = l∈[M      M
+                                                                                                                         ]
+                                                                                                                             . Then,
+ V(2) = 1/4γ · diag([−1, −1, +1, +1, −1, −1, +1, +1])                   for any δ ∈ (0, 1), with probability at least 1 − δ over the
+                                                                        randomness of test data, we have
+ V(3) = 1/4γ · diag([−1, −1, −1, −1, +1, +1, +1, +1])
+                                                                          gj∗ (Xτ , yτ , xτ,q ) = h(θj , 2γ ϕ̂τ,q + PDj (Ξ)) + ϵj
+     (4)
+ V         = 3/4γ · diag([−1, −1, −1, −1, −1, −1, −1, −1])                 X                          ⊤                    
+                                                                                   ∗              ∗,(i)
+                                                                        :=      ai σ diag V                  2γ ϕ̂τ,q + PDj (Ξ) +ϵj
+and V(i+4) = −V(i) , ai+4 = ai for i ∈ [4].
+                                                                           i∈[m]
+On the other hand, the optimal g1∗ for ν1 = 1 has the                                     q               
+{1, 4, 5, 8}-th neurons of g2∗ .                                        where ϵj = O
+                                                                                                 νj    1
+                                                                                                 M log δ       and we have
+By carefully checking, we can see that the neurons in g1∗
+(i.e., the {1, 4, 5, 8}-th neurons of g2∗ ) are used for parity            • 2γ ϕ̂τ,q is the signal useful for prediction: 0 =
+classification task from S1 , i.e, label determined by the first             ℓ(yq · h(θ1 , 2γ ϕ̂τ,q )) = ℓ(yq · h(θ2 , 2γ ϕ̂τ,q )).
+k = 2ν1 = 2 dimensions. With the other neurons (i.e.,
+                                                                           • PD1 (Ξ)) and PD2 (Ξ)) is noise not related to labels,
+the {2, 3, 6, 7}-th neurons of g2∗ ), g2∗ can further do parity                    E[∥P       (Ξ))∥2 ]
+classification on the task from S2 , label determined by any
+                                                                                     D1
+                                                                             and E[∥PD       2
+                                                                                        (Ξ))∥2 ]
+                                                                                                 = νν12 +1
+                                                                                                        +1 .
+                                                                                          2         2
+two dimensions other than the first two dimensions.
+What hidden features does the model pay attention to?                  Implications. Theorem 5.2 shows that during evaluation,
+Theorem 5.1 gives the closed-form optimal solution of two-             we can decompose the input into two parts: signal and noise.
+layer multiple-head transformers learning sparse-parity ICL            Both the larger model and smaller model can capture the
+tasks. It shows the optimal solution of the smaller model              signal part well. However, the smaller model has a much
+indeed is a sub-model of the larger optimal model. In detail,          smaller influence from noise than the larger model, i.e., the
+the smaller model will mainly learn all important features,            ratio is νν12 +1
+                                                                                     +1 . The reason is that smaller models emphasize
+while the larger model will learn more features. This again            important hidden features while larger ones cover more
+shows a trade-off when increasing the model scale: larger              hidden features, and thus, smaller models are more robust
+models can learn more hidden features which can be ben-                to noise while larger ones are easily distracted, leading to
+eficial if these features are relevant to the label, but also          different ICL behaviors. This again sheds light on where
+potentially keep more noise which is harmful.                          transformers pay attention to and how that affects ICL.
+
+5.2. Behavior Difference                                               Remark 5.1. Here, we provide a detailed intuition about
+                                                                       Theorem 5.2. Ξ is the input noise. When we only care
+Similar to Theorem 4.3, to illustrate our insights, we will            about the noise part, we can rewrite the smaller model
+consider a setting where the smaller model learns useful fea-          as g1 = h(θ1 , PD1 (Ξ)), and the larger model as g2 =
+tures for the evaluation task while the larger model covers            h(θ2 , PD2 (Ξ)), where they share the same h function.
+extra features. That is, for evaluation, we uniformly draw             Our conclusion says that E[∥PD1 (Ξ)∥22 ]/E[∥PD2 (Ξ)∥22 ] =
+a task tτ = (iτ , jτ ) from S1 , and then draw M samples to            (ν1 + 1)/(ν2 + 1), which means the smaller model’s “effect”
+form the evaluation prompt in the same way as during pre-              input noise is smaller than the larger model’s “effect” input
+training. To present our theorem (proved in Appendix C.2               noise. Although their original input noise is the same, as the
+using Theorem 5.1), we introduce some notations. Let                   smaller model only focuses on limited features, the smaller
+                                                                       model will ignore part of the noise, and the “effect” input
+D1 = diag(V∗,(1) ), . . . , diag(V∗,(ν1 ) ), diag(V∗,(ν2 +1) ),
+           
+                                                                       noise is small. However, the larger model is the opposite.
+ . . . , diag(V∗,(ν2 +ν1 +1) ), diag(V∗,(2ν2 +2) ) ∈ Rd×2(ν1 +1)
+                                                  
+           h                                      i
+D2 = diag(V∗,(1) ), . . . , diag(V∗,(2ν2 +2) ) ∈ Rd×2(ν2 +1) ,         6. Experiments
+                                                                       Brilliant recent work (Wei et al., 2023b) runs intensive and
+where for any i ∈ [2(ν2 + 1)], V∗,(i) is defined in Theo-              thorough experiments to show that larger language models
+rem 5.1. Let ϕ̂τ,q ∈ Rd satisfy ϕ̂τ,q,iτ = ϕτ,q,iτ , ϕ̂τ,q,jτ =        do in-context learning differently. Following their idea,
+ϕτ,q,jτ and all other entries being zero. For a matrix Z and           we conduct similar experiments on binary classification
+a vector v, let PZ denote the projection of v to the space of          datasets, which is consistent with our problem setting in the
+Z, i.e., PZ (v) = Z(Z⊤ Z)−1 Z⊤ v.                                      parity case, to support our theory statements.
+
+                                                                   7
+                                       Why Larger Language Models Do In-context Learning Differently?
+
+               100.0              glue-rte        100.0          glue-sst2          100.0          glue-qqp
+
+
+     Accuracy(%)
+                80.0                               80.0                              80.0
+                60.0                               60.0                              60.0
+                40.0                               40.0                              40.0
+                20.0                               20.0                              20.0                             open_llama-2-3b
+                 0.0                                0.0                               0.0                             llama-2-7b-chat
+               100.0             glue-wnli        100.0            subj             100.0           Average           llama-2-13b-chat
+                                                                                                                      llama-2-70b-chat
+
+
+
+     Accuracy(%)
+                80.0                               80.0                              80.0                             Random
+                60.0                               60.0                              60.0
+                40.0                               40.0                              40.0
+                20.0                               20.0                              20.0
+                 0.0                                0.0                               0.0
+                           0    25 50 75 100               0    25 50 75 100                 0    25 50 75 100
+                               % flipped_labels                % flipped_labels                  % flipped_labels
+
+Figure 1. Larger models are easier to be affected by noise (flipped labels) and override pretrained biases than smaller models for different
+datasets and model families (chat/with instruct turning). Accuracy is calculated over 1000 evaluation prompts per dataset and over 5 runs
+with different random seeds for each evaluation, using M = 16 in-context exemplars.
+
+
+                   100.0          glue-rte         100.0         glue-sst2           100.0          glue-qqp
+
+
+     Accuracy(%)
+                    80.0                            80.0                              80.0
+                    60.0                            60.0                              60.0
+                    40.0                            40.0                              40.0
+                    20.0                            20.0                              20.0
+                     0.0                             0.0                               0.0                            open_llama-2-3b
+                                                                                                                      llama-2-7b
+                   100.0         glue-wnli         100.0           subj              100.0          Average           llama-2-13b
+                                                                                                                      llama-2-70b
+
+
+
+     Accuracy(%)
+                    80.0                            80.0                              80.0                            Random
+                    60.0                            60.0                              60.0
+                    40.0                            40.0                              40.0
+                    20.0                            20.0                              20.0
+                     0.0                             0.0                               0.0
+                           0    25 50 75 100               0    25 50 75 100                 0    25 50 75 100
+                               % flipped_labels                % flipped_labels                  % flipped_labels
+
+Figure 2. Larger models are easier to be affected by noise (flipped labels) and override pretrained biases than smaller models for different
+datasets and model families (original/without instruct turning). Accuracy is calculated over 1000 evaluation prompts per dataset and over
+5 runs with different random seeds for each evaluation, using M = 16 in-context exemplars.
+
+
+Experimental setup. Following the experimental protocols                  sentence: show us a good time
+in Wei et al. (2023b); Min et al. (2022), we conduct experi-              The answer is positive.
+ments on five prevalent NLP tasks, leveraging datasets from
+GLUE (Wang et al., 2018) tasks and Subj (Conneau & Kiela,                 sentence: as dumb and cheesy
+2018). Our experiments utilize various sizes of the Llama                 The answer is negative.
+model families (Touvron et al., 2023a;b): 3B, 7B, 13B, 70B.
+We follow the prior work on in-context learning (Wei et al.,              sentence: it ’s a charming and often
+2023b) and use M = 16 in-context exemplars. We aim to                     affecting journey
+assess the models’ ability to use inherent semantic biases                The answer is
+from pretraining when facing in-context examples. As part
+of this experiment, we introduce noise by inverting an esca-
+lating percentage of in-context example labels. To illustrate,            6.1. Behavior Difference
+a 100% label inversion for the SST-2 dataset implies that                 Figure 1 shows the result of model performance (chat/with
+every “positive” exemplar is now labeled “negative”. Note
+that while we manipulate the in-context example labels, the               instruct turning) across all datasets with respect to the pro-
+evaluation sample labels remain consistent. We use the                    portion of labels that are flipped. When 0% label flips, we
+same templates as (Min et al., 2021), a sample evaluation                 observe that larger language models have better in-context
+for SST-2 when M = 2:
+
+                                                                      8
+                                                       Why Larger Language Models Do In-context Learning Differently?
+
+                             Correct + Relevant                    Correct + Irrelevant               maps across all heads in the final layer. We do this be-
+                    0.6                                   0.6
+
+
+
+Label-input attention
+                                                                                                      tween “correct”/“wrong” labels and the original/irrelevant
+                    0.4                                   0.4                                         inserted sentences. Figure 3 shows the results on 100 evalu-
+                                                                                  models
+                                                                                 Llama-2-13b-hf       ation prompts; for example, the subfigure Correct+Relevant
+                    0.2                                   0.2                    Llama-2-70b-hf       shows the correlation magnitude between the “correct” label
+                    0.0 0   20    40     60     80    100 0.0 0   20    40     60     80    100       and the original input sentence in each prompt. The results
+                              Wrong + Relevant                     Wrong + Irrelevant                 show that the small model Llama 2-13b mainly focuses on
+                    0.6                                   0.6
+
+
+
+Label-input attention
+                                                                                                      the relevant part (original input) and may ignore the irrele-
+                    0.4                                   0.4                                         vant sentence, while the large model Llama 2-70b focuses
+                                                                                                      on both sentences. This well aligns with our analysis.
+                    0.2                                   0.2
+
+                    0.0 0   20 40 60 80               100 0.0 0   20 40 60 80               100       7. More Discussions about Noise
+                             Indices of the prompts                Indices of the prompts
+                                                                                                      There are three kinds of noise covered in our analysis:
+   Figure 3. The magnitude of attention between the labels and input                                  Pretraining noise. We can see it as toxic or harmful pre-
+   sentences in Llama 2-13b and 70b on 100 evaluation prompts;                                        training data on the website (noisy training data). The model
+   see the main text for the details. x-axis: indices of the prompts.                                 will learn these features and patterns. It is covered by ξ in
+   y-axis: the norm of the last row of attention maps in the final layer.
+                                                                                                      the linear regression case and S2 in the parity case.
+   Correct: original label; wrong: flipped label; relevant: original
+   input sentence; irrelevant: irrelevant sentence from other datasets.                               Input noise during inference. We can see it as natural noise
+   The results show that larger models focus on both sentences, while                                 as the user’s wrong spelling or biased sampling. It is a finite
+   smaller models only focus on relevant sentences.                                                   sampling error as x drawn from the Gaussian distribution
+                                                                                                      for the linear regression case and a finite sampling error as
+                                                                                                      x drawn from a uniform distribution for the parity case.
+   abilities. On the other hand, the performance decrease fac-                                        Label noise during inference. We can see it as adversarial
+   ing noise is more significant for larger models. As the per-                                       examples, or misleading instructions, e.g., deliberately let-
+   centage of label alterations increases, which can be viewed                                        ting a model generate a wrong fact conclusion or harmful
+   as increasing label noise σ 2 , the performance of small mod-                                      solution, e.g., poison making. It is σ in the linear regression
+   els remains flat and seldom is worse than random guess-                                            case and S2 in the parity case.
+   ing while large models are easily affected by the noise, as
+   predicted by our analysis. These results indicate that large                                       For pretraining noise, it will induce the model to learn noisy
+   models can override their pretraining biases in-context input-                                     or harmful features. During inference, for input noise and
+   label correlations, while small models may not and are more                                        label noise, the larger model will pay additional attention to
+   robust to noise. This observation aligns with the findings in                                      these noisy or harmful features in the input and label pair,
+   Wei et al. (2023b) and our analysis.                                                               i.e., y · x, so that the input and label noise may cause a large
+                                                                                                      perturbation in the final results. If there is no pretraining
+   We can see a similar or even stronger phenomenon in Fig-                                           noise, then the larger model will have as good robustness
+   ure 2: larger models are more easily affected by noise                                             as the smaller model. Also, if there is no input and label
+   (flipped labels) and override pretrained biases than smaller                                       noise, the larger model will have as good robustness as the
+   models for the original/without instruct turning version (see                                      smaller model. The robustness gap only happens when both
+   the “Average” sub-figure). On the one hand, we conclude                                            pretraining noise and inference noise exist simultaneously.
+   that both large base models and large chat models suffer
+   from ICL robustness issues. On the other hand, this is also
+   consistent with recent work suggesting that instruction tun-                                       8. Conclusion
+   ing will impair LLM’s in-context learning capability.                                              In this work, we answered our research question: why do
+                                                                                                      larger language models do in-context learning differently?
+    6.2. Ablation Study                                                                               Our theoretical study showed that smaller models empha-
+   To further verify our analysis, we provide an ablation study.                                      size important hidden features while larger ones cover more
+   We concatenate an irrelevant sentence from GSM-IC (Shi                                             hidden features, and thus the former are more robust to noise
+   et al., 2023a) to an input-label pair sentence from SST-2                                          while the latter are more easily distracted, leading to dif-
+   in GLUE dataset. We use “correct” to denote the origi-                                             ferent behaviors during in-context learning. Our empirical
+   nal label and “wrong” to denote the flipped label. Then,                                           results provided positive support for the theoretical analysis.
+   we measure the magnitude of correlation between label-                                             Our findings can help improve understanding of LLMs and
+   input, by computing the norm of the last row of attention                                          ICL, and better training and application of these models.
+
+                                                                                                  9
+                             Why Larger Language Models Do In-context Learning Differently?
+
+Acknowledgements                                                     Barak, B., Edelman, B., Goel, S., Kakade, S., Malach, E.,
+                                                                       and Zhang, C. Hidden progress in deep learning: Sgd
+The work is partially supported by Air Force Grant FA9550-             learns parities near the computational limit. Advances
+18-1-0166, the National Science Foundation (NSF) Grants                in Neural Information Processing Systems, 35:21750–
+2008559-IIS, 2023239-DMS, and CCF-2046710.                             21764, 2022.
+
+Impact Statement                                                     Bhojanapalli, S., Yun, C., Rawat, A. S., Reddi, S., and
+                                                                       Kumar, S. Low-rank bottleneck in multi-head attention
+Our work aims to improve the understanding of the in-                  models. In International conference on machine learning.
+context learning mechanism and to inspire efficient and safe           PMLR, 2020.
+use of ICL. Our paper is purely theoretical and empirical in
+nature and thus we foresee no immediate negative ethical             Bietti, A., Cabannes, V., Bouchacourt, D., Jegou, H., and
+impact. We hope our work will inspire effective algorithm              Bottou, L. Birth of a transformer: A memory viewpoint.
+design and promote a better understanding of large language            In Thirty-seventh Conference on Neural Information Pro-
+model learning mechanisms.                                             cessing Systems, 2023.
+
+                                                                     Blei, D. M., Ng, A. Y., and Jordan, M. I. Latent dirichlet
+References                                                             allocation. the Journal of machine Learning research, 3:
+                                                                       993–1022, 2003.
+Agrawal, S., Zhou, C., Lewis, M., Zettlemoyer, L., and
+  Ghazvininejad, M. In-context examples selection for                Bommasani, R., Hudson, D. A., Adeli, E., Altman, R.,
+  machine translation. arXiv preprint arXiv:2212.02437,                Arora, S., von Arx, S., Bernstein, M. S., Bohg, J., Bosse-
+  2022.                                                                lut, A., Brunskill, E., et al. On the opportunities and risks
+                                                                       of foundation models. arXiv preprint arXiv:2108.07258,
+Ahn, K., Cheng, X., Daneshmand, H., and Sra, S. Trans-
+                                                                       2021.
+  formers learn to implement preconditioned gradient de-
+  scent for in-context learning. In Thirty-seventh Confer-           Brown, T., Mann, B., Ryder, N., Subbiah, M., Kaplan, J. D.,
+  ence on Neural Information Processing Systems, 2023.                 Dhariwal, P., Neelakantan, A., Shyam, P., Sastry, G.,
+                                                                       Askell, A., et al. Language models are few-shot learners.
+Ahn, K., Cheng, X., Song, M., Yun, C., Jadbabaie, A.,
+                                                                       Advances in neural information processing systems, 2020.
+  and Sra, S. Linear attention is (maybe) all you need (to
+  understand transformer optimization). In The Twelfth               Bubeck, S., Chandrasekaran, V., Eldan, R., Gehrke, J.,
+ International Conference on Learning Representations,                 Horvitz, E., Kamar, E., Lee, P., Lee, Y. T., Li, Y.,
+  2024.                                                                Lundberg, S., et al. Sparks of artificial general intel-
+                                                                       ligence: Early experiments with gpt-4. arXiv preprint
+Akyurek, E., Schuurmans, D., Andreas, J., Ma, T., and
+                                                                       arXiv:2303.12712, 2023.
+  Zhou, D. What learning algorithm is in-context learn-
+  ing? investigations with linear models. In The Eleventh            Chen, B., Dao, T., Winsor, E., Song, Z., Rudra, A., and
+ International Conference on Learning Representations,                 Ré, C. Scatterbrain: Unifying sparse and low-rank atten-
+  2023.                                                                tion. Advances in Neural Information Processing Systems,
+                                                                       2021.
+Allen-Zhu, Z. and Li, Y. Physics of language models: Part 1,
+  context-free grammar. arXiv preprint arXiv:2305.13673,             Cheng, X., Chen, Y., and Sra, S. Transformers implement
+  2023.                                                                functional gradient descent to learn non-linear functions
+                                                                       in context. arXiv preprint arXiv:2312.06528, 2023.
+An, S., Lin, Z., Fu, Q., Chen, B., Zheng, N., Lou, J.-G., and
+  Zhang, D. How do in-context examples affect composi-               Chowdhery, A., Narang, S., Devlin, J., Bosma, M., Mishra,
+  tional generalization? arXiv preprint arXiv:2305.04835,              G., Roberts, A., Barham, P., Chung, H. W., Sutton, C.,
+  2023.                                                                Gehrmann, S., et al. Palm: Scaling language modeling
+                                                                       with pathways. arXiv preprint arXiv:2204.02311, 2022.
+Arora, S. and Goyal, A. A theory for emergence of
+  complex skills in language models. arXiv preprint                  Chung, H. W., Hou, L., Longpre, S., Zoph, B., Tay, Y.,
+  arXiv:2307.15936, 2023.                                              Fedus, W., Li, E., Wang, X., Dehghani, M., Brahma,
+                                                                       S., et al. Scaling instruction-finetuned language models.
+Bai, Y., Chen, F., Wang, H., Xiong, C., and Mei, S. Trans-             arXiv preprint arXiv:2210.11416, 2022.
+  formers as statisticians: Provable in-context learning with
+  in-context algorithm selection. In Thirty-seventh Confer-          Conneau, A. and Kiela, D. SentEval: An evaluation toolkit
+  ence on Neural Information Processing Systems, 2023.                 for universal sentence representations. In Proceedings
+
+                                                                10
+                             Why Larger Language Models Do In-context Learning Differently?
+
+  of the Eleventh International Conference on Language                 of the 59th Annual Meeting of the Association for Com-
+  Resources and Evaluation (LREC 2018). European Lan-                  putational Linguistics and the 11th International Joint
+  guage Resources Association (ELRA), 2018.                            Conference on Natural Language Processing, 2021b.
+
+Dai, D., Sun, Y., Dong, L., Hao, Y., Sui, Z., and Wei, F. Why        Garg, S., Tsipras, D., Liang, P. S., and Valiant, G. What
+  can gpt learn in-context? language models secretly per-              can transformers learn in-context? a case study of sim-
+  form gradient descent as meta optimizers. arXiv preprint             ple function classes. Advances in Neural Information
+  arXiv:2212.10559, 2022.                                              Processing Systems, 2022.
+
+Daniely, A. and Malach, E. Learning parities with neural             Geva, M., Schuster, R., Berant, J., and Levy, O. Transformer
+  networks. Advances in Neural Information Processing                  feed-forward layers are key-value memories. In Proceed-
+  Systems, 33:20356–20365, 2020.                                       ings of the 2021 Conference on Empirical Methods in
+                                                                       Natural Language Processing, pp. 5484–5495, 2021.
+Dass, J., Wu, S., Shi, H., Li, C., Ye, Z., Wang, Z., and Lin,
+                                                                     Gu, J., Li, C., Liang, Y., Shi, Z., and Song, Z. Exploring
+ Y. Vitality: Unifying low-rank and sparse approximation
+                                                                       the frontiers of softmax: Provable optimization, appli-
+  for vision transformer acceleration with a linear taylor
+                                                                       cations in diffusion model, and beyond. arXiv preprint
+  attention. In 2023 IEEE International Symposium on
+                                                                       arXiv:2405.03251, 2024a.
+  High-Performance Computer Architecture (HPCA). IEEE,
+  2023.                                                              Gu, J., Li, C., Liang, Y., Shi, Z., Song, Z., and Zhou,
+                                                                      T. Fourier circuits in neural networks: Unlocking
+Devlin, J., Chang, M.-W., Lee, K., and Toutanova, K. BERT:             the potential of large language models in mathemati-
+  Pre-training of deep bidirectional transformers for lan-             cal reasoning and modular arithmetic. arXiv preprint
+  guage understanding. In Proceedings of the 2019 Con-                 arXiv:2402.09469, 2024b.
+  ference of the North American Chapter of the Associa-
+  tion for Computational Linguistics: Human Language                 Gu, J., Liang, Y., Liu, H., Shi, Z., Song, Z., and Yin, J. Conv-
+  Technologies. Association for Computational Linguistics,             basis: A new paradigm for efficient attention inference
+  2019.                                                                and gradient computation in transformers. arXiv preprint
+                                                                       arXiv:2405.05219, 2024c.
+Dong, Q., Li, L., Dai, D., Zheng, C., Wu, Z., Chang, B., Sun,
+  X., Xu, J., and Sui, Z. A survey for in-context learning.          Gu, J., Liang, Y., Shi, Z., Song, Z., and Zhou, Y. Tensor
+  arXiv preprint arXiv:2301.00234, 2022.                               attention training: Provably efficient learning of higher-
+                                                                       order transformers. arXiv preprint arXiv:2405.16411,
+Fan, X., Liu, Z., Lian, J., Zhao, W. X., Xie, X., and Wen,             2024d.
+  J.-R. Lighter and better: low-rank decomposed self-
+  attention networks for next-item recommendation. In                Gu, J., Liang, Y., Shi, Z., Song, Z., and Zhou, Y. Un-
+  Proceedings of the 44th international ACM SIGIR con-                 raveling the smoothness properties of diffusion mod-
+  ference on research and development in information re-               els: A gaussian mixture perspective. arXiv preprint
+  trieval, 2021.                                                       arXiv:2405.16418, 2024e.
+                                                                     Guo, T., Hu, W., Mei, S., Wang, H., Xiong, C., Savarese,
+Fu, Y., Peng, H., Khot, T., and Lapata, M. Improv-
+                                                                       S., and Bai, Y. How do transformers learn in-context
+  ing language model negotiation with self-play and in-
+                                                                       beyond simple functions? a case study on learning with
+  context learning from ai feedback. arXiv preprint
+                                                                       representations. In The Twelfth International Conference
+  arXiv:2305.10142, 2023.
+                                                                       on Learning Representations, 2024.
+Gao, P., Han, J., Zhang, R., Lin, Z., Geng, S., Zhou, A.,            Hu, E. J., yelong shen, Wallis, P., Allen-Zhu, Z., Li, Y.,
+  Zhang, W., Lu, P., He, C., Yue, X., et al. Llama-adapter            Wang, S., Wang, L., and Chen, W. LoRA: Low-rank
+  v2: Parameter-efficient visual instruction model. arXiv              adaptation of large language models. In International
+  preprint arXiv:2304.15010, 2023.                                    Conference on Learning Representations, 2022.
+Gao, T., Fisch, A., and Chen, D. Making pre-trained lan-             Huang, Y., Cheng, Y., and Liang, Y. In-context convergence
+  guage models better few-shot learners. In Proceedings                of transformers. arXiv preprint arXiv:2310.05249, 2023.
+  of the 59th Annual Meeting of the Association for Com-
+  putational Linguistics and the 11th International Joint            Iyer, S., Lin, X. V., Pasunuru, R., Mihaylov, T., Simig,
+  Conference on Natural Language Processing, 2021a.                    D., Yu, P., Shuster, K., Wang, T., Liu, Q., Koura, P. S.,
+                                                                       et al. Opt-iml: Scaling language model instruction meta
+Gao, T., Fisch, A., and Chen, D. Making pre-trained lan-               learning through the lens of generalization. arXiv preprint
+  guage models better few-shot learners. In Proceedings                arXiv:2212.12017, 2022.
+
+                                                                11
+                             Why Larger Language Models Do In-context Learning Differently?
+
+Jelassi, S., Sander, M., and Li, Y. Vision transformers               Mahankali, A., Hashimoto, T. B., and Ma, T. One step of
+   provably learn spatial structure. Advances in Neural In-            gradient descent is provably the optimal in-context learner
+   formation Processing Systems, 2022.                                 with one layer of linear self-attention. arXiv preprint
+                                                                       arXiv:2307.03576, 2023.
+Khattab, O., Santhanam, K., Li, X. L., Hall, D., Liang, P.,
+  Potts, C., and Zaharia, M. Demonstrate-search-predict:              Malladi, S., Gao, T., Nichani, E., Damian, A., Lee, J. D.,
+  Composing retrieval and language models for knowledge-               Chen, D., and Arora, S. Fine-tuning language models
+  intensive nlp. arXiv preprint arXiv:2212.14024, 2022.                with just forward passes. Advances in Neural Information
+                                                                       Processing Systems, 2023.
+Lester, B., Al-Rfou, R., and Constant, N. The power of scale
+  for parameter-efficient prompt tuning. In Proceedings               Michalowicz, J., Nichols, J., Bucholtz, F., and Olson, C. An
+  of the 2021 Conference on Empirical Methods in Natu-                 isserlis’ theorem for mixed gaussian variables: Applica-
+  ral Language Processing. Association for Computational               tion to the auto-bispectral density. Journal of Statistical
+  Linguistics, 2021.                                                   Physics, 2009.
+
+Li, H., Wang, M., Liu, S., and Chen, P.-Y. A theoretical              Min, S., Lewis, M., Zettlemoyer, L., and Hajishirzi, H.
+  understanding of shallow vision transformers: Learning,              Metaicl: Learning to learn in context. arXiv preprint
+  generalization, and sample complexity. In The Eleventh               arXiv:2110.15943, 2021.
+  International Conference on Learning Representations,
+  2023a.                                                              Min, S., Lyu, X., Holtzman, A., Artetxe, M., Lewis, M.,
+                                                                       Hajishirzi, H., and Zettlemoyer, L. Rethinking the role of
+Li, H., Wang, M., Lu, S., Wan, H., Cui, X., and Chen, P.-Y.            demonstrations: What makes in-context learning work?
+  Transformers as multi-task feature selectors: Generaliza-            In Proceedings of the 2022 Conference on Empirical
+  tion analysis of in-context learning. In NeurIPS 2023                Methods in Natural Language Processing, 2022.
+  Workshop on Mathematics of Modern Machine Learning,
+  2023b.                                                              Mishra, S., Khashabi, D., Baral, C., and Hajishirzi, H. Cross-
+                                                                       task generalization via natural language crowdsourcing
+Li, X. L. and Liang, P. Prefix-tuning: Optimizing continu-             instructions. In Proceedings of the 60th Annual Meeting
+  ous prompts for generation. In Proceedings of the 59th               of the Association for Computational Linguistics, 2022.
+  Annual Meeting of the Association for Computational
+  Linguistics and the 11th International Joint Conference             Nye, M., Andreassen, A. J., Gur-Ari, G., Michalewski, H.,
+  on Natural Language Processing. Association for Com-                 Austin, J., Bieber, D., Dohan, D., Lewkowycz, A., Bosma,
+  putational Linguistics, 2021.                                         M., Luan, D., et al. Show your work: Scratchpads for
+                                                                        intermediate computation with language models. arXiv
+Li, Y., Ildiz, M. E., Papailiopoulos, D., and Oymak, S. Trans-          preprint arXiv:2112.00114, 2021.
+   formers as algorithms: Generalization and stability in
+   in-context learning. In Proceedings of the 40th Interna-           Olshausen, B. and Field, D. Sparse coding with an over-
+   tional Conference on Machine Learning, Proceedings of                complete basis set: A strategy employed by v1? Vision
+   Machine Learning Research. PMLR, 2023c.                              Research, 37:3311–3325, 1997.
+
+Li, Y., Li, Y., and Risteski, A. How do transformers learn            OpenAI. Introducing ChatGPT. https://openai.
+  topic structure: Towards a mechanistic understanding.                 com/blog/chatgpt, 2022. Accessed: 2023-09-10.
+  In Proceedings of the 40th International Conference on
+  Machine Learning, Proceedings of Machine Learning                   OpenAI.     GPT-4 technical report.          arXiv preprint
+  Research. PMLR, 2023d.                                                arxiv:2303.08774, 2023.
+
+Li, Y., Sreenivasan, K., Giannou, A., Papailiopoulos, D.,             Ouyang, L., Wu, J., Jiang, X., Almeida, D., Wainwright, C.,
+  and Oymak, S. Dissecting chain-of-thought: Compo-                     Mishkin, P., Zhang, C., Agarwal, S., Slama, K., Ray, A.,
+  sitionality through in-context filtering and learning. In             et al. Training language models to follow instructions
+  Thirty-seventh Conference on Neural Information Pro-                  with human feedback. Advances in Neural Information
+  cessing Systems, 2023e.                                               Processing Systems, 2022.
+
+Luo, Z., Wu, S., Weng, C., Zhou, M., and Ge, R. Un-                   Pan, J., Gao, T., Chen, H., and Chen, D. What in-context
+  derstanding the robustness of self-supervised learning                learning ’learns’ in-context: Disentangling task recog-
+  through topic modeling. In The Eleventh International                 nition and task learning. In Findings of Association for
+  Conference on Learning Representations, 2023.                         Computational Linguistics (ACL), 2023.
+
+                                                                 12
+                             Why Larger Language Models Do In-context Learning Differently?
+
+Panigrahi, A., Malladi, S., Xia, M., and Arora, S.                    Tian, Y., Wang, Y., Zhang, Z., Chen, B., and Du, S. Joma:
+  Trainable transformer in transformer. arXiv preprint                  Demystifying multilayer transformers via joint dynamics
+  arXiv:2307.01189, 2023.                                               of mlp and attention, 2023b.
+
+Pourreza, M. and Rafiei, D. Din-sql: Decomposed in-                   Touvron, H., Lavril, T., Izacard, G., Martinet, X., Lachaux,
+  context learning of text-to-sql with self-correction. arXiv           M.-A., Lacroix, T., Rozière, B., Goyal, N., Hambro, E.,
+  preprint arXiv:2304.11015, 2023.                                      Azhar, F., et al. Llama: Open and efficient foundation lan-
+                                                                        guage models. arXiv preprint arXiv:2302.13971, 2023a.
+Raventos, A., Paul, M., Chen, F., and Ganguli, S. Pretrain-
+  ing task diversity and the emergence of non-bayesian                Touvron, H., Martin, L., Stone, K., Albert, P., Almahairi,
+  in-context learning for regression. In Thirty-seventh Con-            A., Babaei, Y., Bashlykov, N., Batra, S., Bhargava, P.,
+  ference on Neural Information Processing Systems, 2023.               Bhosale, S., et al. Llama 2: Open foundation and fine-
+                                                                        tuned chat models. arXiv preprint arXiv:2307.09288,
+Reddy, G. The mechanistic basis of data dependence and                  2023b.
+  abrupt learning in an in-context classification task. In The
+  Twelfth International Conference on Learning Represen-              Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones,
+  tations, 2024.                                                        L., Gomez, A. N., Kaiser, Ł., and Polosukhin, I. At-
+                                                                        tention is all you need. Advances in neural information
+Schlag, I., Irie, K., and Schmidhuber, J. Linear transformers           processing systems, 2017.
+  are secretly fast weight programmers. In International
+  Conference on Machine Learning. PMLR, 2021.                         Vinje, W. E. and Gallant, J. L. Sparse coding and decor-
+                                                                        relation in primary visual cortex during natural vision.
+Shi, F., Chen, X., Misra, K., Scales, N., Dohan, D., Chi,               Science, 287(5456):1273–1276, 2000.
+  E. H., Schärli, N., and Zhou, D. Large language models
+  can be easily distracted by irrelevant context. In Interna-         Von Oswald, J., Niklasson, E., Randazzo, E., Sacramento,
+  tional Conference on Machine Learning. PMLR, 2023a.                   J., Mordvintsev, A., Zhmoginov, A., and Vladymyrov,
+                                                                        M. Transformers learn in-context by gradient descent. In
+Shi, Z., Wei, J., and Liang, Y. A theoretical analysis on               International Conference on Machine Learning. PMLR,
+  feature learning in neural networks: Emergence from                   2023.
+  inputs and advantage over fixed features. In International
+  Conference on Learning Representations, 2022.                       Wang, A., Singh, A., Michael, J., Hill, F., Levy, O., and
+                                                                       Bowman, S. GLUE: A multi-task benchmark and analy-
+Shi, Z., Chen, J., Li, K., Raghuram, J., Wu, X., Liang, Y.,            sis platform for natural language understanding. In Pro-
+  and Jha, S. The trade-off between universality and label             ceedings of the 2018 EMNLP Workshop BlackboxNLP:
+  efficiency of representations from contrastive learning.             Analyzing and Interpreting Neural Networks for NLP.
+  In The Eleventh International Conference on Learning                 Association for Computational Linguistics, 2018.
+  Representations, 2023b.
+                                                                      Wang, Y., Mishra, S., Alipoormolabashi, P., Kordi, Y.,
+Shi, Z., Ming, Y., Fan, Y., Sala, F., and Liang, Y. Domain             Mirzaei, A., Naik, A., Ashok, A., Dhanasekaran, A. S.,
+  generalization via nuclear norm regularization. In Con-              Arunkumar, A., Stap, D., et al. Super-naturalinstructions:
+  ference on Parsimony and Learning (Proceedings Track),               Generalization via declarative instructions on 1600+ nlp
+  2023c.                                                               tasks. In Proceedings of the 2022 Conference on Em-
+                                                                       pirical Methods in Natural Language Processing, pp.
+Shi, Z., Wei, J., and Liang, Y. Provable guarantees for neural         5085–5109, 2022.
+  networks via gradient feature learning. In Thirty-seventh
+  Conference on Neural Information Processing Systems,                Wei, J., Bosma, M., Zhao, V., Guu, K., Yu, A. W., Lester,
+  2023d.                                                               B., Du, N., Dai, A. M., and Le, Q. V. Finetuned lan-
+                                                                       guage models are zero-shot learners. In International
+Sun, T., Shao, Y., Qian, H., Huang, X., and Qiu, X. Black-             Conference on Learning Representations, 2022a.
+  box tuning for language-model-as-a-service. In Interna-
+  tional Conference on Machine Learning. PMLR, 2022.                  Wei, J., Tay, Y., Bommasani, R., Raffel, C., Zoph, B.,
+                                                                       Borgeaud, S., Yogatama, D., Bosma, M., Zhou, D., Met-
+Tian, Y., Wang, Y., Chen, B., and Du, S. Scan and snap:                zler, D., Chi, E. H., Hashimoto, T., Vinyals, O., Liang,
+  Understanding training dynamics and token composition                P., Dean, J., and Fedus, W. Emergent abilities of large
+  in 1-layer transformer. Advances in Neural Information               language models. Transactions on Machine Learning
+  Processing Systems, 2023a.                                           Research, 2022b.
+
+                                                                 13
+                              Why Larger Language Models Do In-context Learning Differently?
+
+Wei, J., Wang, X., Schuurmans, D., Bosma, M., Xia, F., Chi,            Zhang, H., Zhang, Y.-F., Yu, Y., Madeka, D., Foster, D.,
+ E., Le, Q. V., Zhou, D., et al. Chain-of-thought prompting              Xing, E., Lakkaraju, H., and Kakade, S. A study on
+ elicits reasoning in large language models. Advances in                 the calibration of in-context learning. arXiv preprint
+ Neural Information Processing Systems, 2022c.                           arXiv:2312.04021, 2023a.
+
+Wei, J., Hou, L., Lampinen, A. K., Chen, X., Huang, D.,                Zhang, R., Frei, S., and Bartlett, P. L. Trained trans-
+ Tay, Y., Chen, X., Lu, Y., Zhou, D., Ma, T., and Le, Q. V.              formers learn linear models in-context. arXiv preprint
+ Symbol tuning improves in-context learning in language                  arXiv:2306.09927, 2023b.
+ models. In The 2023 Conference on Empirical Methods
+                                                                       Zhang, R., Han, J., Zhou, A., Hu, X., Yan, S., Lu, P., Li,
+ in Natural Language Processing, 2023a.
+                                                                         H., Gao, P., and Qiao, Y. Llama-adapter: Efficient fine-
+Wei, J., Wei, J., Tay, Y., Tran, D., Webson, A., Lu, Y., Chen,           tuning of language models with zero-init attention. arXiv
+ X., Liu, H., Huang, D., Zhou, D., et al. Larger language                preprint arXiv:2303.16199, 2023c.
+ models do in-context learning differently. arXiv preprint             Zhao, Z., Wallace, E., Feng, S., Klein, D., and Singh, S.
+ arXiv:2303.03846, 2023b.                                                Calibrate before use: Improving few-shot performance
+                                                                         of language models. In International Conference on
+Wibisono, K. C. and Wang, Y. On the role of unstructured
+                                                                         Machine Learning. PMLR, 2021.
+ training data in transformers’ in-context learning capa-
+ bilities. In NeurIPS 2023 Workshop on Mathematics of                  Zheng, H. S., Mishra, S., Chen, X., Cheng, H.-T., Chi, E. H.,
+ Modern Machine Learning, 2023.                                          Le, Q. V., and Zhou, D. Step-back prompting enables
+                                                                         reasoning via abstraction in large language models. In
+Wick, G.-C. The evaluation of the collision matrix. Physical             The Twelfth International Conference on Learning Repre-
+ review, 1950.                                                           sentations, 2024.
+Wu, J., Zou, D., Chen, Z., Braverman, V., Gu, Q., and                  Zhou, C., Liu, P., Xu, P., Iyer, S., Sun, J., Mao, Y., Ma, X.,
+ Bartlett, P. L. How many pretraining tasks are needed for               Efrat, A., Yu, P., YU, L., Zhang, S., Ghosh, G., Lewis,
+ in-context learning of linear regression? In The Twelfth                M., Zettlemoyer, L., and Levy, O. LIMA: Less is more
+ International Conference on Learning Representations,                   for alignment. In Thirty-seventh Conference on Neural
+ 2024.                                                                   Information Processing Systems, 2023a.
+
+Xie, S. M., Raghunathan, A., Liang, P., and Ma, T. An                  Zhou, H., Nova, A., Larochelle, H., Courville, A.,
+  explanation of in-context learning as implicit bayesian                Neyshabur, B., and Sedghi, H. Teaching algorith-
+  inference. In International Conference on Learning Rep-                mic reasoning via in-context learning. arXiv preprint
+  resentations, 2022.                                                    arXiv:2211.09066, 2022.
+
+Xu, Z., Shi, Z., Wei, J., Li, Y., and Liang, Y. Improving              Zhou, H., Bradley, A., Littwin, E., Razin, N., Saremi, O.,
+  foundation models for few-shot learning via multitask                  Susskind, J., Bengio, S., and Nakkiran, P. What algo-
+  finetuning. In ICLR 2023 Workshop on Mathematical and                  rithms can transformers learn? a study in length general-
+ Empirical Understanding of Foundation Models, 2023.                     ization. In The 3rd Workshop on Mathematical Reasoning
+                                                                         and AI at NeurIPS’23, 2023b.
+Xu, Z., Shi, Z., and Liang, Y. Do large language models have
+  compositional ability? an investigation into limitations
+  and scalability. In ICLR 2024 Workshop on Mathemati-
+  cal and Empirical Understanding of Foundation Models,
+  2024a.
+
+Xu, Z., Shi, Z., Wei, J., Mu, F., Li, Y., and Liang, Y. Towards
+  few-shot adaptation of foundation models via multitask
+  finetuning. In The Twelfth International Conference on
+  Learning Representations, 2024b.
+
+Yao, S., Yu, D., Zhao, J., Shafran, I., Griffiths, T. L., Cao,
+  Y., and Narasimhan, K. R. Tree of thoughts: Deliberate
+  problem solving with large language models. In Thirty-
+  seventh Conference on Neural Information Processing
+  Systems, 2023.
+
+                                                                  14
+                             Why Larger Language Models Do In-context Learning Differently?
+
+                                                         Appendix
+A. Limitations
+We study and understand an interesting phenomenon of in-context learning: smaller models are more robust to noise, while
+larger ones are more easily distracted, leading to different ICL behaviors. Although we study two stylized settings and give
+the closed-form solution, our analysis cannot extend to real Transformers easily due to the high non-convex function and
+complicated design of multiple-layer Transformers. Also, our work does not study optimization trajectory, which we leave
+as future work. On the other hand, we use simple binary classification real-world datasets to verify our analysis, which still
+has a gap for the practical user using the LLM scenario.
+
+B. Deferred Proof for Linear Regression
+B.1. Proof of Theorem 4.1
+Here, we provide the proof of Theorem 4.1.
+Theorem 4.1 (Optimal rank-r solution for regression). Recall the loss function ℓ̃ in Lemma 4.1. Let
+
+                                           U∗ , u∗ =               argmin        ℓ̃(U, u).
+                                                       U∈Rd×d ,rank(U)≤r,u∈R
+
+
+Then U∗ = cQV∗ Q⊤ , u = 1c , where c is any nonzero constant, and V∗ = diag([v1∗ , . . . , vd∗ ]) satisfies for any i ≤ r, vi∗ =
+      N                             ∗
+(N +1)λi +tr(D) and for any i > r, vi = 0.
+
+
+Proof of Theorem 4.1. Note that,
+
+                       argmin            ℓ̃(U, u) =            argmin          ℓ̃(U, u) −       min        ℓ̃(U, u)
+               U∈Rd×d ,rank(U)≤r,u∈R                  U∈Rd×d ,rank(U)≤r,u∈R                  U∈Rd×d ,u∈R
+                                                                                                                   
+                                                  =            argmin           ℓ̃(U, u) −        min       ℓ̃(U, u) .
+                                                      U∈Rd×d ,rank(U)≤r,u∈R                   U∈Rd×d ,u∈R
+
+
+Thus, we may consider Equation (7) in Lemma B.1 only. On the other hand, we have
+                                               
+                                              1        1
+                                   Γ= 1+          Λ+     tr(Λ)Id×d
+                                             N        N
+                                               
+                                              1              1
+                                      = 1+        QDQ⊤ +        tr(D)QId×d Q⊤
+                                             N               N
+                                                                      
+                                                  1        1
+                                      =Q     1+       D+      tr(D)Id×d Q⊤ .
+                                                 N         N
+                                                                              1
+                                                           1     1    1                               −1
+We denote D′ = 1 + N1 D + N1 tr(D)Id×d . We can see Λ 2 = QD 2 Q⊤ , Γ 2 = QD′ 2 Q⊤ , and Γ−1 = QD′ Q⊤ . We
+                         
+                 ⊤
+denote V = uQ UQ. Since Γ and Λ are commutable and the Frobenius norm (F -norm) of a matrix does not change after
+multiplying it by an orthonormal matrix, we have Equation (7) as
+
+                                                                     1   1
+                                                                            1     1
+                                                                                               2
+                            ℓ̃(U, u) −      min        ℓ̃(U, u) =      Γ 2 uΛ 2 UΛ 2 − ΛΓ−1
+                                         U∈Rd×d ,u∈R                 2                           F
+                                                                     1   1   1              1 2
+                                                                    = Γ 2 Λ 2 uU − Γ−1 Λ 2
+                                                                                        
+                                                                     2                         F
+                                                                     1     1
+                                                                                           1 2
+                                                                         ′2    1
+                                                                                      ′ −1
+                                                                    = D D2 V − D            D2      .
+                                                                     2                            F
+
+As WKQ is a matrix whose rank is at most r, we have V is also at most rank r.                            Then, we denote V∗ =
+                                1                              2
+                               ′2   1             −1       1
+argminV∈Rd×d ,rank(V)≤r D D         2    V − D′        D   2       . We can see that V∗ is a diagonal matrix. Denote D′ =
+                                                               F
+
+                                                                    15
+                                   Why Larger Language Models Do In-context Learning Differently?
+
+diag([λ′1 , . . . , λ′d ]) and V∗ = diag([v1∗ , . . . , vd∗ ]). Then, we have
+                                       1   1
+                                             
+                                                    −1
+                                                        1                     2
+                                    D′ 2 D 2 V − D′     D2                                                                                (4)
+                                                                               F
+                                   d                                  2
+                                   X          1                   1
+                               =           λ′i 2 λi       vi∗ −                                                                           (5)
+                                   i=1
+                                                                  λ′i
+                                   d                                                                             !2
+                                   X             1                 tr(D)                                1
+                               =              1+              λi +                 λ2i   vi∗ −                            .               (6)
+                                                 N                   N                           1 + N1 λi + tr(D)
+                                                                                                       
+                                   i=1                                                                         N
+
+As V∗ is the minimum rank r solution, we have that vi∗ ≥ 0 for any i ∈ [d] and if vi∗ > 0, we have vi∗ =                     1
+                                                                                                                                        .
+                                                                                                                     (1+ N1 )λi + tr(D)
+                                                                                                                                    N
+                                                                 2                        
+                      1 + N1 x + tr(D)                     1                          1
+                                              2
+Denote g(x) =                                x               tr(D)     = x2                      . It is easy to see that g(x) is an
+                                      N            (1+ N1 )x+ N               (1+ N1 )x+ tr(D)
+                                                                                           N
+
+increasing function on [0, ∞). Now, we use contradiction to show that V∗ only has non-zero entries in the first r diagonal
+entries. Suppose i > r, such that vi∗ > 0, then we must have j ≤ r such that vj∗ = 0 as V∗ is a rank r solution. We find that
+if we set vi∗ = 0, vj∗ =         1
+                                            and all other values remain the same, Equation (6) will strictly decrease as g(x) is
+                         (1+ N1 )λj + tr(D)
+                                        N
+
+an increasing function on [0, ∞). Thus, here is a contradiction. We finish the proof by V∗ = uQ⊤ U∗ Q.
+
+B.2. Behavior Difference
+Theorem 4.2 (Behavior difference for regression). Let w = Q(s + ξ) ∈ Rd where s, ξ ∈ Rd are truncated and residual
+vectors defined above. The optimal rank-r solution fLSA,θ in Theorem 4.1 satisfies:
+
+                                           L(fLSA,θ ; E)
+                                                      b
+                                                                                      2
+                                                                           b − ⟨w, xq ⟩
+                                         :=Ex1 ,ϵ1 ,...,xM ,ϵM ,xq fLSA,θ (E)
+                                             1                   1
+                                               ∥s∥2(V∗ )2 D3 +        ∥s + ξ∥2D + σ 2 tr (V∗ )2 D2
+                                                                                                  
+                                         =
+                                             M                   M
+                                                         X                      2
+                                             + ∥ξ∥2D +       s2i λi (λi vi∗ − 1) .
+                                                              i∈[r]
+
+
+Proof of Theorem 4.2. By Theorem 4.1, w.l.o.g, letting c = 1, the optimal rank-r solution fLSA,θ satisfies θ =
+(WP V , WKQ ), and
+                                                                 ∗     
+                                  ∗P V      0d×d 0d         ∗KQ    U 0d
+                                W      =                 ,W     =           ,
+                                             0⊤
+                                              d      1             0⊤
+                                                                    d   0
+
+where U∗ = QV∗ Q⊤ .
+                                                                         PM
+We can see that U∗ and Λ commute. Denote Λ
+                                         b := 1
+                                              M
+                                                                                      ⊤
+                                                                              i=1 xi xi . Note that we have
+
+               ybq =fLSA,θ ( b
+                            E)
+                                         !
+                    
+                      0        0d
+                                  
+                                           E
+                                           bEb⊤
+                                             U∗ 0d
+                                                       
+                   = d×d                                  xq
+                       0⊤
+                        d      1            M0⊤
+                                              d     0
+                                                     PM                                            P                             
+                                        1       ⊤               ⊤                                 1      M       ⊤
+                                                                                                                       PM
+                      0d×d 0d   M xq xq + i=1 xi xi                                                    i=1 xi xi w +   i=1 ϵi xi
+                            
+                                                                                                  M
+                  =
+                       0⊤
+                                                                                                                                    
+                           1      1
+                                       PM       ⊤
+                                                  x   x ⊤
+                                                             PM
+                                                                  ϵ  x ⊤                               1
+                                                                                                          P  M     ⊤          2
+                        d
+                                  M       i=1 w     i   i +   i=1  i   i                               M     i=1 (w xi + ϵi )
+                       ∗    
+                       U 0d
+                    ·          xq
+                       0⊤d 0
+                                M
+                                          !
+                        ⊤b   1 X
+                  = w Λ+            ϵi xi U∗ xq .
+                                        ⊤
+                            M i=1
+
+
+                                                                                   16
+                              Why Larger Language Models Do In-context Learning Differently?
+
+Then, we have
+
+                                                                       2
+                                                       yq − ⟨w, xq ⟩)
+                              Ex1 ,ϵ1 ,...,xM ,ϵM ,xq (b
+                                                                               M
+                                                                                                            !2
+                                                       b ∗ xq + 1
+                                                                   X
+                           =Ex1 ,ϵ1 ,...,xM ,ϵM ,xq w⊤ ΛU              ϵi x ⊤    ∗      ⊤
+                                                                            i U xq − w xq
+                                                                 M i=1
+                               
+                                                                 
+                                                                       M
+                                                                                       !2 
+                                                         2        1 X
+                           = E w⊤ ΛU     b ∗ xq − w ⊤ xq      +E          ϵi x ⊤  ∗
+                                                                                i U xq
+                                                                                          ,
+                                                                   M i=1
+                             |                {z            }
+                                              (I)              |           {z             }
+                                                                                       (II)
+
+
+where the last equality is due to i.i.d. of ϵi . We see that the label noise can only have an effect in the second term. For the
+term (I) we have,
+                                                                                                   2 
+                                       ⊤b    ∗            ⊤   ∗            ⊤       ∗          ⊤
+                         (I) =E    w ΛU xq − w ΛU xq + w ΛU xq − w xq
+                                                   2     h                 2 i
+                                    ⊤b ∗      ⊤  ∗
+                             = E w ΛU xq − w ΛU xq        + E w⊤ ΛU∗ xq − w⊤ xq ,
+                               |           {z           } |          {z           }
+                                                  (III)                                       (IV)
+
+
+
+where the last equality is due to E[Λ]        b is independent with xq . Note the fact that U∗ and Λ commute. For the
+                                    b = Λ and Λ
+(III) term, we have
+                                  2                            
+                               ⊤b ∗       ⊤   ∗
+                                                  2   ⊤b ∗   ⊤ ∗
+                                                                  
+                  (III) =E E w ΛU xq + w ΛU xq − 2 w ΛU xq w ΛU xq xq
+                                2             
+                             ⊤b ∗       ⊤   ∗
+                                              2
+                        =E w ΛU xq − w ΛU xq       .
+
+
+By the property of trace, we have,
+                       h                     i
+                                  ⊤b
+              (III) =E tr Λww
+                            b      Λ(U∗ )2 Λ − ∥w∥2(U∗ )2 Λ3
+                       "            M
+                                              !           M
+                                                                     !        !#
+                          1        X
+                                            ⊤        ⊤
+                                                         X
+                                                                   ⊤     ∗ 2
+                    =E       tr         xi xi ww              xi xi (U ) Λ       − ∥w∥2(U∗ )2 Λ3
+                         M2        i=1                   i=1
+                                                                                           
+                         M −1             ⊤      ∗ 2        1          ⊤     ⊤    ⊤  ∗ 2
+                                                               tr x1 x1 ww x1 x1 (U ) Λ − ∥w∥2(U∗ )2 Λ3
+                                                                                         
+                    =E          tr Λww Λ(U ) Λ +
+                           M                               M
+                         1                   1 
+                           ∥w∥2(U∗ )2 Λ3 +    E tr x1 x⊤         ⊤     ⊤   ∗ 2
+                                                                               
+                    =−                                    1 ww x1 x1 (U ) Λ
+                        M                   M
+                         1                   1 
+                                2
+                                              E tr ∥w∥2Λ Λ + 2Λw⊤ wΛ (U∗ )2 Λ
+                                                                                    
+                    =−     ∥w∥(U∗ )2 Λ3 +
+                        M                   M
+                      1                  1
+                            2
+                                            ∥w∥2Λ tr (U∗ )2 Λ2 ,
+                                                                 
+                    = ∥w∥(U∗ )2 Λ3 +
+                     M                   M
+
+where the third last equality is by Lemma B.2. Furthermore, injecting w = Q(s + ξ), as ξ ⊤ V∗ is a zero vector, we have
+
+                                         1                      1
+                                           ∥s + ξ∥2(V∗ )2 D3 +    ∥s + ξ∥2D tr (V∗ )2 D2
+                                                                                         
+                                  (III) =
+                                         M                     M
+                                         1                  1
+                                           ∥s∥2(V∗ )2 D3 +    ∥s + ξ∥2D tr (V∗ )2 D2 .
+                                                                                    
+                                       =
+                                         M                 M
+
+                                                                  17
+                                Why Larger Language Models Do In-context Learning Differently?
+
+Similarly, for the term (IV), we have
+                                                 h                                              2 i
+                                      (IV) =E        (s + ξ)⊤ Q⊤ ΛU∗ xq − (s + ξ)⊤ Q⊤ xq
+                                                 h                                              2 i
+                                            =E       s⊤ DV∗ Q⊤ xq − s⊤ Q⊤ xq − ξ ⊤ Q⊤ xq
+                                            =s⊤ (V∗ )2 D3 s + s⊤ Ds + ξ ⊤ Dξ − 2s⊤ V∗ D2 s
+                                                       X
+                                            =ξ ⊤ Dξ +      s2i λi λ2i (vi∗ )2 − 2λi vi∗ + 1
+                                                                                            
+
+                                                            i∈[r]
+                                                            X                         2
+                                            =∥ξ∥2D +                s2i λi (λi vi∗ − 1) ,
+                                                            i∈[r]
+
+
+where the third equality is due to s⊤ Aξ = 0 for any diagonal matrix A ∈ Rd×d .
+Now, we analyze the label noise term. By U∗ and Λ being commutable, for the term (II), we have
+                                            
+                                                M
+                                                            !2 
+                                       σ2  X ⊤ ∗
+                                 (II) = 2 E        xi U xq 
+                                       M       i=1
+                                             
+                                                     M
+                                                           !⊤            M
+                                                                               !
+                                       σ2   X                        X
+                                      = 2 E tr          xi    U∗ ΛU∗        xi 
+                                       M            i=1                 i=1
+
+                                            σ2 
+                                               E tr x⊤  ∗   ∗
+                                                               
+                                           =         1 U ΛU x1
+                                            M
+                                            σ2
+                                           = tr (V∗ )2 D2 ,
+                                                          
+                                            M
+where all cross terms vanish in the second equality. We conclude by combining four terms.
+Theorem 4.3 (Behavior difference for regression, special case). Let 0 ≤ r ≤ r′ ≤ d and w = Qs where s is r-dim truncated
+vector. Denote the optimal rank-r solution as f1 and the optimal rank-r′ solution as f2 . Then,
+
+                                       L(f2 ; b
+                                              E) − L(f1 ; b
+                                                          E)
+                                                          ′                             
+                                                             r                       2
+                                        1                   X            N  λ i
+                                           ∥s∥2D + σ 2 
+                                                      
+                                     =                                                   .
+                                       M                   i=r+1
+                                                                   (N + 1) λi + tr(D)
+
+
+Proof of Theorem 4.3. Let V∗ = diag([v1∗ , . . . , vd∗ ]) satisfying for any i ≤ r, vi∗ = (N +1)λNi +tr(D) and for any i > r, vi∗ =
+          ∗           ∗               ∗                                      ∗                                                 ∗
+0. Let V′ = diag([v ′ 1 , . . . , v ′ d ]) be satisfied for any i ≤ r′ , v ′ i = (N +1)λNi +tr(D) and for any i > r′ , v ′ i = 0. Note that
+                                                ∗
+V∗ is a truncated diagonal matrix of V′ . By Theorem 4.1 and Theorem 4.2, we have
+                                                                                                                                      
+                                           1                   1                            ∗
+                                                                                                        X                     ∗      2
+                            E) =  ∥s∥2(V′∗ )2 D3 +                 ∥s∥2D + σ 2 tr (V′ )2 D2 +                  s2i λi λi v ′ i − 1 
+                                                                                                                                 
+        L(f2 ; b
+               E) − L(f1 ; b
+                                           M                  M
+                                                                                                       i∈[r ′ ]
+                                                                                                                                     
+                                              1                   1                                      X                          2
+                                       −  ∥s∥2(V∗ )2 D3 +            ∥s∥2D + σ 2 tr (V∗ )2 D2 +                 s2i λi (λi vi∗ − 1) 
+                                                                                                    
+                                             M                   M
+                                                                                                       i∈[r]
+                                   1                      ∗
+                                     ∥s∥2D + σ     tr (V′ )2 D − tr (V∗ )2 D2
+                                                      2                        2
+                                                                                
+                                                                                
+                                 =
+                                   M               ′                             
+                                                      r                       2
+                                   1                 X            N  λ i
+                                     ∥s∥2D + σ 2 
+                                                
+                                 =                                                .
+                                   M                i=r+1
+                                                            (N + 1) λi + tr(D)
+
+
+
+
+                                                                          18
+                                   Why Larger Language Models Do In-context Learning Differently?
+
+B.3. Auxiliary Lemma
+Lemma B.1 provides the structure of the quadratic form of our MSE loss.
+Lemma B.1 (Corollary A.2 in Zhang et al. (2023b)). The loss function ℓ̃ in Lemma 4.1 satisfies
+                                                                          1
+                                                    min       ℓ̃(U, u) = − tr[Λ2 Γ−1 ],
+                                                U∈Rd×d ,u∈R               2
+
+where U = cΓ−1 , u = 1c for any non-zero constant c are minimum solution. We also have
+
+                                                                          1   1
+                                                                                 1     1
+                                                                                                  2
+                              ℓ̃(U, u) −        min       ℓ̃(U, u) =        Γ 2 uΛ 2 UΛ 2 − ΛΓ−1     .                            (7)
+                                            U∈Rd×d ,u∈R                   2                        F
+
+
+Lemma B.2. Let x ∼ N (0, Λ), ϵ ∼ N (0, σ 2 ) and y = ⟨w, x⟩ + ϵ, where w ∈ Rd is a fixed vector. Then we have
+
+                                                E y 2 xx⊤ =σ 2 Λ + ∥w∥2Λ Λ + 2Λw⊤ wΛ,
+                                                         
+
+                                               E(yx)E(yx)⊤ =Λ⊤ ww⊤ Λ,
+                               E (yx − E(yx))(yx − E(yx))⊤ =σ 2 Λ + ∥w∥2Λ Λ + Λw⊤ wΛ.
+                                                         
+
+
+Proof of Lemma B.2. As y is a zero mean Gaussian, by Isserlis’ theorem (Wick, 1950; Michalowicz et al., 2009), for any
+i, j ∈ [d] we have
+
+                               E[y 2 xi xj ] =E[y 2 ]E[xi xj ] + 2E[yxi ]E[yxj ]
+                                             = σ 2 + w⊤ Λw Λi,j + 2Λ⊤            ⊤
+                                                               
+                                                                           i ww Λj .
+
+Thus, we have E y 2 xx⊤ = σ 2 + w⊤ Λw Λ + 2Λw⊤ wΛ. Similarly, we also have E(yx)E(yx)⊤ = Λ⊤ ww⊤ Λ. Thus,
+                                       
+
+we have
+
+                             E (yx − E(yx))(yx − E(yx))⊤
+                                                                 
+
+                           =E y 2 xx⊤ − yxE(yx)⊤ − E(yx)yx⊤ + E(yx)E(yx)⊤
+                                                                                    
+
+                           =E y 2 xx⊤ − E(yx)E(yx)⊤
+                                        
+
+                           = σ 2 + w⊤ Λw Λ + Λw⊤ wΛ.
+                                              
+
+
+
+
+C. Deferred Proof for Parity Classification
+C.1. Proof of Theorem 5.1
+Here, we provide the proof of Theorem 5.1.
+Theorem 5.1 (Optimal solution for parity). Consider k = 2ν1 , d = 2ν2 , and let g1∗ and g2∗ denote the optimal solutions for
+m = 2(ν1 + 1) and m = 2(ν2 + 1), respectively.
+                          1
+                              −γ
+When 0 < pT < d(d−1) 41                   , g1∗ neurons are a subset of g2∗ neurons. Specifically, for any i ∈ [2(ν2 + 1)], let V∗,(i)
+                     2   ( 4 +γ)+ 14 −γ
+be diagonal matrix and
+
+                                                              ∗,(i)
+   • For any i ∈ [ν2 ] and iτ ∈ [d], let a∗i = −1 and Viτ ,iτ = (2 digit(bin(iτ − 1), i) − 1)/(4γ).
+                                                                  ∗,(i)
+   • For i = ν2 + 1 and any iτ ∈ [d], let a∗i = +1 and Viτ ,iτ = −νj /(4γ) for gj∗ .
+
+   • For i ∈ [2(ν2 + 1)] \ [ν2 + 1], let a∗i = a∗i−ν2 −1 and V∗,(i) = −V∗,(i−ν2 −1) .
+
+Let W∗,(i) = GV∗,(i) G⊤ . Up to permutations, g2∗ has neurons (a∗ , W∗,(1) , . . . , W∗,(m) ) and g1∗ has the {1, . . . , ν1 , ν2 +
+1, ν2 + 2 . . . , ν2 + ν1 + 1, 2ν2 + 2}-th neurons of g2∗ .
+
+                                                                      19
+                                Why Larger Language Models Do In-context Learning Differently?
+
+Proof of Theorem 5.1. Recall tτ = (iτ , jτ ). Let zτ ∈ Rd satisfy zτ,iτ = zτ,jτ = 2γ and all other entries are zero. Denote
+V(i) = G⊤ W(i) G. Notice that ∥W(i) ∥2F = ∥V(i) ∥2F . Thus, we denote V∗,(i) = G⊤ W∗,(i) G. Then, we have
+
+                                    Eτ [ℓ (yτ,q · g(Xτ , yτ , xτ,q ))]
+                                                                                 
+                                                                ⊤                 
+                                                      X          y    X τ
+                                   =Eτ ℓ yτ,q           ai σ τ         W(i) xτ,q 
+                                                                     N
+                                                     i∈[m]
+                                                                            
+                                                      X        h             i
+                                   =Eτ ℓ yτ,q           ai σ z⊤     (i)
+                                                                   τ V ϕτ,q
+                                                                               
+                                                            i∈[m]
+                                                                                                
+                                                                        h                        i
+                                                                             (i)      (i)
+                                                            X
+                                   =Eτ ℓ yτ,q                    ai σ 2γ(Viτ ,: + Vjτ ,: )ϕτ,q  .
+                                                         i∈[m]
+
+                                                        ∗,(i)
+We can see that for any i ∈ [m], |a∗i | = 1 and Vj,l            = 0 when j ̸= l. As ReLU is a homogeneous function, we have
+
+                Eτ [ℓ (yτ,q · g ∗ (Xτ , yτ , xτ,q ))]
+                                                                                                                    
+                                                                            h                                i
+                                                                                  ∗,(i)        ∗,(i)
+                                                              X
+               = (1 − pT )E ℓ 2γϕτ,q,iτ ϕτ,q,jτ                    a∗i σ Viτ ,iτ ϕτ,q,iτ + Vjτ ,jτ ϕτ,q,jτ  tτ ∈ S1 
+                                                             i∈[m]
+                 |                                                          {z                                           }
+                                                                            (I)
+                                                                                                                    
+                                                                           h                                 i
+                                                                             ∗,(i)             ∗,(i)
+                                                              X
+                      + pT E ℓ 2γϕτ,q,iτ ϕτ,q,jτ                   a∗i σ Viτ ,iτ ϕτ,q,iτ + Vjτ ,jτ ϕτ,q,jτ  tτ ∈ S2  .
+                                                              i∈[m]
+                         |                                                        {z                                     }
+                                                                                  (II)
+
+We have
+                                        (                                                                
+                                             1                X            h
+                                                                               ∗,(i)       ∗,(i)
+                                                                                                 i
+                     (I) =(1 − pT ) ·       ( + γ)E ℓ 2γ         a∗i σ Viτ ,iτ + Vjτ ,jτ  tτ ∈ S1 
+                                             4
+                                                             i∈[m]
+                                                                                                       
+                                               1          X           h
+                                                                             ∗,(i)       ∗,(i)
+                                                                                               i
+                                            + E ℓ −2γ           a∗i σ Viτ ,iτ − Vjτ ,jτ  tτ ∈ S1 
+                                               4
+                                                           i∈[m]
+                                                                                                            
+                                                1                X            h
+                                                                                     ∗,(i)       ∗,(i)
+                                                                                                       i
+                                            + ( − γ)E ℓ 2γ           a∗i σ −Viτ ,iτ − Vjτ ,jτ  tτ ∈ S1 
+                                                4
+                                                                i∈[m]
+                                                                                                         )
+                                               1          X           h
+                                                                               ∗,(i)       ∗,(i)
+                                                                                                 i
+                                            + E ℓ −2γ           a∗i σ −Viτ ,iτ + Vjτ ,jτ  tτ ∈ S1  .
+                                               4
+                                                                    i∈[m]
+
+We can get a similar equation for (II).
+
+We make some definitions to be used. We define a pattern as (z1 , {(iτ , z2 ), (jτ , z3 )}), where z1 , z2 , z3 ∈ {±1}. We
+                                                                                                            ∗,(i)
+define a pattern is covered by a neuron means there exists i ∈ [m], such that a∗i = z1 and sign(Viτ ,iτ ) = z2 and
+       ∗,(i)
+sign(Vjτ ,jτ ) = z3 . We define a neuron as being positive when its a∗i = +1 and being negative when its a∗i = −1. We
+define a pattern as being positive if z1 = +1 and being negative if z1 = −1.
+Then all terms in (I) and (II) can be written as:
+                                                                                                    
+                                                                        h                          i
+                                                                                   ∗,(i)   ∗,(i)
+                                                             X
+                                    αE ℓ 2γz1                    a∗i σ z2 Viτ ,iτ + z3 Vjτ ,jτ  ,
+                                                            i∈[m]
+
+
+
+                                                                            20
+                              Why Larger Language Models Do In-context Learning Differently?
+                                                                                                      
+where α is the scalar term. Note that there are total k(k−1)
+                                                         2   × 4 patterns in (I) and   d(d−1)
+                                                                                          2   − k(k−1)
+                                                                                                   2     × 4 patterns in (II).
+The loss depends on the weighted sum of non-covered patterns. To have zero loss, we need all patterns to be covered by m
+neurons, i.e., (a∗ , V∗,(1) , . . . , V∗,(m) ).
+                                                                                     1
+                                                                                         −γ
+Note that one neuron at most cover d(d−1)
+                                      2   patterns. Also, by 0 < pT < d(d−1) 41                           , we have
+                                                                                2   ( 4 +γ)+ 14 −γ
+
+
+                                           d(d − 1)     1                 1
+                                                    pT ( + γ) < (1 − pT )( − γ),
+                                              2         4                 4
+which means the model will only cover all patterns in (I) before covering a pattern in (II) in purpose.
+Now, we show that the minimum number of neurons to cover all patterns in (I) and (II) is 2(ν2 + 1).
+
+First, we show that 2(ν2 + 1) neurons are enough to cover all patterns in (I) and (II). For i ∈ [ν2 ] and iτ ∈ [d],
+  (i)
+Viτ ,iτ = (2 digit(bin(iτ − 1), i) − 1)/(4γ) and all non-diagonal entries in V(i) being zero and ai = −1. For i = ν2 + 1
+                (i)
+and iτ ∈ [d], Viτ ,iτ = −ν2 /(4γ) and all non-diagonal entries in V(i) being zero and ai = +1. For i ∈ [2(ν2 + 1)] \ [ν2 + 1],
+let V(i) = −V(i−ν2 −1) and ai = ai−ν2 −1 .
+We can check that this construction can cover all patterns in (I) and (II) and only needs 2(ν2 + 1) neurons. V(ν2 +1) and
+V(2(ν2 +1)) cover all positive patterns. All other neurons cover all negative patterns. This is because bin(iτ ) and bin(jτ )
+have at least one digit difference. If bin(iτ ) and bin(jτ ) are different in the i-th digit, then (−1, {(iτ , −1), (jτ , +1)}) and
+(−1, {(iτ , +1), (jτ , −1)}) are covered by the i-th and i + ν2 + 1-th neuron.
+                                   1     ν2
+We can also check that the scalar 4γ and 4γ is the optimal value. Note that
+
+ (1) For any negative patterns, the positive neurons will not have a cancellation effect on the negative neurons, i.e., when
+     yq = −1, the positive neurons will never activate.
+
+ (2) For each negative neuron, there exist some patterns that are uniquely covered by it.
+
+ (3) For any positive patterns, there are at most ν2 − 1 negative neurons that will have a cancellation effect on the positive
+     neurons, i.e., when yq = +1, these negative neurons will activate simultaneously. Also, we can check that there is a
+     positive pattern such that there are ν2 − 1 negative neurons that will have a cancellation effect.
+
+ (4) For two positive neurons, there exist some patterns that are uniquely covered by one of them.
+
+                                     1                                                                               ν2
+Due to hinge loss, we can see that 4γ  is tight for negative neurons as (1) and (2). Similarly, we can also see that 4γ is tight
+for positive neurons as (3) and (4).
+
+Second, we prove that we need at least 2(ν2 + 1) neurons to cover all patterns in (I) and (II). We can see that we
+need at least 2 positive neurons to cover all positive patterns. Then, we only need to show that 2ν2 − 1 neurons are not
+enough to cover all negative patterns.
+                                     nWe can prove that      all negative
+                                                                        o patterns are covered equivalent to all numbers from
+                ν2                       (1)           (ν2 )
+{0, 1, . . . , 2 − 1} are encoded by   Vi,i , . . . , Vi,i       i ∈ [k] . Then 2ν2 − 1 is not enough to do so.
+
+Therefore, the minimum number of neurons to cover all patterns in (I) and (II) is 2(ν2 + 1).
+Thus, when m = 2(ν1 + 1), the optimal solution will cover all patterns in (I) but not all in (II). When m ≥ 2(ν2 + 1), the
+optimal solution will cover all patterns in (I) and (II). We see that g1∗ neurons as the subset of g2∗ neurons, while the only
+                                                     ν1             ν2
+difference is that the scalar of positive neurons is 4γ for g1∗ and 4γ for g2∗ . Thus, we finished the proof.
+
+C.2. Proof of Theorem 5.2
+Here, we provide the proof of Theorem 5.2.
+Theorem 5.2 (Behavior difference for parity). Assume the same condition as Theorem
+                                                                                P
+                                                                                   5.1. For j ∈ {1, 2}, Let θj denote the
+                                                                                              l∈[M ] ξl
+parameters of gj∗ . For l ∈ [M ], let ξl be uniformly drawn from {±1}d , and Ξ =               M          . Then, for any δ ∈ (0, 1), with
+
+                                                                21
+                                  Why Larger Language Models Do In-context Learning Differently?
+
+probability at least 1 − δ over the randomness of test data, we have
+
+
+                                       gj∗ (Xτ , yτ , xτ,q ) = h(θj , 2γ ϕ̂τ,q + PDj (Ξ)) + ϵj
+                                        X                       ⊤                      
+                                     :=      a∗i σ diag V∗,(i)           2γ ϕ̂τ,q + PDj (Ξ) +ϵj
+                                        i∈[m]
+
+
+
+               q             
+                    νj    1
+where ϵj = O        M log δ       and we have
+
+
+
+  • 2γ ϕ̂τ,q is the signal useful for prediction: 0 = ℓ(yq · h(θ1 , 2γ ϕ̂τ,q )) = ℓ(yq · h(θ2 , 2γ ϕ̂τ,q )).
+
+
+
+                                                                       E[∥P       (Ξ))∥2 ]
+                                                                  D1
+  • PD1 (Ξ)) and PD2 (Ξ)) is noise not related to labels, and E[∥PD       2
+                                                                     (Ξ))∥2 ]
+                                                                              = νν12 +1
+                                                                                     +1 .
+                                                                              2         2
+
+
+
+
+Proof of Theorem 5.2. Let Φτ = [ϕτ,1 , . . . , ϕτ,M ]⊤ ∈ RM ×d . Recall tτ = (iτ , jτ ). Let zτ ∈ Rd satisfy zτ,iτ = zτ,jτ =
+2γ and all other entries are zero. We see tτ as an index set and let rτ = [d] \ tτ . Then, we have
+
+
+                                    g2∗ (Xτ , yτ , xτ,q )
+                                                 ⊤                     
+                                     X
+                                             ∗     yτ Xτ ∗,(i)
+                                  =       ai σ              W      xτ,q
+                                                     M
+                                    i∈[m]
+                                                 ⊤ τ                  
+                                     X             y Φ
+                                  =       a∗i σ τ          V∗,(i) ϕτ,q
+                                                     M
+                                    i∈[m]
+                                                "                                                     #
+                                     X
+                                             ∗
+                                                   yτ⊤ Φτ:,tτ ∗,(i)           yτ⊤ Φτ:,rτ ∗,(i)
+                                  =       ai σ               Vtτ ,: ϕτ,q,tτ +           Vrτ ,: ϕτ,q,rτ .
+                                                      M                          M
+                                     i∈[m]
+
+
+
+Note that we can absorb the randomness of yτ , Φτ:,rτ , ϕτ,q,rτ together.
+Let zi for i ∈ [n] uniformly draw from {−1, +1}. By Chernoff bound for binomial distribution (Lemma C.1), for any
+0 < ϵ < 1, we have
+
+                                                    P                !
+                                                       i∈[n] zi
+                                                                                  2 
+                                                                                    ϵ n
+                                             Pr                   ≥ϵ      ≤ 2 exp −     .
+                                                        n                            6
+
+
+
+Thus, for any 0 < δ < 1, with probability at least 1 − δ over the randomness of evaluation data, such that
+
+                                                                              r              !
+                                                          ∗,(i)                    1     1
+                                                Ξ⊤
+                                                 tτ diag(Vtτ ,tτ )   ≤O              log         .
+                                                                                   M     δ
+
+
+                                                                     22
+                                 Why Larger Language Models Do In-context Learning Differently?
+
+Then, for any 0 < δ < 1, with probability at least 1 − δ over the randomness of evaluation data, we have
+
+                      g2∗ (Xτ , yτ , xτ,q )
+                                  "                                                                          #
+                       X
+                               ∗
+                                     yτ⊤ Φτ:,tτ ∗,(i)               ⊤          ∗,(i)      ⊤            ∗,(i)
+                    =       ai σ                 Vtτ ,: ϕτ,q,tτ + Ξ diag(V           ) − Ξtτ diag(Vtτ ,tτ )
+                                        M
+                      i∈[m]
+                                  h                                                                   i
+                                           ∗,(i)                                              ∗,(i)
+                       X
+                    =       a∗i σ z⊤  τ V  tτ ,: ϕ τ,q,tτ
+                                                          + Ξ ⊤
+                                                                diag(V ∗,(i)
+                                                                             ) − Ξ ⊤
+                                                                                   tτ  diag(V tτ ,tτ )
+                        i∈[m]
+                                                       ⊤                                                
+                                                  ∗,(i)                                            ∗,(i)
+                        X
+                    =           a∗i σ    2γ diag Vtτ ,tτ               ⊤
+                                                            ϕτ,q,tτ + Ξ diag(V ∗,(i)      ⊤
+                                                                                     ) − Ξtτ diag(Vtτ ,tτ )
+                        i∈[m]
+                                                    ⊤                                  
+                                                                                    ∗,(i)
+                        X
+                    =           a∗i σ    diag V ∗,(i)                      ⊤
+                                                           2γ ϕ̂τ,q + Ξ − Ξtτ diag(Vtτ ,tτ )
+                        i∈[m]
+                                        "                                  r         !#
+                        X                       ⊤                        1     1
+                    =           a∗i σ
+                                   diag V         ∗,(i)
+                                                     2γ ϕ̂τ,q + Ξ + O          log
+                                                                             M     δ
+                      i∈[m]
+                                  "                                            r           !#
+                       X                        ⊤                              1     1
+                              ∗            ∗,(i)
+                    =       ai σ diag V               2γ ϕ̂τ,q + PD2 (Ξ) + O         log
+                                                                                  M      δ
+                      i∈[m]
+                                                          r           !
+                                                             ν2     1
+                    = h(θ2 , 2γ ϕ̂τ,q + PD2 (Ξ)) + O            log     .
+                                                             M      δ
+                                                                             q             
+                                                                                  ν1
+Similarly, we have g1∗ (Xτ , yτ , xτ,q ) = h(θ1 , 2γ ϕ̂τ,q + PD1 (Ξ)) + O               1
+                                                                                  M log δ       .
+
+As tτ ∈ S1 and the number of (ϕiτ , ϕjτ ) being balanced as training, by careful checking, we can see that ℓ(yq ·
+h(θ1 , 2γ ϕ̂τ,q )) = ℓ(yq · h(θ2 , 2γ ϕ̂τ,q )) = 0 and we have 2γ ϕ̂τ,q is the signal part.
+On the other hand, we know that all the first half columns in D2 are orthogonal with each other, and the second half columns
+in D2 are opposite to the first half columns. We have the same fact to D1 . As Ξ is a symmetric noise distribution, we have
+E[∥PD1 (Ξ))∥22 ]
+E[∥PD2 (Ξ))∥22 ]
+                 = νν12 +1
+                        +1 and we have PD1 (Ξ)) and PD2 (Ξ)) is the noise part.
+
+
+C.3. Auxiliary Lemma
+Lemma C.1 (Chernoff bound for binomial distribution). Let Z ∼ Bin(n, p) and let µ = E[Z]. For any 0 < ϵ < 1, we have
+                                                                  2 
+                                                                     ϵ µ
+                                      Pr(|Z − µ| ≥ ϵµ) ≤ 2 exp −           .
+                                                                      3
+
+
+
+
+                                                                  23
+
