@@ -1,0 +1,102 @@
+CELL 1 (code)
+import json
+import math
+import openai
+import textstat
+import tiktoken
+import numpy as np
+import pandas as pd
+from tqdm import tqdm
+from rouge_score import rouge_scorer
+from nltk.stem import WordNetLemmatizer
+from scipy.spatial.distance import cosine
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+CELL 2 (code)
+data = 'Hemonc'
+dataset = pd.read_csv(f'Data/Input/{data}.csv')
+features = pd.DataFrame()
+
+CELL 3 (markdown)
+### Complexity
+
+- Length
+- Readability
+- Number of Unique Tokens
+
+CELL 4 (code)
+wnl = WordNetLemmatizer()
+get_length = lambda x: len(x)
+get_readability = lambda x: textstat.flesch_kincaid_grade(x)
+count_unitok = lambda x: len(set([wnl.lemmatize(tkn).lower() for tkn in x.split(' ')]))
+
+features['Length'] = dataset[f'evidence {augmentation}'].apply(get_length)
+features['Readability'] = dataset[f'evidence {augmentation}'].apply(get_readability)
+features['# Uniq Tkns'] = dataset[f'evidence {augmentation}'].apply(count_unitok)
+
+CELL 5 (markdown)
+### Relevance
+
+- N-gram Overlap (ROUGE)
+- Embedding Similarity
+
+CELL 6 (code)
+emb_model, chunk_size = "text-embedding-3-large", 8000
+text_splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(model_name=emb_model, chunk_size=chunk_size)
+evidences, questions, idx2pieces = [], [], {}
+for idx, row in tqdm(dataset.iterrows(), total=len(dataset), desc='chunking'):
+    evidence = text_splitter.split_text(row[f'evidence {augmentation}'])
+    idx2pieces[idx] = (len(idx2pieces), len(idx2pieces)+len(evidence))
+    evidences += evidence; questions.append(row['question 1'])
+
+encoding = tiktoken.encoding_for_model(emb_model)
+client = openai.OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+batch_limit, query_limit = 500000, 1000
+evi_embs_, qn_embs = [], []
+for texts, embs in zip([evidences, questions], [evi_embs_, qn_embs]):
+    batch, batch_size = [], 0
+    for text in tqdm(texts, desc='embedding'):
+        text_size = len(encoding.encode(text))
+        if batch_size + text_size > batch_limit or len(batch) >= query_limit:
+            response = client.embeddings.create(input=batch, model=emb_model)
+            embs += [each.embedding for each in response.data]
+            batch, batch_size = [], 0
+        batch.append(text); batch_size += text_size
+    response = client.embeddings.create(input=batch, model=emb_model)
+    embs += [np.array(each.embedding) for each in response.data]
+    
+evi_embs = []
+for idx, (start, end) in idx2pieces.items():
+    evi_embs.append(np.mean(evi_embs_[start:end], axis=0))
+for idx, (evi_emb, qn_emb) in enumerate(zip(evi_embs, qn_embs)):
+    features.at[idx, 'Emb Sim'] = 1 - cosine(evi_emb, qn_emb)
+
+CELL 7 (code)
+scorer = rouge_scorer.RougeScorer(['rouge2'], use_stemmer=True)
+for m in ['P', 'R', 'F']:
+    features[f'rouge2-{m}'] = None
+
+for idx, row in tqdm(dataset.iterrows(), total=len(dataset)):
+    scores = scorer.score(row['question 1'], row[f'evidence {augmentation}'])
+    features.at[idx, f'rouge2-P'] = scores[f'rouge2'].precision
+    features.at[idx, f'rouge2-R'] = scores[f'rouge2'].recall
+    features.at[idx, f'rouge2-F'] = scores[f'rouge2'].fmeasure
+
+CELL 8 (markdown)
+### Familiarity
+
+- Perplexity
+
+CELL 9 (code)
+abbre2model = {'Gemma-2B':'gemma-2-2b-it', 'Gemma-9B':'gemma-2-9b-it', 'Gemma-27B':'gemma-2-27b-it', 
+               'Llama-3B':'Llama-3.2-3B-Instruct', 'Llama-8B':'Llama-3.1-8B-Instruct', 'Llama-70B':'Llama-3.3-70B-Instruct', 
+               'Qwen-3B':'Qwen2.5-3B-Instruct', 'Qwen-7B':'Qwen2.5-7B-Instruct', 'Qwen-14B':'Qwen2.5-14B-Instruct'}
+for abbre, model in abbre2model.items():
+    for fea in ['Perplexity', 'Entropy']:
+        raw = json.load(open(f'Data/Uncertainty/{model}_{fea}.json'))
+        features[f'{abbre} {fea[:4]} Context'] = raw[data]['evidence']
+        features[f'{abbre} {fea[:4]} Question'] = raw[data]['question 1']
+
+CELL 10 (code)
+features.to_csv(f'Data/Feature/{data}.csv', index=False)
+

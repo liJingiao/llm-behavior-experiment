@@ -1,0 +1,951 @@
+### CELL 1
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import seaborn as sns
+import json
+import math
+import os
+import scipy.stats as stats
+from tabulate import tabulate
+import itertools
+from scipy.stats import norm, ttest_ind, f_oneway, t, shapiro, levene, mannwhitneyu, wilcoxon, kruskal
+import matplotlib.ticker as ticker
+
+
+### CELL 2
+n_list = [1, 2, 3]
+blocks = 50
+current_dir = os.getcwd()
+
+### CELL 3
+def compute_summary_stats(all_trials, exp_name, n_list, blocks):
+    summary_stats = {}
+    raw_data = {}
+    for n in n_list:
+        hit_rate, false_alarm_rate, accuracy, response_time, d_prime = [], [], [], [], []
+        for b in range(blocks):
+            trials = all_trials[f"{n}back_{b}"]
+
+            # Compute the hit rate, false alarm rate, and response time
+            hits, false_alarms, total_targets, total_lures, total_rt = 0, 0, 0, 0, 0
+            for trial in trials:
+                if trial['target'] == 'm':
+                    total_targets += 1
+                    if trial['correct']:
+                        hits += 1
+                        total_rt += trial['rt']
+                    elif trial['correct'] == '':
+                        raise ValueError("Missing data in " + exp_name + " " + str(n) + "-back task, block " + str(b) + '.')
+                else:
+                    total_lures += 1
+                    if trial['correct'] == '':
+                        raise ValueError("Missing data in " + exp_name + " " + str(n) + "-back task, block " + str(b) + '.')
+                    elif not trial['correct']:
+                        false_alarms += 1
+
+            hit_rate.append((hits / total_targets) * 100)
+            false_alarm_rate.append((false_alarms / total_lures) * 100)
+            accuracy.append(((hits + total_lures - false_alarms) / (total_targets + total_lures)) * 100)
+            response_time.append(total_rt / hits if hits > 0 else np.nan)
+
+            # Compute d prime
+            hit_rate_adjusted = np.clip(hits / total_targets, 0.01, 0.99)
+            false_alarm_rate_adjusted = np.clip(false_alarms / total_lures, 0.01, 0.99)
+            d_prime.append(np.abs(norm.ppf(hit_rate_adjusted) - norm.ppf(false_alarm_rate_adjusted)))
+
+        raw_data[n] = {
+            "hit_rate": hit_rate,
+            "false_alarm_rate": false_alarm_rate,
+            "accuracy": accuracy,
+            "d_prime": d_prime
+        }
+            
+        summary_stats[n] = {
+            "hit_rate": {"mean": np.mean(hit_rate),  "stderr": np.std(hit_rate) / math.sqrt(blocks)},
+            "false_alarm_rate": {"mean": np.mean(false_alarm_rate), "stderr": np.std(false_alarm_rate) / math.sqrt(blocks)},
+            "accuracy": {"mean": np.mean(accuracy), "stderr": np.std(accuracy) / math.sqrt(blocks)},
+            "d_prime": {"mean": np.mean(d_prime), "stderr": np.std(d_prime) / math.sqrt(blocks)}
+        }
+    return summary_stats, raw_data
+
+
+
+### CELL 4
+# we use the non-parametric test to compare the performance of different n-back tasks
+def nonparametric_test(raw_data, n_list):
+    metrics = ["d_prime"]
+    U_list = []
+    corrected_p_list = []
+    r_list = []
+    for metric in metrics:
+        # print(f"Kruskal-Wallis test for {metric}:")
+
+        # Prepare the data for Kruskal-Wallis test
+        data = [np.array(raw_data[n][metric]) for n in n_list]
+
+        # Perform Kruskal-Wallis test
+        H, p = kruskal(*data)
+
+        # Calculate degrees of freedom
+        df = len(n_list) - 1
+
+        # Calculate the total number of observations
+        N = len(raw_data[n_list[0]][metric]) * len(n_list)
+        
+        # Calculate epsilon squared (ε²):ε² = (H - k + 1) / (N - k), where H is the Kruskal-Wallis H statistic, k is the number of groups (in your case, len(n_list)), N is the total number of observations across all groups
+        epsilon_squared = (H - len(n_list) + 1) / (N - len(n_list))
+
+        # print(f"  H({df}) = {H:.4f}, p = {p:.4f}, epsilon squared = {epsilon_squared:.4f}")
+
+        # Perform post-hoc Mann-Whitney U test
+        # print("  Post-hoc Mann-Whitney U test:")
+        for combo in itertools.combinations(n_list, 2):
+            n1, n2 = combo
+            data1 = raw_data[n1][metric]
+            data2 = raw_data[n2][metric]
+
+            # Mann-Whitney U test
+            U, p_value = mannwhitneyu(data1, data2)
+
+            # Bonferroni correction
+            corrected_p = min(p_value * len(list(itertools.combinations(n_list, 2))), 1)
+
+            # Calculate the effect size using the rank-biserial correlation (r): r = 1 – (2U)/ (n1 * n2)
+            r = 1 - (2 * U) / (len(data1) * len(data2))
+            U_list.append(U)
+            corrected_p_list.append(corrected_p)
+            r_list.append(r)
+            # print(f"    {n1}-back vs {n2}-back: U = {U:.4f}, p = {corrected_p:.4f}, rank-biserial correlation(r) = {r:.4f}")
+        # return (H, p, epsilon_squared) and (U_list, corrected_p_list, r_list)
+        return (H, p, epsilon_squared), (U_list, corrected_p_list, r_list)
+
+
+### CELL 5
+# define a function to test for each n in n_list if the d' is significantly larger than 1
+def test_dprime(raw_data,n_list):
+    stats_list = []
+    p_list = []
+    r_list = []
+    data = [np.array(raw_data[n]["d_prime"]) for n in n_list]
+    for n in range(len(n_list)):
+        # Subtract the hypothesized median (1 in this case) from the data
+        differences = data[n] - 1
+        # Wilcoxon Signed-Rank Test
+        statistic, p_value = stats.wilcoxon(differences, alternative="greater")
+        # Compute the sum of positive ranks and the sum of negative ranks
+        positive_ranks = np.sum(np.where(differences > 0, stats.rankdata(np.abs(differences)), 0))
+        negative_ranks = np.sum(np.where(differences < 0, stats.rankdata(np.abs(differences)), 0))
+        # Calculate the rank-biserial correlation
+        rank_biserial = (positive_ranks - negative_ranks) / (positive_ranks + negative_ranks)
+        stats_list.append(statistic)
+        p_list.append(p_value)
+        r_list.append(rank_biserial)
+    return (stats_list, p_list, r_list)
+
+### CELL 6
+# plot the distribution of the data
+def plot_distribution(raw_data, n_list):
+    metrics = ["d_prime"]
+
+    for metric in metrics:
+        print(f"Distribution plot for {metric}:")
+
+        # Prepare the data for distribution plot
+        data = [np.array(raw_data[n][metric]) for n in n_list]
+
+        # Perform distribution plot
+        fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+        for i, ax in enumerate(axes.flat):
+            sns.histplot(data[i], ax=ax, color="blue", bins=20, kde=True, stat="count")
+            # sns.displot(data[i], ax=ax, kde=True, color="black")
+            # sns.distplot(data[i], ax=ax, color="blue")
+            ax.set_title(f"{n_list[i]}-back", fontsize=14, fontweight='bold')
+            ax.set_xlabel(metric.replace("_", " ").capitalize())
+            ax.set_ylabel("Count")
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+            # remove the grid lines
+            ax.grid(False)
+            # set the weight  and color of axes lines
+            ax.spines['bottom'].set_linewidth(1.5)
+            ax.spines['left'].set_linewidth(1.5)
+            ax.spines['bottom'].set_color('black')
+            ax.spines['left'].set_color('black')
+            # show tick lines on the left and bottom axes
+            ax.tick_params(axis='both', which='both', bottom=True, left=True)
+            
+
+        # layout setting: adjust the space between subplots
+        plt.subplots_adjust(wspace=0.3, hspace=0.3)
+        plt.show()
+        return fig
+    return fig
+
+
+### CELL 7
+# load data (all_trials_verbal.json,all_trials_verbal_noise.json, all_trials_verbal_think_by_step.json, all_trials_verbal_feedback.json) from multiple verbal task experiments
+def load_data_from_verbal_experiments():
+    # load data from all_trials_verbal.json
+    with open(os.path.join(current_dir, "results", "all_trials_verbal.json"), "r") as f:
+        trials_verbal = json.load(f)
+
+    # load data from all_trials_verbal_noise.json
+    with open(os.path.join(current_dir, "results", "all_trials_verbal_noise.json"), "r") as f:
+        trials_verbal_noise = json.load(f)
+
+    # load data from all_trials_verbal_think_by_step.json
+    with open(os.path.join(current_dir, "results", "all_trials_verbal_think_by_step.json"), "r") as f:
+        trials_verbal_think_by_step = json.load(f)
+
+    # load data from all_trials_verbal_feedback.json
+    with open(os.path.join(current_dir, "results", "all_trials_verbal_feedback.json"), "r") as f:
+        trials_verbal_feedback = json.load(f)
+
+    return trials_verbal, trials_verbal_noise, trials_verbal_think_by_step, trials_verbal_feedback
+
+trials_verbal, trials_verbal_noise, trials_verbal_think_by_step, trials_verbal_feedback = load_data_from_verbal_experiments()
+
+# calculate the summary statistics (hit rate, false alarm rate, accuracy, d prime) for all the verbal experiments
+summary_stats_verbal, raw_data_verbal = compute_summary_stats(trials_verbal, 'verbal', n_list, blocks)
+summary_stats_verbal_noise, raw_data_verbal_noise = compute_summary_stats(trials_verbal_noise, 'verbal_noise', n_list, blocks)
+summary_stats_verbal_think_by_step, raw_data_verbal_think_by_step = compute_summary_stats(trials_verbal_think_by_step, 'verbal_think_by_step', n_list, blocks)
+summary_stats_verbal_feedback, raw_data_verbal_feedback = compute_summary_stats(trials_verbal_feedback, 'verbal_feedback', n_list, blocks)
+
+    
+
+
+### CELL 8
+def plot_performance(summary_stats_verbal, summary_stats_verbal_noise, summary_stats_verbal_think_by_step, summary_stats_verbal_feedback, n_list):
+    fig, axes = plt.subplots(1, 4, figsize=(12, 3), sharex=True)
+    axes = axes.flatten()
+    palette = sns.color_palette("Set1", 4)
+    line_styles = ['-', '-', '-', '-']
+
+    for i, (measure, ylabel) in enumerate(zip(["hit_rate", "false_alarm_rate", "accuracy", "d_prime"],
+                                              ["Hit Rate (%)", "False Alarm Rate (%)", "Accuracy (%)", "d'"])):
+        ax = axes[i]
+        for j, (summary_stats, label) in enumerate(zip([summary_stats_verbal, summary_stats_verbal_noise, summary_stats_verbal_think_by_step, summary_stats_verbal_feedback],
+                                        ["Verbal", "Verbal with Noise", "Verbal with CoT Reasoning", "Verbal with Feedback"])):
+            ax.plot(n_list, [summary_stats[n][measure]["mean"] for n in n_list], label=label,  color=palette[j], linestyle=line_styles[j], linewidth=2,marker='o', markersize=5)
+            ax.errorbar(n_list, [summary_stats[n][measure]["mean"] for n in n_list],
+                        yerr=[summary_stats[n][measure]["stderr"] for n in n_list], fmt='none',  ecolor=palette[j], alpha=1)
+
+        ax.set_ylabel(ylabel, fontsize=18)
+        ax.grid(False)
+        ax.xaxis.set_minor_locator(ticker.AutoMinorLocator())
+        ax.yaxis.set_minor_locator(ticker.AutoMinorLocator())
+        ax.tick_params(axis='both', which='both', labelsize=12)
+        ax.set_xlabel("N-back", fontsize=18)
+
+    plt.tight_layout()
+    plt.legend(loc='upper center', bbox_to_anchor=(-1.6, -0.3), fancybox=True, shadow=True, ncol=2, fontsize=18)
+    plt.show()
+    return fig
+
+fig = plot_performance(summary_stats_verbal, summary_stats_verbal_noise, summary_stats_verbal_think_by_step, summary_stats_verbal_feedback, n_list)
+
+# save figure
+# fig.savefig(os.path.join("figures", "performance_on_verbal_n_back_tasks.pdf"), format="pdf",dpi=300, bbox_inches='tight')
+
+
+### CELL 9
+# for each verbal task, perform non-parametric statistical tests (Kruskal-Wallis H test and post-hoc U test) on the d_prime scores across different N-back levels
+# and define a function to create a latex table for the H tests
+# and define a function to create a latex table for the post hoc U tests
+verbal_H, verbal_U = nonparametric_test(raw_data_verbal, n_list)
+verbal_noise_H, verbal_noise_U = nonparametric_test(raw_data_verbal_noise, n_list)
+verbal_think_by_step_H, verbal_think_by_step_U = nonparametric_test(raw_data_verbal_think_by_step, n_list)
+verbal_feedback_H, verbal_feedback_U = nonparametric_test(raw_data_verbal_feedback, n_list)
+
+task_names = ["Verbal", "Verbal with Noise", "Verbal with CoT Reasoning", "Verbal with Feedback"]
+H_results = [verbal_H, verbal_noise_H, verbal_think_by_step_H, verbal_feedback_H]
+# put the H test results of all the verbal tasks together and create a latex table
+def create_table_H(results, task_names):
+    headers = ["Task", "H", "p", "$\epsilon^2$"]
+    table = []
+    for (result, task_name) in (zip(results, task_names)):
+        row = [task_name]
+        for i,header in enumerate(headers[1:]):
+            row.append(result[i])
+        table.append(row)
+
+    print(tabulate(table, headers=headers, tablefmt="latex_raw"))
+
+create_table_H(H_results, task_names)
+
+# we need to define another column for the U test names within each task
+test_groups = ["1-back vs 2-back","1-back vs 3-back","2-back vs 3-back"]
+U_results = [verbal_U, verbal_noise_U, verbal_think_by_step_U, verbal_feedback_U]
+# each U result is a tuple of 3 lists, each list contains the U test results for one of the test groups
+# put the U test results of all the verbal tasks together and create a latex table
+# each row should be the U test results (including "U","Bonferroni-corrected p","rank-biserial correlation(r)") for one of the test groups
+def create_table_U(results, task_names,test_groups):
+    headers = ["Task", "Test","U","Bonferroni-corrected p","rank-biserial correlation(r)"]
+    table = []
+    for (result, task_name) in (zip(results, task_names)):
+        for i,test_group in enumerate(test_groups):
+            row = [task_name, test_group]
+            for j,header in enumerate(headers[2:]):
+                row.append(result[j][i])
+            table.append(row)
+
+    print(tabulate(table, headers=headers, tablefmt="latex_raw"))
+
+create_table_U(U_results, task_names,test_groups)
+    
+
+
+
+
+### CELL 10
+# create dprime Wilcoxon test table
+
+verbal_dprime = test_dprime(raw_data_verbal, n_list)
+verbal_noise_dprime = test_dprime(raw_data_verbal_noise, n_list)
+verbal_think_by_step_dprime = test_dprime(raw_data_verbal_think_by_step, n_list)
+verbal_feedback_dprime = test_dprime(raw_data_verbal_feedback, n_list)
+
+task_names = ["Verbal", "Verbal with Noise", "Verbal with CoT Reasoning", "Verbal with Feedback"]
+test_groups = ["1-back","2-back","3-back"]
+dprime_results = [verbal_dprime, verbal_noise_dprime, verbal_think_by_step_dprime, verbal_feedback_dprime]
+
+def create_table_dprime(results, task_names,test_groups):
+    headers = ["Task","n-back","T","p","r"]
+    table = []
+    for (result, task_name) in (zip(results, task_names)):
+        for i,test_group in enumerate(test_groups):
+            row = [task_name, test_group]
+            for j,header in enumerate(headers[2:]):
+                row.append(result[j][i])
+            table.append(row)
+
+    print(tabulate(table, headers=headers, tablefmt="latex_raw"))
+
+create_table_dprime(dprime_results, task_names,test_groups)
+    
+
+
+
+
+### CELL 11
+# plot the distribution of the d_prime scores for each N-back level
+fig_verbal = plot_distribution(raw_data_verbal, n_list)
+fig_verbal_noise = plot_distribution(raw_data_verbal_noise, n_list)
+fig_verbal_think_by_step = plot_distribution(raw_data_verbal_think_by_step, n_list)
+fig_verbal_feedback = plot_distribution(raw_data_verbal_feedback, n_list)
+# save figures to pdf
+fig_verbal.savefig(os.path.join("figures", "distribution_of_d_prime_scores_for_verbal_n_back_tasks.pdf"), format="pdf",dpi=300, bbox_inches='tight')
+fig_verbal_noise.savefig(os.path.join("figures", "distribution_of_d_prime_scores_for_verbal_noise_n_back_tasks.pdf"), format="pdf",dpi=300, bbox_inches='tight')
+fig_verbal_think_by_step.savefig(os.path.join("figures", "distribution_of_d_prime_scores_for_verbal_think_by_step_n_back_tasks.pdf"), format="pdf",dpi=300, bbox_inches='tight')
+fig_verbal_feedback.savefig(os.path.join("figures", "distribution_of_d_prime_scores_for_verbal_feedback_n_back_tasks.pdf"), format="pdf",dpi=300, bbox_inches='tight')
+
+
+### CELL 12
+# Prepare data
+experiments = ["Verbal", "Verbal Noise", "Verbal Think By Step", "Verbal Feedback"]
+measures = ["hit_rate", "false_alarm_rate", "accuracy", "d_prime"]
+data = []
+
+for n in n_list:
+    for exp, summary_stats in zip(experiments, [summary_stats_verbal, summary_stats_verbal_noise, summary_stats_verbal_think_by_step, summary_stats_verbal_feedback]):
+        data.append([n, exp] + [summary_stats[n][measure]["mean"] for measure in measures])
+
+df = pd.DataFrame(data, columns=["N-back", "Experiment"] + measures)
+
+# Radar Chart
+def plot_radar_chart(df, n):
+    # Number of variables
+    num_vars = len(measures)
+
+    # Compute angle for each axis
+    angles = [n / float(num_vars) * 2 * np.pi for n in range(num_vars)]
+    angles += angles[:1]
+
+    # Initialize plot
+    fig, ax = plt.subplots(figsize=(6, 6), subplot_kw={"projection": "polar"})
+
+    # Set axis labels and ticks
+    ax.set_xticks(angles[:-1])
+    ax.set_xticklabels(measures)
+    ax.set_yticklabels([])
+    
+    # Plot each experiment
+    for exp, color in zip(experiments, sns.color_palette("deep", 4)):
+        values = df.loc[(df["Experiment"] == exp) & (df["N-back"] == n), measures].values.flatten().tolist()
+        values += values[:1]
+        ax.plot(angles, values, label=exp, color=color)
+        ax.fill(angles, values, color=color, alpha=0.25)
+
+    # Add legend and title
+    ax.legend(loc='upper right', bbox_to_anchor=(1.1, 1.1))
+    plt.title(f"{n}-back Radar Chart", size=16, color="black", y=1.1)
+
+for n in n_list:
+    plot_radar_chart(df, n)
+
+# Parallel Coordinates Plot
+def plot_parallel_coordinates(df):
+    measures = ["hit_rate", "false_alarm_rate", "accuracy", "d_prime"]
+    fig, ax = plt.subplots(figsize=(10, 6))
+    pd.plotting.parallel_coordinates(df, class_column="Experiment", cols=["N-back"] + measures, ax=ax, color=sns.color_palette("deep", 4))
+    ax.legend(fontsize=12)
+    plt.xticks(range(1, 1 + len(measures)), measures, rotation=-45, ha='left', fontsize=12)
+    ax.set_ylabel("Performance Measures", fontsize=14)
+    ax.set_xlabel("Measures", fontsize=14)
+    ax.set_title("Parallel Coordinates Plot", fontsize=16)
+    plt.grid(False)
+    plt.show()
+
+plot_parallel_coordinates(df)
+
+def plot_heatmap(df, measure):
+    # Pivot the DataFrame to create a matrix format with experiments as columns and n-back levels as rows
+    heatmap_data = df.pivot_table(index="N-back", columns="Experiment", values=measure)
+
+    # Create a heatmap using seaborn
+    fig, ax = plt.subplots(figsize=(10, 6))
+    sns.heatmap(heatmap_data, annot=True, fmt=".2f", cmap="coolwarm", cbar_kws={'label': measure}, ax=ax)
+
+    # Customize the appearance of the heatmap
+    ax.set_title(f"Heatmap for {measure}", fontsize=16)
+    plt.xticks(fontsize=12)
+    plt.yticks(fontsize=12)
+    ax.set_xlabel("Experiment", fontsize=14)
+    ax.set_ylabel("N-back", fontsize=14)
+    plt.show()
+
+# Create a heatmap for each performance measure
+for measure in ["hit_rate", "false_alarm_rate", "accuracy", "d_prime"]:
+    plot_heatmap(df, measure)
+
+### CELL 13
+
+# load data from multiple experiments
+def load_data_from_experiments(exps):
+    # load data from every element in exps
+    all_exps = {}
+    for exp in exps:
+        file_path = os.path.join(current_dir, "results", exp)
+        with open(file_path, "r") as f:
+            print("loading data from "+exp)
+            # path relative to the 'results' folder in the current directory + exp
+            all_exps[exp] = json.load(f)
+    return all_exps
+
+
+### CELL 14
+exps = ['all_trials_spatial_3*3.json', 'all_trials_spatial_with_noise.json', 'all_trials_spatial_think_by_step.json', 'all_trials_spatial_feedback.json']
+spatial_exps = load_data_from_experiments(exps)
+
+# compute summary statistics for the spatial task experiments
+summary_stats_spatial_exps = {}
+raw_data_spatial_exps = {}
+for exp_name in exps:
+    summary_stats_spatial_exps[exp_name],raw_data_spatial_exps[exp_name] = compute_summary_stats(spatial_exps[exp_name], exp_name, n_list, blocks)
+
+# plot performance for the spatial task experiments
+def plot_performance_spatial(summary_stats_spatial_exps):
+    fig, axes = plt.subplots(1, 4, figsize=(12, 3), sharex=True)
+    axes = axes.flatten()
+    palette = sns.color_palette("Set1", 4)
+    line_styles = ['-', '-', '-', '-']
+
+    for i, (measure, ylabel) in enumerate(zip(["hit_rate", "false_alarm_rate", "accuracy", "d_prime"],
+                                              ["Hit Rate (%)", "False Alarm Rate (%)", "Accuracy (%)", "d'"])):
+        ax = axes[i]
+        for j, (summary_stats, label) in enumerate(zip([summary_stats_spatial_exps[exp] for exp in exps],
+                                        ["Spatial", "Spatial with Noise", "Spatial with CoT Reasoning", "Spatial with Feedback"])):
+            ax.plot(n_list, [summary_stats[n][measure]["mean"] for n in n_list], label=label,  color=palette[j], linestyle=line_styles[j], linewidth=2,marker='o', markersize=5)
+            ax.errorbar(n_list, [summary_stats[n][measure]["mean"] for n in n_list],
+                        yerr=[summary_stats[n][measure]["stderr"] for n in n_list], fmt='none',  ecolor=palette[j], alpha=1)
+
+        ax.set_ylabel(ylabel, fontsize=18)
+        ax.grid(False)
+        ax.xaxis.set_minor_locator(ticker.AutoMinorLocator())
+        ax.yaxis.set_minor_locator(ticker.AutoMinorLocator())
+        ax.tick_params(axis='both', which='both', labelsize=12)
+        ax.set_xlabel("N-back", fontsize=18)
+
+    plt.tight_layout()
+    plt.legend(loc='upper center', bbox_to_anchor=(-1.6, -0.3), fancybox=True, shadow=True, ncol=2, fontsize=18)
+    # add a title above the figure
+    # fig.suptitle("Performance on Spatial N-back Tasks", fontsize=16, y=1.05)
+    plt.show()
+    return fig
+
+fig = plot_performance_spatial(summary_stats_spatial_exps)
+
+# save figure
+fig.savefig(os.path.join("figures", "performance_on_spatial_n_back_tasks_1.pdf"), format="pdf", dpi=300, bbox_inches='tight')
+    
+
+### CELL 15
+# for each of the spatial task above, perform non-parametric statistical tests (Kruskal-Wallis H test and post-hoc U test) on the d_prime scores across different N-back levels
+# and define a function to create a latex table for the H tests
+# and define a function to create a latex table for the post hoc U tests
+
+H_results = []
+U_results = []
+
+for i,exp_name in enumerate(exps):
+    H_result, U_result = nonparametric_test(raw_data_spatial_exps[exp_name], n_list)
+    U_results.append(U_result)
+    H_results.append(H_result)
+
+task_names = ["Spatial", "Spatial with Noise", "Spatial with CoT Reasoning", "Spatial with Feedback"]
+
+# put the H test results of all the verbal tasks together and create a latex table
+def create_table_H(results, task_names):
+    headers = ["Task", "H", "p", "$\epsilon^2$"]
+    table = []
+    for (result, task_name) in (zip(results, task_names)):
+        row = [task_name]
+        for i,header in enumerate(headers[1:]):
+            row.append(result[i])
+        table.append(row)
+
+    print(tabulate(table, headers=headers, tablefmt="latex_raw"))
+
+create_table_H(H_results, task_names)
+
+# we need to define another column for the U test names within each task
+test_groups = ["1-back vs 2-back","1-back vs 3-back","2-back vs 3-back"]
+# each U result is a tuple of 3 lists, each list contains the U test results for one of the test groups
+# put the U test results of all the verbal tasks together and create a latex table
+# each row should be the U test results (including "U","Bonferroni-corrected p","rank-biserial correlation(r)") for one of the test groups
+def create_table_U(results, task_names,test_groups):
+    headers = ["Task", "Test","U","Bonferroni-corrected p","rank-biserial correlation(r)"]
+    table = []
+    for (result, task_name) in (zip(results, task_names)):
+        for i,test_group in enumerate(test_groups):
+            row = [task_name, test_group]
+            for j,header in enumerate(headers[2:]):
+                row.append(result[j][i])
+            table.append(row)
+
+    print(tabulate(table, headers=headers, tablefmt="latex_raw"))
+
+create_table_U(U_results, task_names,test_groups)
+
+
+
+### CELL 16
+# create dprime Wilcoxon test table
+
+dprime_results = []
+
+for i,exp_name in enumerate(exps):
+    result = test_dprime(raw_data_spatial_exps[exp_name], n_list)
+    dprime_results.append(result)
+
+task_names = ["Spatial", "Spatial with Noise", "Spatial with CoT Reasoning", "Spatial with Feedback"]
+test_groups = ["1-back","2-back","3-back"]
+
+def create_table_dprime(results, task_names,test_groups):
+    headers = ["Task","n-back","T","p","r"]
+    table = []
+    for (result, task_name) in (zip(results, task_names)):
+        for i,test_group in enumerate(test_groups):
+            row = [task_name, test_group]
+            for j,header in enumerate(headers[2:]):
+                row.append(result[j][i])
+            table.append(row)
+
+    print(tabulate(table, headers=headers, tablefmt="latex_raw"))
+
+create_table_dprime(dprime_results, task_names,test_groups)
+    
+
+
+
+
+### CELL 17
+# plot the distribution of the d_prime scores for each N-back level for the spatial task experiments
+task_names = ["Spatial", "Spatial with Noise", "Spatial with CoT Reasoning", "Spatial with Feedback"]
+for i,exp_name in enumerate(exps):
+    fig = plot_distribution(raw_data_spatial_exps[exp_name], n_list)
+    fig.savefig(os.path.join("figures", "distribution{}.pdf".format(task_names[i])), format="pdf", dpi=300, bbox_inches='tight')
+
+### CELL 18
+exps = ['all_trials_spatial_3*3.json', 'all_trials_spatial_4*4.json', 'all_trials_spatial_5*5.json', 'all_trials_spatial_7*7.json']
+spatial_exps_grid = load_data_from_experiments(exps)
+
+# compute summary statistics for the spatial task experiments
+summary_stats_spatial_exps_grid = {}
+raw_data_spatial_exps_grid = {}
+for exp_name in exps:
+    summary_stats_spatial_exps_grid[exp_name],raw_data_spatial_exps_grid[exp_name] = compute_summary_stats(spatial_exps_grid[exp_name], exp_name, n_list, blocks)
+
+# plot performance for the spatial task experiments
+
+fig, axes = plt.subplots(1, 4, figsize=(12, 3), sharex=True)
+axes = axes.flatten()
+palette = sns.color_palette("mako_r", 4)
+line_styles = ['-', '-', '-', '-']
+
+for i, (measure, ylabel) in enumerate(zip(["hit_rate", "false_alarm_rate", "accuracy", "d_prime"],
+                                            ["Hit Rate (%)", "False Alarm Rate (%)", "Accuracy (%)", "d'"])):
+    ax = axes[i]
+    for j, (summary_stats, label) in enumerate(zip([summary_stats_spatial_exps_grid[exp] for exp in exps],
+                                    ["Spatial 3*3", "Spatial 4*4", "Saptial 5*5", "Spatial 7*7"])):
+        ax.plot(n_list, [summary_stats[n][measure]["mean"] for n in n_list], label=label,  color=palette[j], linestyle=line_styles[j], linewidth=2,marker='o', markersize=5)
+        ax.errorbar(n_list, [summary_stats[n][measure]["mean"] for n in n_list],
+                    yerr=[summary_stats[n][measure]["stderr"] for n in n_list], fmt='none',  ecolor=palette[j], alpha=1)
+
+    ax.set_ylabel(ylabel, fontsize=18)
+    ax.grid(False)
+    ax.xaxis.set_minor_locator(ticker.AutoMinorLocator())
+    ax.yaxis.set_minor_locator(ticker.AutoMinorLocator())
+    ax.tick_params(axis='both', which='both', labelsize=12)
+    ax.set_xlabel("N-back", fontsize=18)
+
+plt.tight_layout()
+plt.legend(loc='upper center', bbox_to_anchor=(-1.6, -0.3), fancybox=True, shadow=True, ncol=4, fontsize=18)
+plt.show()
+
+# save figure
+fig.savefig(os.path.join("figures", "performance_on_spatial_n_back_tasks_2.pdf"), format="pdf", dpi=300, bbox_inches='tight')
+
+### CELL 19
+# for each of the spatial task above, perform non-parametric statistical tests (Kruskal-Wallis H test and post-hoc U test) on the d_prime scores across different N-back levels
+# and define a function to create a latex table for the H tests
+# and define a function to create a latex table for the post hoc U tests
+
+H_results = []
+U_results = []
+
+for i,exp_name in enumerate(exps):
+    H_result, U_result = nonparametric_test(raw_data_spatial_exps_grid[exp_name], n_list)
+    U_results.append(U_result)
+    H_results.append(H_result)
+
+task_names = ["Spatial 3*3", "Spatial 4*4", "Saptial 5*5", "Spatial 7*7"]
+
+# put the H test results of all the verbal tasks together and create a latex table
+def create_table_H(results, task_names):
+    headers = ["Task", "H", "p", "$\epsilon^2$"]
+    table = []
+    for (result, task_name) in (zip(results, task_names)):
+        row = [task_name]
+        for i,header in enumerate(headers[1:]):
+            row.append(result[i])
+        table.append(row)
+
+    print(tabulate(table, headers=headers, tablefmt="latex_raw"))
+
+create_table_H(H_results, task_names)
+
+# we need to define another column for the U test names within each task
+test_groups = ["1-back vs 2-back","1-back vs 3-back","2-back vs 3-back"]
+# each U result is a tuple of 3 lists, each list contains the U test results for one of the test groups
+# put the U test results of all the verbal tasks together and create a latex table
+# each row should be the U test results (including "U","Bonferroni-corrected p","rank-biserial correlation(r)") for one of the test groups
+def create_table_U(results, task_names,test_groups):
+    headers = ["Task", "Test","U","Bonferroni-corrected p","rank-biserial correlation(r)"]
+    table = []
+    for (result, task_name) in (zip(results, task_names)):
+        for i,test_group in enumerate(test_groups):
+            row = [task_name, test_group]
+            for j,header in enumerate(headers[2:]):
+                row.append(result[j][i])
+            table.append(row)
+
+    print(tabulate(table, headers=headers, tablefmt="latex_raw"))
+
+create_table_U(U_results, task_names,test_groups)
+
+
+
+### CELL 20
+# create dprime Wilcoxon test table
+
+dprime_results = []
+
+for i,exp_name in enumerate(exps):
+    result = test_dprime(raw_data_spatial_exps_grid[exp_name], n_list)
+    dprime_results.append(result)
+
+task_names = ["Spatial 3*3", "Spatial 4*4", "Saptial 5*5", "Spatial 7*7"]
+test_groups = ["1-back","2-back","3-back"]
+
+def create_table_dprime(results, task_names,test_groups):
+    headers = ["Task","n-back","T","p","r"]
+    table = []
+    for (result, task_name) in (zip(results, task_names)):
+        for i,test_group in enumerate(test_groups):
+            row = [task_name, test_group]
+            for j,header in enumerate(headers[2:]):
+                row.append(result[j][i])
+            table.append(row)
+
+    print(tabulate(table, headers=headers, tablefmt="latex_raw"))
+
+create_table_dprime(dprime_results, task_names,test_groups)
+    
+
+
+
+
+### CELL 21
+# plot the distribution of the d_prime scores for each N-back level for the spatial task experiments
+task_names = ["Spatial 3*3", "Spatial 4*4", "Saptial 5*5", "Spatial 7*7"]
+for i,exp_name in enumerate(exps):
+    fig = plot_distribution(raw_data_spatial_exps_grid[exp_name], n_list)
+    fig.savefig(os.path.join("figures", "distribution{}.pdf".format(task_names[i])), format="pdf", dpi=300, bbox_inches='tight')
+
+### CELL 22
+exps = ['all_trials_spatial_3*3.json', 'all_trials_spatial_abstraction.json', 'all_trials_spatial_abstraction_2.json']
+spatial_exps_abstraction = load_data_from_experiments(exps)
+
+# compute summary statistics for the spatial task experiments
+summary_stats_spatial_exps_abstraction = {}
+raw_data_spatial_exps_abstraction = {}
+for exp_name in exps:
+    summary_stats_spatial_exps_abstraction[exp_name],raw_data_spatial_exps_abstraction[exp_name] = compute_summary_stats(spatial_exps_abstraction[exp_name], exp_name, n_list, blocks)
+
+# plot performance for the spatial task experiments
+fig, axes = plt.subplots(1, 4, figsize=(12, 3), sharex=True)
+axes = axes.flatten()
+palette = sns.color_palette("Set1", 3)
+line_styles = ['-', '-', '-', '-']
+
+for i, (measure, ylabel) in enumerate(zip(["hit_rate", "false_alarm_rate", "accuracy", "d_prime"],
+                                            ["Hit Rate (%)", "False Alarm Rate (%)", "Accuracy (%)", "d'"])):
+    ax = axes[i]
+    for j, (summary_stats, label) in enumerate(zip([summary_stats_spatial_exps_abstraction[exp] for exp in exps],
+                                    ["Spatial", "Spatial with Abstract Reasoning (incl. identical)", "Spatial with Abstract Reasoning (excl. identical)"])):
+        
+        ax.plot(n_list, [summary_stats[n][measure]["mean"] for n in n_list], label=label,  color=palette[j], linestyle=line_styles[j], linewidth=2,marker='o', markersize=5)
+        ax.errorbar(n_list, [summary_stats[n][measure]["mean"] for n in n_list],
+                    yerr=[summary_stats[n][measure]["stderr"] for n in n_list], fmt='none',  ecolor=palette[j], alpha=1)
+
+    ax.set_ylabel(ylabel, fontsize=18)
+    ax.grid(False)
+    ax.xaxis.set_minor_locator(ticker.AutoMinorLocator())
+    ax.yaxis.set_minor_locator(ticker.AutoMinorLocator())
+    ax.tick_params(axis='both', which='both', labelsize=12)
+    ax.set_xlabel("N-back", fontsize=18)
+
+plt.tight_layout()
+plt.legend(loc='upper center', bbox_to_anchor=(-1.6, -0.3), fancybox=True, shadow=True, ncol=1, fontsize=18)
+plt.show()
+
+# save figure
+fig.savefig(os.path.join("figures", "performance_on_spatial_n_back_tasks_3.pdf"), format="pdf", dpi=300, bbox_inches='tight')
+
+### CELL 23
+# for each of the spatial task above, perform non-parametric statistical tests (Kruskal-Wallis H test and post-hoc U test) on the d_prime scores across different N-back levels
+# and define a function to create a latex table for the H tests
+# and define a function to create a latex table for the post hoc U tests
+
+H_results = []
+U_results = []
+
+for i,exp_name in enumerate(exps):
+    H_result, U_result = nonparametric_test(raw_data_spatial_exps_abstraction[exp_name], n_list)
+    U_results.append(U_result)
+    H_results.append(H_result)
+
+task_names = ["Spatial", "Spatial with Abstract Reasoning (incl. identical)", "Spatial with Abstract Reasoning (excl. identical)"]
+
+# put the H test results of all the verbal tasks together and create a latex table
+def create_table_H(results, task_names):
+    headers = ["Task", "H", "p", "$\epsilon^2$"]
+    table = []
+    for (result, task_name) in (zip(results, task_names)):
+        row = [task_name]
+        for i,header in enumerate(headers[1:]):
+            row.append(result[i])
+        table.append(row)
+
+    print(tabulate(table, headers=headers, tablefmt="latex_raw"))
+
+create_table_H(H_results, task_names)
+
+# we need to define another column for the U test names within each task
+test_groups = ["1-back vs 2-back","1-back vs 3-back","2-back vs 3-back"]
+# each U result is a tuple of 3 lists, each list contains the U test results for one of the test groups
+# put the U test results of all the verbal tasks together and create a latex table
+# each row should be the U test results (including "U","Bonferroni-corrected p","rank-biserial correlation(r)") for one of the test groups
+def create_table_U(results, task_names,test_groups):
+    headers = ["Task", "Test","U","Bonferroni-corrected p","rank-biserial correlation(r)"]
+    table = []
+    for (result, task_name) in (zip(results, task_names)):
+        for i,test_group in enumerate(test_groups):
+            row = [task_name, test_group]
+            for j,header in enumerate(headers[2:]):
+                row.append(result[j][i])
+            table.append(row)
+
+    print(tabulate(table, headers=headers, tablefmt="latex_raw"))
+
+create_table_U(U_results, task_names,test_groups)
+
+
+
+### CELL 24
+# create dprime Wilcoxon test table
+
+dprime_results = []
+
+for i,exp_name in enumerate(exps):
+    result = test_dprime(raw_data_spatial_exps_abstraction[exp_name], n_list)
+    dprime_results.append(result)
+
+task_names = ["Spatial", "Spatial with Abstract Reasoning (incl. identical)", "Spatial with Abstract Reasoning (excl. identical)"]
+test_groups = ["1-back","2-back","3-back"]
+
+def create_table_dprime(results, task_names,test_groups):
+    headers = ["Task","n-back","T","p","r"]
+    table = []
+    for (result, task_name) in (zip(results, task_names)):
+        for i,test_group in enumerate(test_groups):
+            row = [task_name, test_group]
+            for j,header in enumerate(headers[2:]):
+                row.append(result[j][i])
+            table.append(row)
+
+    print(tabulate(table, headers=headers, tablefmt="latex_raw"))
+
+create_table_dprime(dprime_results, task_names,test_groups)
+    
+
+
+
+
+### CELL 25
+# plot the distribution of the d_prime scores for each N-back level for the spatial task experiments
+task_names = ["Spatial", "Spatial with Abstract Reasoning (including identical locations)", "Spatial with Abstract Reasoning (excluding identical locations)"]
+for i,exp_name in enumerate(exps):
+    fig = plot_distribution(raw_data_spatial_exps_abstraction[exp_name], n_list)
+    fig.savefig(os.path.join("figures", "distribution{}.pdf".format(task_names[i])), format="pdf", dpi=300, bbox_inches='tight')
+
+### CELL 26
+exps = ['all_trials_verbal_bloomz-7b.json','all_trials_verbal_bloomz-7b1-mt.json','all_trials_verbal_chatglm-6b_v1.0.json','all_trials_verbal_chatglm-6b_v1.1.json','all_trials_verbal.json','all_trials_verbal_gpt-4.json','all_trials_verbal_Vicuna-7B.json','all_trials_verbal_Vicuna-13B.json']
+blocks = 30 # changed to 30 to shorten the time
+verbal_exps = load_data_from_experiments(exps)
+
+# compute summary statistics for the experiments
+summary_stats_exps = {}
+raw_data_exps = {}
+for exp_name in exps:
+    summary_stats_exps[exp_name],raw_data_exps[exp_name] = compute_summary_stats(verbal_exps[exp_name], exp_name, n_list, blocks)
+
+# plot performance for the experiments
+fig, axes = plt.subplots(1, 4, figsize=(12, 3), sharex=True)
+axes = axes.flatten()
+palette = sns.color_palette()
+line_styles = ['-', '-', '-', '-', '-', '-', '-', '-']
+
+for i, (measure, ylabel) in enumerate(zip(["hit_rate", "false_alarm_rate", "accuracy", "d_prime"],
+                                            ["Hit Rate (%)", "False Alarm Rate (%)", "Accuracy (%)", "d'"])):
+    ax = axes[i]
+    for j, (summary_stats, label) in enumerate(zip([summary_stats_exps[exp] for exp in exps],
+                                    ["Bloomz-7B", "Bloomz-7B1-mt", "ChatGLM-6B_v1.0", "ChatGLM-6B_v1.1", "GPT-3.5", "GPT-4", "Vicuna-7B", "Vicuna-13B"])):
+        
+        ax.plot(n_list, [summary_stats[n][measure]["mean"] for n in n_list], label=label,  color=palette[j], linestyle=line_styles[j], linewidth=2,marker='o', markersize=5)
+        ax.errorbar(n_list, [summary_stats[n][measure]["mean"] for n in n_list],
+                    yerr=[summary_stats[n][measure]["stderr"] for n in n_list], fmt='none',  ecolor=palette[j], alpha=1)
+
+    ax.set_ylabel(ylabel, fontsize=18)
+    ax.grid(False)
+    ax.xaxis.set_minor_locator(ticker.AutoMinorLocator())
+    ax.yaxis.set_minor_locator(ticker.AutoMinorLocator())
+    ax.tick_params(axis='both', which='both', labelsize=12)
+    ax.set_xlabel("N-back", fontsize=18)
+
+plt.tight_layout()
+plt.legend(loc='upper center', bbox_to_anchor=(-1.6, -0.3), fancybox=True, shadow=True, ncol=4, fontsize=18)
+plt.show()
+
+# save figure
+fig.savefig(os.path.join("figures", "performance_on_verbal_all_models.pdf"), format="pdf", dpi=300, bbox_inches='tight')
+
+### CELL 27
+# for each of the spatial task above (["Spatial", "Spatial with Noise", "Spatial with CoT Reasoning", "Spatial with Feedback"]), perform non-parametric statistical tests (Kruskal-Wallis H test and post-hoc U test) on the d_prime scores across different N-back levels
+# and define a function to create a latex table for the H tests
+# and define a function to create a latex table for the post hoc U tests
+
+H_results = []
+U_results = []
+
+for i,exp_name in enumerate(exps):
+    H_result, U_result = nonparametric_test(raw_data_exps[exp_name], n_list)
+    U_results.append(U_result)
+    H_results.append(H_result)
+
+task_names = ["Bloomz-7B", "Bloomz-7B1-mt", "ChatGLM-6B_v1.0", "ChatGLM-6B_v1.1", "GPT-3.5", "GPT-4", "Vicuna-7B", "Vicuna-13B"]
+
+# put the H test results of all the verbal tasks together and create a latex table
+def create_table_H(results, task_names):
+    headers = ["Model", "H", "p", "$\epsilon^2$"]
+    table = []
+    for (result, task_name) in (zip(results, task_names)):
+        row = [task_name]
+        for i,header in enumerate(headers[1:]):
+            row.append(result[i])
+        table.append(row)
+
+    print(tabulate(table, headers=headers, tablefmt="latex_raw"))
+
+create_table_H(H_results, task_names)
+
+# we need to define another column for the U test names within each task
+test_groups = ["1-back vs 2-back","1-back vs 3-back","2-back vs 3-back"]
+# each U result is a tuple of 3 lists, each list contains the U test results for one of the test groups
+# put the U test results of all the verbal tasks together and create a latex table
+# each row should be the U test results (including "U","Bonferroni-corrected p","rank-biserial correlation(r)") for one of the test groups
+def create_table_U(results, task_names,test_groups):
+    headers = ["Model", "Test","U","Bonferroni-corrected p","rank-biserial correlation(r)"]
+    table = []
+    for (result, task_name) in (zip(results, task_names)):
+        for i,test_group in enumerate(test_groups):
+            row = [task_name, test_group]
+            for j,header in enumerate(headers[2:]):
+                row.append(result[j][i])
+            table.append(row)
+
+    print(tabulate(table, headers=headers, tablefmt="latex_raw"))
+
+create_table_U(U_results, task_names,test_groups)
+
+
+
+### CELL 28
+# create dprime Wilcoxon test table
+
+dprime_results = []
+
+for i,exp_name in enumerate(exps):
+    result = test_dprime(raw_data_exps[exp_name], n_list)
+    dprime_results.append(result)
+
+task_names = ["Bloomz-7B", "Bloomz-7B1-mt", "ChatGLM-6B_v1.0", "ChatGLM-6B_v1.1", "GPT-3.5", "GPT-4", "Vicuna-7B", "Vicuna-13B"]
+test_groups = ["1-back","2-back","3-back"]
+
+def create_table_dprime(results, task_names,test_groups):
+    headers = ["Model","n-back","T","p","r"]
+    table = []
+    for (result, task_name) in (zip(results, task_names)):
+        for i,test_group in enumerate(test_groups):
+            row = [task_name, test_group]
+            for j,header in enumerate(headers[2:]):
+                row.append(result[j][i])
+            table.append(row)
+
+    print(tabulate(table, headers=headers, tablefmt="latex_raw"))
+
+create_table_dprime(dprime_results, task_names,test_groups)
+    
+
+
+
+
+### CELL 29
+# plot the distribution of the d_prime scores for each N-back level for the spatial task experiments
+task_names = ["Bloomz-7B", "Bloomz-7B1-mt", "ChatGLM-6B_v1.0", "ChatGLM-6B_v1.1", "GPT-3.5", "GPT-4", "Vicuna-7B", "Vicuna-13B"]
+for i,exp_name in enumerate(exps):
+    print(exp_name)
+    fig = plot_distribution(raw_data_exps[exp_name], n_list)
+    fig.savefig(os.path.join("figures", "distribution_{}.pdf".format(task_names[i])), format="pdf", dpi=300, bbox_inches='tight')

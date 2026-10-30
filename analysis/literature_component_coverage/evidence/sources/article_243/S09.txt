@@ -1,0 +1,553 @@
+CELL 1 (markdown)
+### Hemonc
+
+CELL 2 (code)
+import os
+import time
+import numpy as np
+import pandas as pd
+from tqdm import tqdm
+from Bio import Entrez
+from urllib.error import HTTPError
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+CELL 3 (code)
+columns_ref = ['study', 'condition', 'pmid', 'pub.date']
+columns_result = ['study', 'condition', 'regimen', 'comparator', 'efficacy']
+columns_indication = ['study', 'condition', 'stage_or_status']
+
+preprocess = lambda df, col: df[col].dropna().drop_duplicates().sort_values(col).reset_index(drop=True)
+ref = preprocess(pd.read_csv("Data/Raw/Hemonc/ref.table.csv"), columns_ref)
+result = preprocess(pd.read_csv("Data/Raw/Hemonc/study_results.csv"), columns_result)
+indication = preprocess(pd.read_csv("Data/Raw/Hemonc/indications.csv"), columns_indication)
+
+efficacy = pd.read_excel("Data/Raw/Hemonc/efficacy.xlsx")
+efficacy2label = dict(zip(efficacy['efficacy_raw'], efficacy['efficacy_std']))
+efficacy2label = {k:v if 'Might Be ' not in v else v[len('Might Be '):] for k,v in efficacy2label.items()}
+stage = pd.read_excel("Data/Raw/Hemonc/stage.xlsx")
+stage2label = dict(zip(stage['stage_raw'], stage['stage_std']))
+
+CELL 4 (code)
+study2pmids = defaultdict(set)
+for _, row in ref.iterrows():
+    study2pmids[(row['study'], row['condition'])].add(row['pmid'])
+    
+study2result = defaultdict(set)
+for _, row in result.iterrows():
+    if (row['study'], row['condition']) not in study2pmids or efficacy2label[row['efficacy']] == 'Other' or row['regimen'] == row['comparator']: continue
+    label = efficacy2label[row['efficacy']]
+    switched = label.replace('Inferior', 'Superior') if 'Inferior' in label else label.replace('Superior', 'Inferior')
+    study2result[(row['study'], row['condition'])].add((row['regimen'], row['comparator'], label))
+    study2result[(row['study'], row['condition'])].add((row['comparator'], row['regimen'], switched))
+    
+for study in set(study2pmids.keys()) - set(study2result.keys()):
+    del study2pmids[study]
+    
+study2stage = defaultdict(set)
+for _, row in indication.iterrows():
+    if (row['study'], row['condition']) not in study2result: continue
+    study2stage[(row['study'], row['condition'])].add(stage2label[row['stage_or_status']])
+
+CELL 5 (code)
+Entrez.email = "" # your email address
+def get_text(pmid, retries=50):
+    for i in range(retries):
+        try:
+            handle = Entrez.efetch(db="pubmed", id=pmid, rettype="xml", retmode="text")
+            record = Entrez.read(handle)
+            article = record['PubmedArticle'][0]['MedlineCitation']['Article']
+            doc = article['ArticleTitle']
+            if 'Abstract' in article: doc = ' '.join([doc] + article['Abstract']['AbstractText'])
+            return pmid, doc
+        except HTTPError as e:
+            if e.code == 429: time.sleep(i)
+            else: raise Exception(f"Failed to fetch data for PMID {pmid} after {retries} retries.")
+
+pmid2doc = {}
+path_doc = "Data/Raw/Hemonc/docs.csv"
+if os.path.exists(path_doc):
+    pmid2doc = pd.read_csv(path_doc)
+    pmid2doc = dict(zip(pmid2doc['pmid'], pmid2doc['doc']))
+
+pmids_missing = set([pmid for study, pmids in study2pmids.items() for pmid in pmids]) - set(pmid2doc.keys())
+pmids_missing |= set([pmid for pmid, doc in pmid2doc.items() if not isinstance(doc, str) and np.isnan(doc)])
+if len(pmids_missing):
+    pmid2doc_missing = {}
+    with ThreadPoolExecutor(max_workers=10) as exe:
+        futures = [exe.submit(get_text, pmid) for pmid in pmids_missing]
+        for future in tqdm(as_completed(futures), total=len(futures)):
+            try:
+                pmid, doc = future.result()
+                pmid2doc_missing[pmid] = doc
+            except Exception as e:
+                print(f"Error: {e}")
+    for pmid in pmid2doc_missing:
+        if not isinstance(pmid2doc_missing[pmid], str) and np.isnan(pmid2doc_missing[pmid]):
+            pmid2doc_missing[pmid] = get_text(pmid)[1]
+    pmid2doc |= pmid2doc_missing
+    pmid2doc_df = pd.DataFrame(list(pmid2doc.items()), columns=['pmid', 'doc'])
+    pmid2doc_df.to_csv(path_doc, index=False)
+
+CELL 6 (code)
+openai_client = openai.OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+openai_model = "gpt-4o"
+
+def call_gpt(message_user, retries=50):
+    messages = [{"role": "system", "content": 'You are a helpful assistant.'}, 
+                {"role": "user", "content": message_user}]
+    for i in range(retries):
+        try:
+            response = openai_client.chat.completions.create(
+                model = openai_model, messages = messages, max_tokens = 4096 # 512
+            )
+            return response.choices[0].message.content
+        except openai.RateLimitError as e:
+            time.sleep(i)
+        except Exception as e:
+            print(f"An error occurred: {e}")
+            raise
+    raise Exception(f"Failed to call GPT-4 after {retries} retries.")
+
+CELL 7 (code)
+templates_qn = [
+    'Choose an option that best describes the efficacy of {REGIMEN} compared to {COMPARATOR} when used to treat {CONDITION}.',
+    'Select the option that most accurately reflects the effectiveness of {REGIMEN} versus {COMPARATOR} in treating {CONDITION}.',
+    'Which option best summarizes the comparative efficacy of {REGIMEN} and {COMPARATOR} for managing {CONDITION}?',
+    'Identify the option that best summarizes the effectiveness of {REGIMEN} versus {COMPARATOR} in treating {CONDITION}.',
+    'Which option most effectively illustrates the efficacy of {REGIMEN} when compared with {COMPARATOR} for {CONDITION}?'
+]
+rephrase = \
+f'''
+### Instruction
+Do not respond to the question. 
+Instead, rephrase the given question template into 20 other versions that are semantically equivalent.
+
+## Version 0: {templates_qn[0]}
+## Version 1: {templates_qn[1]}
+## Version 2: {templates_qn[2]}
+## Version 3: {templates_qn[3]}
+## Version 4: {templates_qn[4]}
+'''
+response = call_gpt(rephrase)
+matches = [re.search(fr"## Version {i}: (.*)", response) for i in range(5, 20)]           
+templates_qn += [each.group(1) for each in matches if each is not None and len(each.group(1))]
+
+CELL 8 (code)
+option2idx = {'superior':1, 'inferior':2, 'no difference':3}
+dataset = []
+for key, values in study2result.items():
+    evidence = '\n\n'.join([pmid2doc[pmid] for pmid in study2pmids[key]])
+    stage = '' if key not in study2stage else ' ({})'.format(', '.join(sorted(study2stage[key])))
+    conditon = key[1] + stage
+    for regimen, comparator, efficacy in values:
+        if regimen == comparator: continue
+        questions = [each.format(**{'REGIMEN':regimen, 'COMPARATOR':comparator, 'CONDITION':conditon}) for each in templates_qn]
+        answer = option2idx[efficacy.lower()]
+        dataset.append((evidence, *questions, answer))
+        
+columns = ['evidence'] + [f'question {i}' for i in range(1, len(templates_qn)+1)] + ['answer']
+dataset = pd.DataFrame(dataset, columns=columns)
+dataset = dataset.dropna().drop_duplicates(subset=columns[:-1], keep=False).reset_index(drop=True)
+for option, idx in option2idx.items():
+    dataset[f'option {idx}'] = option
+dataset.to_csv('Data/Input/Hemonc.csv', index=False)
+
+CELL 9 (code)
+dataset
+
+CELL 10 (markdown)
+### PubMedQA
+
+CELL 11 (code)
+import re
+import json
+import time
+import openai
+import random
+import pandas as pd
+from tqdm import tqdm
+from datasets import load_dataset
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+CELL 12 (code)
+raw = load_dataset("qiaojin/PubMedQA", data_dir="pqa_labeled", split="train")
+raw.to_json('Data/Raw/PubMedQA/PubMedQA.jsonl')
+
+CELL 13 (code)
+openai_client = openai.OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+openai_model = "gpt-4o"
+
+def call_gpt(message_user, retries=50):
+    messages = [{"role": "system", "content": 'You are a helpful assistant.'}, 
+                {"role": "user", "content": message_user}]
+    for i in range(retries):
+        try:
+            response = openai_client.chat.completions.create(
+                model = openai_model, messages = messages, max_tokens = 4096 # 512
+            )
+            return response.choices[0].message.content
+        except openai.RateLimitError as e:
+            time.sleep(i)
+        except Exception as e:
+            print(f"An error occurred: {e}")
+            raise
+    raise Exception(f"Failed to call GPT-4 after {retries} retries.")
+
+CELL 14 (code)
+template_rephrase = \
+'''
+### Instruction
+Do not respond to the question. 
+Instead, follow the provided examples and rephrase the given question into 20 other versions that are semantically equivalent.
+
+### Example
+## Question: Which option best summarizes the comparative efficacy of regimen and comparator for managing condition?
+## Version 1: Choose an option that best describes the efficacy of regimen compared to comparator when used to treat condition.
+## Version 2: Select the option that most accurately reflects the effectiveness of regimen versus comparator in treating condition.
+## Version 3: Identify the option that best summarizes the effectiveness of regimen versus comparator in treating condition.
+## Version 4: Which option most effectively illustrates the efficacy of regimen when compared with comparator for condition?
+
+### Your Task
+## Question: {QUESTION}
+'''
+
+def rephrase_qn(question, retries=50):
+    query = template_rephrase.format(**{'QUESTION':question})
+    for _ in range(retries):
+        response = call_gpt(query)
+        matches = [re.search(fr"## Version {i}: (.*)", response) for i in range(1, 20)]
+        if all([each is not None and len(each.group(1)) for each in matches]):            
+            questions = [question] + [each.group(1) for each in matches]
+            if len(set(questions)) == 20: return questions
+    return [question] + [None]*19
+
+CELL 15 (code)
+def prepare_row(idx, row):
+    evidence = '\n\n'.join(row['context']['contexts'])
+    questions = rephrase_qn(row['question'])
+    row = (evidence, *questions, option2idx[row['final_decision']])
+    return idx, row
+
+raw = [json.loads(line) for line in open('Data/Raw/PubMedQA/PubMedQA.jsonl')]
+option2idx = {'yes':1, 'no':2, 'maybe':3}
+
+dataset, max_workers = {}, 50
+with ThreadPoolExecutor(max_workers=max_workers) as exe:
+    futures = [exe.submit(prepare_row, idx, row) for idx, row in enumerate(raw)]
+    for future in tqdm(as_completed(futures), total=len(futures)):
+        try:
+            idx, row = future.result()
+            dataset[idx] = row
+        except Exception as e:
+            print(f"Error: {e}")
+
+CELL 16 (code)
+columns = ['evidence'] + [f'question {i}' for i in range(1, 21)] + ['answer']
+dataset = [row for idx, row in sorted(dataset.items(), key = lambda x: x[0])]
+dataset = pd.DataFrame(dataset, columns=columns)
+dataset = dataset.dropna().drop_duplicates(subset=columns[:-1], keep=False).reset_index(drop=True)
+for option, idx in option2idx.items():
+    dataset[f'option {idx}'] = option
+dataset.to_csv('Data/Input/PubMedQA.csv', index=False)
+
+CELL 17 (code)
+dataset
+
+CELL 18 (markdown)
+### NQ
+
+CELL 19 (code)
+import re
+import json
+import time
+import openai
+import random
+import pandas as pd
+from tqdm import tqdm
+from bs4 import BeautifulSoup
+from datasets import load_dataset
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+CELL 20 (code)
+raw = load_dataset("google-research-datasets/natural_questions", split="validation")
+raw.to_json('Data/Raw/NQ/NQ.jsonl')
+
+CELL 21 (code)
+openai_client = openai.OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+openai_model = "gpt-4o"
+
+def call_gpt(message_user, retries=50):
+    messages = [{"role": "system", "content": 'You are a helpful assistant.'}, 
+                {"role": "user", "content": message_user}]
+    for i in range(retries):
+        try:
+            response = openai_client.chat.completions.create(
+                model = openai_model, messages = messages, max_tokens = 512
+            )
+            return response.choices[0].message.content
+        except openai.RateLimitError as e:
+            time.sleep(i)
+        except Exception as e:
+            print(f"An error occurred: {e}")
+            raise
+    raise Exception(f"Failed to call GPT-4 after {retries} retries.")
+
+CELL 22 (code)
+template_rephrase = \
+'''
+### Instruction
+Do not respond to the question. 
+Instead, follow the provided examples and rephrase the given question into 20 other versions that are semantically equivalent.
+
+### Example
+## Question: Which option best summarizes the comparative efficacy of regimen and comparator for managing condition?
+## Version 1: Choose an option that best describes the efficacy of regimen compared to comparator when used to treat condition.
+## Version 2: Select the option that most accurately reflects the effectiveness of regimen versus comparator in treating condition.
+## Version 3: Identify the option that best summarizes the effectiveness of regimen versus comparator in treating condition.
+## Version 4: Which option most effectively illustrates the efficacy of regimen when compared with comparator for condition?
+
+### Your Task
+## Question: {QUESTION}
+'''
+
+def rephrase_qn(question, retries=20):
+    query = template_rephrase.format(**{'QUESTION':question})
+    for _ in range(retries):
+        response = call_gpt(query)
+        matches = [re.search(fr"## Version {i}: (.*)", response) for i in range(1, 20)]
+        if all([each is not None and len(each.group(1)) for each in matches]):            
+            questions = [question] + [each.group(1) for each in matches]
+            if len(set(questions)) == 20: return questions
+    return [question] + [None]*19
+
+CELL 23 (code)
+template_mcq = \
+'''
+### Instruction
+Using the provided examples as a guide, transform the given question with a correct answer into a multiple-choice question. 
+Provide two additional incorrect options that are similar in type or category to the correct answer.
+
+# Example 1
+## Question: Which continent is the largest by land area?
+## Correct Answer: Asia
+## Incorrect Option 1: Africa
+## Incorrect Option 2: Europe
+
+# Example 2
+## Question: Is the last name scott irish or scottish?
+## Correct Answer: Scottish
+## Incorrect Option 1: Irish
+## Incorrect Option 2: English
+
+# Example 3
+## Question: Were Scott Derrickson and Ed Wood of the same nationality?
+## Correct Answer: Yes
+## Incorrect Option 1: No
+## Incorrect Option 2: Maybe
+
+# Your Task
+## Question: {QUESTION}
+## Correct Answer: {ANSWER}
+'''
+
+def convert_mcq(question, answer, retries=20):
+    query = template_mcq.format(**{'QUESTION':question, 'ANSWER':answer})
+    for _ in range(retries):
+        response = call_gpt(query)
+        match1 = re.search(r"## Incorrect Option 1: (.*)", response)
+        match2 = re.search(r"## Incorrect Option 2: (.*)", response)
+        if match1 and len(match1.group(1)) and match2 and len(match2.group(1)):            
+            options = [answer.capitalize(), match1.group(1).capitalize(), match2.group(1).capitalize()]
+            random.shuffle(options)
+            if len(set(options)) == 3: return options
+    return [answer.capitalize(), None, None]
+
+CELL 24 (code)
+def extract_evidence(evidence):
+    soup = BeautifulSoup(evidence, "html.parser")
+    evidence = ' '.join([p.get_text(strip=True) for p in soup.find_all("p") if p.get_text(strip=True)])
+    return evidence
+
+def prepare_row(idx, row):
+    question, answer = row['question'], row['answer'][0]
+    questions = rephrase_qn(question)
+    options = convert_mcq(question, answer)
+    answer = options.index(answer.capitalize())+1
+    evidence = extract_evidence(' '.join(raw[raw_id2idx[row['id']]]['document']['tokens']['token']))
+    row = (evidence, *questions, answer, *options)
+    return idx, row
+
+raw = [json.loads(line) for line in open('Data/Raw/NQ/NQ.jsonl')]
+raw_genread = [json.loads(line) for line in open('Data/Raw/NQ/NQ-GenRead.jsonl')]
+raw_id2idx = {each['id']:idx for idx, each in enumerate(raw)}
+
+dataset, max_workers = {}, 50
+with ThreadPoolExecutor(max_workers=max_workers) as exe:
+    futures = [exe.submit(prepare_row, idx, row) for idx, row in enumerate(raw_genread)]
+    for future in tqdm(as_completed(futures), total=len(futures)):
+        try:
+            idx, row = future.result()
+            dataset[idx] = row
+        except Exception as e:
+            print(f"Error: {e}")
+
+CELL 25 (code)
+columns = ['evidence'] + [f'question {i}' for i in range(1, 21)] + ['answer'] + [f'option {i}' for i in range(1, 4)]
+dataset = [row for idx, row in sorted(dataset.items(), key = lambda x: x[0])]
+dataset = pd.DataFrame(dataset, columns=columns)
+dataset = dataset.dropna().drop_duplicates(subset=columns[:21], keep=False).reset_index(drop=True)
+dataset.to_csv('Data/Input/NQ.csv', index=False)
+
+CELL 26 (code)
+dataset
+
+CELL 27 (markdown)
+### HotpotQA
+
+CELL 28 (code)
+import re
+import json
+import time
+import openai
+import random
+import pandas as pd
+from tqdm import tqdm
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+CELL 29 (code)
+openai_client = openai.OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+openai_model = "gpt-4o"
+
+def call_gpt(message_user, retries=50):
+    messages = [{"role": "system", "content": 'You are a helpful assistant.'}, 
+                {"role": "user", "content": message_user}]
+    for i in range(retries):
+        try:
+            response = openai_client.chat.completions.create(
+                model = openai_model, messages = messages, max_tokens = 512
+            )
+            return response.choices[0].message.content
+        except openai.RateLimitError as e:
+            time.sleep(i)
+        except Exception as e:
+            print(f"An error occurred: {e}")
+            raise
+    raise Exception(f"Failed to call GPT-4 after {retries} retries.")
+
+CELL 30 (code)
+template_rephrase = \
+'''
+### Instruction
+Do not respond to the question. 
+Instead, follow the provided examples and rephrase the given question into 20 other versions that are semantically equivalent.
+
+### Example
+## Question: Which option best summarizes the comparative efficacy of regimen and comparator for managing condition?
+## Version 1: Choose an option that best describes the efficacy of regimen compared to comparator when used to treat condition.
+## Version 2: Select the option that most accurately reflects the effectiveness of regimen versus comparator in treating condition.
+## Version 3: Identify the option that best summarizes the effectiveness of regimen versus comparator in treating condition.
+## Version 4: Which option most effectively illustrates the efficacy of regimen when compared with comparator for condition?
+
+### Your Task
+## Question: {QUESTION}
+'''
+
+def rephrase_qn(question, retries=20):
+    query = template_rephrase.format(**{'QUESTION':question})
+    for _ in range(retries):
+        response = call_gpt(query)
+        matches = [re.search(fr"## Version {i}: (.*)", response) for i in range(1, 20)]
+        if all([each is not None and len(each.group(1)) for each in matches]):            
+            questions = [question] + [each.group(1) for each in matches]
+            if len(set(questions)) == 20: return questions
+    return [question] + [None]*19
+
+CELL 31 (code)
+template_mcq = \
+'''
+Using the provided examples as a guide, transform the given question with a correct answer into a multiple-choice question. 
+Provide two additional incorrect options that are similar in type or category to the correct answer.
+
+# Example 1
+## Question: Which continent is the largest by land area?
+## Correct Answer: Asia
+## Incorrect Option 1: Africa
+## Incorrect Option 2: Europe
+
+# Example 2
+## Question: Is the last name scott irish or scottish?
+## Correct Answer: Scottish
+## Incorrect Option 1: Irish
+## Incorrect Option 2: English
+
+# Example 3
+## Question: Were Scott Derrickson and Ed Wood of the same nationality?
+## Correct Answer: Yes
+## Incorrect Option 1: No
+## Incorrect Option 2: Maybe
+
+# Your task
+## Question: {QUESTION}
+## Correct Answer: {ANSWER}
+'''
+
+def convert_mcq(question, answer, retries=20):
+    query = template_mcq.format(**{'QUESTION':question, 'ANSWER':answer})
+    for _ in range(retries):
+        response = call_gpt(query)
+        match1 = re.search(r"## Incorrect Option 1: (.*)", response)
+        match2 = re.search(r"## Incorrect Option 2: (.*)", response)
+        if match1 and len(match1.group(1)) and match2 and len(match2.group(1)):            
+            options = [answer.capitalize(), match1.group(1).capitalize(), match2.group(1).capitalize()]
+            random.shuffle(options)
+            if len(set(options)) == 3: return options
+    return [answer.capitalize(), None, None]
+
+CELL 32 (code)
+def prepare_row(idx, row):
+    question, answer = row['question'], row['answer']
+    questions = rephrase_qn(question)
+    options = convert_mcq(question, answer)
+    answer = options.index(answer.capitalize())+1
+    name2paragraph = {each[0]:''.join(each[1]) for each in row['context']}
+    evidence = '\n\n'.join([name2paragraph[name] for name, _ in row['supporting_facts']])
+    row = (evidence, *questions, answer, *options)
+    return idx, row
+
+raw = json.load(open('Data/Raw/HotpotQA/hotpot_dev_distractor_v1.json'))
+dataset, max_workers = {}, 50
+with ThreadPoolExecutor(max_workers=max_workers) as exe:
+    futures = [exe.submit(prepare_row, idx, row) for idx, row in enumerate(raw)]
+    for future in tqdm(as_completed(futures), total=len(futures)):
+        try:
+            idx, row = future.result()
+            dataset[idx] = row
+        except Exception as e:
+            print(f"Error: {e}")
+
+CELL 33 (code)
+columns = ['evidence'] + [f'question {i}' for i in range(1, 21)] + ['answer'] + [f'option {i}' for i in range(1, 4)]
+dataset = [row for idx, row in sorted(dataset.items(), key = lambda x: x[0])]
+dataset = pd.DataFrame(dataset, columns=columns)
+dataset = dataset.dropna().drop_duplicates(subset=columns[:21], keep=False).reset_index(drop=True)
+dataset.to_csv('Data/Input/HotpotQA.csv', index=False)
+
+CELL 34 (code)
+dataset
+
+CELL 35 (code)
+dataset = pd.read_csv('Data/Input/HotpotQA.csv')
+raw = json.load(open('Data/Raw/HotpotQA/hotpot_dev_fullwiki_v1.json'))
+raw_ = json.load(open('Data/Raw/HotpotQA/hotpot_dev_distractor_v1.json'))
+
+retrieveds = []
+question2id = {each['question']:idx for idx, each in enumerate(raw)}
+for _, row in dataset.iterrows():
+    id = question2id[row['question 1']]
+    context = raw[id]['context'] if len(raw[id]['context']) else raw_[id]['context']
+    retrieved = '\n\n'.join([''.join(each[1]) for each in context])
+    retrieveds.append(retrieved)
+dataset['retrieved'] = retrieveds
+dataset.to_csv('Data/Input/HotpotQA.csv', index=False)    
+

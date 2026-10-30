@@ -1,0 +1,354 @@
+---
+title: "Classify all LLMs"
+author: "Alex Reinhart, Ben Markey, Michael Laudenbach, Kachatad Pantusen, Ronald Yurko, Gordon Weinberg, and David West Brown"
+format: html
+---
+
+This document contains the code necessary to reproduce classification results in
+"Do LLMs write like humans? Variation in grammatical and rhetorical styles".
+
+```{r setup, message=FALSE}
+library(dplyr)
+library(ranger)
+library(ggplot2)
+library(scales)
+library(rsample)
+library(tidyr)
+library(readr)
+library(gt)
+library(polars)
+
+source("biber-names.R")
+```
+
+## Read data and make train/test split
+
+For classification, we use the Biber features of the HAP-E corpus. See the
+README for dataset citations.
+
+
+```{r load-data, message=FALSE}
+get_genre <- function(doc_id) {
+  sapply(strsplit(doc_id, "_", fixed = TRUE), function(x) x[1])
+}
+
+d <- pl$read_parquet('hf://datasets/browndw/human-ai-parallel-corpus-biber/**/*.parquet')$to_data_frame()
+
+source_levels <- c(
+  "chunk_1", "chunk_2",
+  "gpt-4o-mini-2024-07-18", "gpt-4o-2024-08-06",
+  "Meta-Llama-3-8B-Instruct", "Meta-Llama-3-70B-Instruct",
+  "Meta-Llama-3-8B", "Meta-Llama-3-70B"
+)
+source_labels <-  c(
+  "Chunk 1", "Chunk 2",
+  "GPT-4o Mini", "GPT-4o",
+  "Llama 3 8B Instruct", "Llama 3 70B Instruct",
+  "Llama 3 8B", "Llama 3 70B"
+)
+
+# make response a factor
+d <- d |>
+  separate_wider_delim(doc_id, names = c("doc_id", "source"), delim = "@") |>
+  select(-f_43_type_token) |>
+  mutate(source = factor(source, levels = source_levels, labels = source_labels),
+         genre = get_genre(doc_id)) |>
+  filter(!is.na(f_01_past_tense), !is.na(f_44_mean_word_length))
+```
+
+```{r train-test-split}
+# Train/test split.
+by_doc <- d |>
+  nest(data = doc_id)
+
+split <- initial_split(by_doc, strata = genre)
+
+# unnest and remove doc_id & genre so we don't use them as features. Remove
+# chunk_1; only compare against chunk_2.
+train <- unnest(training(split), cols = data) |>
+  select(-doc_id, -genre) |>
+  filter(source != "Chunk 1")
+test <- unnest(testing(split), cols = data) |>
+  select(-doc_id, -genre) |>
+  filter(source != "Chunk 1")
+
+nrow(train)
+nrow(test)
+```
+
+## Classifying all sources
+
+### Fit a base random forest
+
+To classify all LLMs against Chunk 2:
+
+```{r fit-rf, cache=TRUE}
+fit <- ranger(source ~ ., data = train, importance = "impurity",
+              probability = TRUE)
+
+top_features <- sort(importance(fit), decreasing = TRUE)
+importances <- data.frame(feature = names(importance(fit)),
+                          importance = importance(fit))
+
+write_csv(importances, "data/models/rf-importances.csv")
+
+fit
+```
+
+### Get test accuracy
+
+We'll define a function to evaluate the test accuracy of a random forest:
+
+```{r}
+# probability forests predict probabilities for each class; convert to vector of
+# highest-probability classes
+hard_predictions <- function(model, test_data) {
+  preds <- predictions(predict(model, data = test_data))
+  levels <- colnames(preds)
+
+  out <- levels[apply(preds, 1, which.max)]
+
+  # restore factor ordering. Note that the levels are now the *labels* of the
+  # source factor, because those are the column names of preds
+  out <- factor(out, levels = levels(test_data$source))
+
+  return(out)
+}
+
+test_accuracy <- function(model, test_data) {
+  labels <- hard_predictions(model, test_data)
+
+  mean(test_data$source == labels)
+}
+```
+
+The test accuracy of our full model is
+
+```{r full-test-accuracy}
+test_accuracy(fit, test)
+```
+
+The top most important features:
+
+```{r}
+importances |>
+  arrange(desc(importance)) |>
+  head(n = 10)
+```
+
+Using the top most important features:
+
+```{r top-feature-rfs, cache=TRUE, warning=FALSE}
+max_model_size <- 20
+accuracies <- numeric(max_model_size)
+for (num_predictors in 1:max_model_size) {
+  x <- train[, names(top_features)[1:num_predictors]]
+  small_model <- ranger(y = train$source, x = x, probability = TRUE)
+
+  accuracies[num_predictors] <- test_accuracy(small_model, test)
+}
+
+results <- data.frame(model_size = 1:max_model_size,
+                      accuracy = accuracies)
+```
+
+A plot:
+
+```{r}
+ggplot(results, aes(x = model_size, y = accuracy)) +
+  geom_line() +
+  labs(x = "Number of features", y = "Test accuracy") +
+  scale_y_continuous(labels = label_percent()) +
+  scale_x_continuous(breaks = seq(5, 20, by = 5), minor_breaks = 1:20)
+```
+
+### Confusion matrix
+
+```{r full-confusion-matrix}
+test_preds <- data.frame(
+  label = test$source,
+  prediction = hard_predictions(fit, test)
+)
+
+confusion <- ggplot(test_preds, aes(x = label, y = prediction)) +
+  stat_bin_2d(drop = FALSE) +
+  labs(x = "True source", y = "Prediction", fill = "Count") +
+  theme_bw() +
+  scale_fill_distiller(type = "seq", direction = 1) +
+  theme(axis.text.x = element_text(angle = 30, vjust = 1, hjust = 1))
+
+ggsave("paper-output/confusion-matrix.pdf", confusion, width = 4.5, height = 3)
+
+confusion
+```
+
+```{r}
+test_preds |>
+  group_by(label, prediction) |>
+  summarize(n = n(), .groups = "drop") |>
+  pivot_wider(id_cols = label,
+              names_from = prediction,
+              values_from = n,
+              values_fill = 0) |>
+  mutate(across(where(is.numeric),
+                ~ .x / (`Chunk 2` + `GPT-4o` +
+                          `GPT-4o Mini` + `Llama 3 70B Instruct` +
+                          `Llama 3 70B` + `Llama 3 8B Instruct` +
+                          `Llama 3 8B`))) |>
+  gt() |>
+  fmt_percent(where(is.numeric), decimals = 1)
+```
+
+Rate of LLMs being classified as human:
+
+```{r}
+test_preds |>
+  mutate(is_llm = (label != "Chunk 2"),
+         llm_classified_human = (label != "Chunk 2" & prediction == "Chunk 2")) |>
+  summarize(total_llms = sum(is_llm),
+            llms_human = sum(llm_classified_human)) |>
+  mutate(false_human_rate = llms_human / total_llms)
+```
+
+Rate of humans being classified as LLMs:
+
+```{r}
+test_preds |>
+  mutate(is_human = (label == "Chunk 2"),
+         human_classified_llm = (label == "Chunk 2" & prediction != "Chunk 2")) |>
+  summarize(total_human = sum(is_human),
+            humans_llm = sum(human_classified_llm)) |>
+  mutate(false_llm_rate = humans_llm / total_human)
+```
+
+### Feature exploration
+
+Which features are most different between all sources?
+
+```{r}
+compare_rates <- function(biber_features, importances) {
+  biber_features |>
+    group_by(source) |>
+    summarize(across(starts_with("f_"), mean)) |>
+    pivot_longer(cols = starts_with("f_"), names_to = "feature",
+                 values_to = "mean") |>
+    pivot_wider(names_from = source, values_from = mean) |>
+    mutate(across(!c(feature, chunk_2), ~ . / chunk_2)) |>
+    inner_join(importances, by = "feature") |>
+    arrange(desc(importance))
+}
+```
+
+## Comparing individual LLMs to humans
+
+```{r one-v-one, cache=TRUE}
+llms <- setdiff(unique(d$source), c("Chunk 1", "Chunk 2"))
+
+llm_perf <- data.frame(
+  llm = llms,
+  accuracy = numeric(length(llms))
+)
+
+llm_importances <- data.frame(
+  feature = importances$feature
+)
+
+for (ii in seq_along(llms)) {
+  llm <- llms[ii]
+
+  llm_train <- train |>
+    filter(source %in% c(llm, "Chunk 2"))
+  llm_test <- test |>
+    filter(source %in% c(llm, "Chunk 2"))
+
+  llm_fit <- ranger(source ~ ., data = llm_train, probability = TRUE,
+                    importance = "impurity")
+  llm_perf$accuracy[ii] <- test_accuracy(llm_fit, llm_test)
+
+  llm_importances[[llm]] <- importance(llm_fit)
+}
+```
+
+Test accuracy of each LLM v Human model:
+
+```{r}
+llm_perf |>
+  arrange(desc(accuracy)) |>
+  gt() |>
+  cols_label(llm = "LLM", accuracy = "Test accuracy") |>
+  fmt_percent(accuracy, decimals = 1)
+```
+
+Feature importances plot:
+
+```{r llm-v-human-importances}
+#| fig-width: 6
+#| fig-height: 8
+llm_importances |>
+  pivot_longer(!feature, names_to = "model") |>
+  mutate(feature = feature_name_decode(feature)) |>
+  ggplot(aes(x = model, y = feature, fill = value)) +
+  geom_tile() +
+  labs(x = "LLM", y = "Biber feature", fill = "Importance") +
+  theme(axis.text.x = element_text(angle = 30, vjust = 1, hjust = 1))
+```
+
+## Classifying humans vs. base vs. instruction-tuned
+
+Let's reduce the data labels to just human vs. base vs. instruction-tuned LLMs, not by specific source.
+
+### Fit a random forest
+
+```{r base-instruct-human, cache=TRUE}
+source_type <- function(source) {
+  factor(case_when(
+    is_human(source) ~ "human",
+    is_instruct(source) ~ "instruct",
+    .default = "base"))
+}
+
+is_human <- function(source) {
+  source %in% c("Chunk 1", "Chunk 2")
+}
+
+is_instruct <- function(source) {
+  startsWith(as.character(source), "GPT") |
+    endsWith(as.character(source), "Instruct")
+}
+
+
+train_ai <- train |>
+  mutate(source = source_type(source))
+
+test_ai <- test |>
+  mutate(source = source_type(source))
+
+fit_ai <- ranger(source ~ ., data = train_ai, importance = "impurity",
+                 probability = TRUE)
+
+importances_ai <- data.frame(feature = names(importance(fit_ai)),
+                             importance = importance(fit_ai))
+```
+
+### Get test accuracy
+
+```{r}
+test_accuracy(fit_ai, test_ai)
+```
+
+### Confusion matrix
+
+```{r}
+test_ai_preds <- data.frame(
+  label = test_ai$source,
+  prediction = hard_predictions(fit_ai, test_ai)
+)
+
+test_ai_preds |>
+  group_by(label, prediction) |>
+  summarize(n = n(), .groups = "drop")
+```
+
+```{r}
+caret::confusionMatrix(test_ai_preds$prediction, test_ai_preds$label)
+```

@@ -1,0 +1,412 @@
+---
+title: "Paper figures and results"
+author: "Alex Reinhart, Ben Markey, Michael Laudenbach, Kachatad Pantusen, Ronald Yurko, Gordon Weinberg, and David West Brown"
+format: html
+---
+
+This document contains the code necessary to reproduce the figures and tables in
+"Do LLMs write like humans? Variation in grammatical and rhetorical styles".
+Vocabulary comparisons are in `vocab-compare.qmd` and random forests are in
+`classify-all.qmd`. The classification code in `classify-all.qmd` must be run
+first to produce random forest feature importances to use in these figures.
+
+```{r setup, message=FALSE}
+library(dplyr)
+library(readr)
+library(ranger)
+library(ggplot2)
+library(scales)
+library(rsample)
+library(tidyr)
+library(gt)
+library(polars)
+library(stringr)
+
+# better PDF graphics device
+# supports special characters, good kerning
+library(Cairo)
+
+# set default ggplot2 theme
+theme_set(theme_bw())
+
+source("biber-names.R")
+```
+
+## Loading data
+
+See the README for citations for all data used in this notebook.
+
+This code loads the Biber feature data:
+
+```{r load-data, message=FALSE}
+get_genre <- function(doc_id) {
+  sapply(strsplit(doc_id, "_", fixed = TRUE), function(x) x[1])
+}
+
+d <- pl$read_parquet('hf://datasets/browndw/human-ai-parallel-corpus-biber/**/*.parquet')$to_data_frame()
+
+
+# make response a factor
+d <- d |>
+  separate_wider_delim(doc_id, names = c("doc_id", "source"), delim = "@") |>
+  mutate(source = factor(source),
+         genre = get_genre(doc_id)) |>
+  filter(!is.na(f_01_past_tense), !is.na(f_44_mean_word_length))
+
+# Feature importances:
+importances <- read_csv("data/models/rf-importances.csv")
+```
+
+## Utilities
+
+Utilities to map the LLM source names to nice, human-readable ones:
+
+```{r}
+source_name <- function(source) {
+  source_names <- list(
+    chunk_1 = "Chunk 1",
+    chunk_2 = "Chunk 2",
+    `gpt-4o-2024-08-06` = "GPT-4o",
+    `gpt-4o-mini-2024-07-18` = "GPT-4o Mini",
+    `Meta-Llama-3-70B-Instruct` = "Llama 3 70B Instruct",
+    `Meta-Llama-3-70B` = "Llama 3 70B",
+    `Meta-Llama-3-8B-Instruct` = "Llama 3 8B Instruct",
+    `Meta-Llama-3-8B` = "Llama 3 8B"
+  )
+
+  sources <- sapply(as.character(source), function(s) source_names[[s]])
+
+  # Order sources in a desirable way
+  factor(sources,
+         levels = c("Chunk 1", "Chunk 2", "GPT-4o", "GPT-4o Mini",
+                    "Llama 3 70B Instruct", "Llama 3 8B Instruct",
+                    "Llama 3 70B", "Llama 3 8B"))
+}
+```
+
+## Data summaries
+
+Number of texts:
+
+```{r}
+length(unique(d$doc_id))
+```
+
+### Table of token counts
+
+Count the tokens from each source, by genre:
+
+```{r}
+hape_spacy <- pl$read_parquet('hf://datasets/browndw/human-ai-parallel-corpus-spacy/**/*.parquet')$select(pl$col("doc_id", "pos"))
+
+hape_totals <- hape_spacy$to_data_frame() |>
+  filter(pos != "PUNCT") |>
+  mutate(model_type = str_remove(doc_id, "^\\S+@")) |>
+  mutate(text_type = str_extract(doc_id, "^[a-z]+")) |>
+  group_by(model_type, text_type) |>
+  summarise(n_tkns = n(),
+            n = n_distinct(doc_id),
+            .groups = "drop") |>
+  ungroup() |>
+  mutate(text_type = paste0(text_type, " (*n* = ", n, ")")) |>
+  select(-n) |>
+  pivot_wider(names_from = text_type, values_from = n_tkns) |>
+  mutate(Total = rowSums(across(where(is.numeric)), na.rm = TRUE),
+         Author = case_when(
+           endsWith(model_type, "Instruct") ~ "Llama Instruct",
+           endsWith(model_type, "B") ~ "Llama Base",
+           str_detect(model_type, fixed("gpt")) ~ "GPT-4o",
+           .default = "Human"
+         ),
+         model_type = source_name(model_type)) |>
+  select(model_type, Author, everything()) |>
+  arrange(tolower(model_type))
+```
+
+```{r}
+totals_table <- hape_totals |>
+  gt(rowname_col = "model_type", groupname_col = "Author") |>
+  tab_stubhead(label = "Author") |>
+  tab_stub_indent(
+    rows = everything(),
+    indent = 3
+  ) |>
+  fmt_integer(
+    columns = where(is.numeric)
+  ) |>
+  cols_label(
+    .fn = md,
+    .process_units = TRUE
+  ) |>
+  grand_summary_rows(
+    columns = where(is.numeric),
+    fns =  list(label = "Total", id = "totals", fn = "sum"),
+    fmt = ~ fmt_integer(.)
+  ) |>
+  tab_header(
+    title = "Word counts in the HAP-E corpus, by source"
+  )
+
+gtsave(totals_table, "paper-output/totals.tex")
+
+totals_table
+```
+
+## Top features by source
+
+
+```{r}
+num_top_features <- 15
+
+compare_rates <- function(biber_features, importances, relative = TRUE) {
+  out <- biber_features |>
+    group_by(source) |>
+    summarize(across(starts_with("f_"), mean),
+              .groups = "drop") |>
+    pivot_longer(cols = starts_with("f_"), names_to = "feature",
+                 values_to = "mean") |>
+    pivot_wider(names_from = source, values_from = mean) |>
+    inner_join(importances, by = "feature") |>
+    arrange(desc(importance))
+
+  if (relative) {
+    out |>
+      mutate(across(!c(importance, feature, chunk_1, chunk_2), ~ . / chunk_2))
+  } else {
+    out
+  }
+}
+
+rates_by_genre <- function(biber_features, importances, relative = TRUE) {
+  out <- biber_features |>
+    group_by(source, genre)  |>
+    summarize(across(starts_with("f_"), mean),
+              .groups = "drop") |>
+    pivot_longer(cols = starts_with("f_"), names_to = "feature",
+                 values_to = "mean")  |>
+    pivot_wider(names_from = source, values_from = mean) |>
+    inner_join(importances, by = "feature") |>
+    arrange(desc(importance))
+
+  if (relative) {
+    out |>
+      mutate(across(!c(feature, genre, chunk_1, chunk_2), ~ . / chunk_2))
+  } else {
+    out
+  }
+}
+```
+
+All features in descending importance order, for SI appendix.
+
+```{r}
+top_feature_table <- compare_rates(d, importances) |>
+  relocate(feature, chunk_1, chunk_2, `gpt-4o-mini-2024-07-18`,
+           `gpt-4o-2024-08-06`, `Meta-Llama-3-8B-Instruct`,
+           `Meta-Llama-3-70B-Instruct`, `Meta-Llama-3-8B`,
+           `Meta-Llama-3-70B`, importance) |>
+  mutate(feature = feature_name_decode(feature)) |>
+  gt() |>
+  cols_label(feature = "Feature",
+             chunk_1 = "Chunk 1",
+             chunk_2 = "Chunk 2",
+             `gpt-4o-mini-2024-07-18` = "GPT-4o Mini",
+             `gpt-4o-2024-08-06` = "GPT-4o",
+             `Meta-Llama-3-8B` = "8B",
+             `Meta-Llama-3-8B-Instruct` = "8B",
+             `Meta-Llama-3-70B` = "70B",
+             `Meta-Llama-3-70B-Instruct` = "70B",
+             importance = "Importance") |>
+  tab_spanner("Human", c(chunk_1, chunk_2)) |>
+  tab_spanner("GPT", starts_with("gpt-")) |>
+  tab_spanner("Llama 3 Base", c(`Meta-Llama-3-8B`, `Meta-Llama-3-70B`)) |>
+  tab_spanner("Llama 3 Instruct", ends_with("Instruct")) |>
+  fmt_percent(!c(feature, chunk_1, chunk_2, importance), decimals = 0) |>
+  fmt_number(c(chunk_1, chunk_2, importance), decimals = 1) |>
+  tab_header(title = "Biber features distinguishing human- and LLM-written text in HAP-E",
+             subtitle = "Rate per 1,000 tokens; LLM rates relative to human Chunk 2") |>
+  data_color(columns = starts_with(c("gpt", "Meta-Llama")),
+             direction = "row", palette = "RdBu",
+             method = "bin",
+             bins = c(0, 0.25, 0.5, 0.75, 0.9, 1/0.9,
+                      1/0.75, 1/0.5, 1/0.25, 10))
+
+gtsave(top_feature_table, "paper-output/top-features.tex")
+
+top_feature_table
+```
+
+## Differences between LLMs and humans
+
+### Effect sizes
+
+All features relative to human use, Cohen's $d$, for appendix.
+
+```{r}
+cohen_d <- d |>
+  select(-f_43_type_token) |>
+  pivot_longer(!c(doc_id, source, genre), names_to = "feature") |>
+  pivot_wider(id_cols = c(doc_id, genre, feature), names_from = source, values_from = value) |>
+  group_by(feature) |>
+  summarize(across(where(is.numeric) & !chunk_2,
+                   ~ mean(. - chunk_2) / sd(. - chunk_2))) |>
+  left_join(importances, by = "feature") |>
+  arrange(desc(importance)) |>
+  mutate(feature = feature_name_decode(feature)) |>
+  gt() |>
+  cols_label(feature = "Feature",
+             `gpt-4o-mini-2024-07-18` = "GPT-4o Mini",
+             `gpt-4o-2024-08-06` = "GPT-4o",
+             `Meta-Llama-3-8B` = "8B",
+             `Meta-Llama-3-8B-Instruct` = "8B",
+             `Meta-Llama-3-70B` = "70B",
+             `Meta-Llama-3-70B-Instruct` = "70B",
+             importance = "Importance") |>
+  tab_spanner("GPT", starts_with("gpt")) |>
+  tab_spanner("Llama 3 Base", c(`Meta-Llama-3-8B`, `Meta-Llama-3-70B`)) |>
+  tab_spanner("Llama 3 Instruct", ends_with("instruct")) |>
+  fmt_number(!c(feature, importance), decimals = 2) |>
+  fmt_number(importance, decimals = 1) |>
+  tab_header(title = "Effect sizes of features in LLM writing",
+             subtitle = md("Paired Cohen's $d$ relative to human chunk 2"))
+
+gtsave(cohen_d, "paper-output/effect-sizes.tex")
+
+cohen_d
+```
+
+### Hypothesis tests for differences
+
+Using the paired Wilcoxon rank-sum test (i.e. the Mann-Whitney U test).
+
+```{r}
+test_results <- d |>
+  select(-f_43_type_token) |>
+  pivot_longer(!c(doc_id, source, genre), names_to = "feature") |>
+  pivot_wider(id_cols = c(doc_id, genre, feature), names_from = source, values_from = value) |>
+  group_by(feature) |>
+  summarize(across(where(is.numeric) & !chunk_2,
+                   ~ wilcox.test(., chunk_2, paired = TRUE)$p.value
+                   )) |>
+  left_join(importances, by = "feature") |>
+  arrange(desc(importance))
+
+test_results |>
+  mutate(feature = feature_name_decode(feature)) |>
+  gt() |>
+  cols_label(feature = "Feature",
+             `gpt-4o-mini-2024-07-18` = "GPT-4o Mini",
+             `gpt-4o-2024-08-06` = "GPT-4o",
+             `Meta-Llama-3-8B` = "8B",
+             `Meta-Llama-3-8B-Instruct` = "8B",
+             `Meta-Llama-3-70B` = "70B",
+             `Meta-Llama-3-70B-Instruct` = "70B",
+             importance = "Importance") |>
+  tab_spanner("GPT", starts_with("gpt")) |>
+  tab_spanner("Llama 3 Base", c(`Meta-Llama-3-8B`, `Meta-Llama-3-70B`)) |>
+  tab_spanner("Llama 3 Instruct", ends_with("Instruct")) |>
+  fmt_scientific(!c(feature, importance), decimals = 1) |>
+  fmt_number(importance, decimals = 1) |>
+  tab_header("Wilcoxon tests of rates relative to human chunk 2")
+```
+
+Significance of the top `r num_top_features` features compared to humans, Bonferroni-corrected with $\alpha = 0.05$:
+
+```{r}
+bonferroni_factor <- num_top_features * 6
+
+feature_significance <- test_results |>
+  slice_max(importance, n = num_top_features) |>
+  select(!importance) |>
+  mutate(across(where(is.numeric), ~ . * bonferroni_factor < 0.05)) |>
+  pivot_longer(!feature, names_to = "source", values_to = "significant")
+```
+
+### Boxplot of paired differences
+
+Boxplots showing the distribution of paired differences: for each feature, the
+distribution of differences between the LLM and human chunk 2. Standardized by
+the SD of the paired differences for that feature.
+
+```{r}
+top_biber_features <- unique(feature_significance$feature)
+
+human_biber_scale <- d |>
+  pivot_longer(cols = starts_with("f_"),
+               names_to = "feature", values_to = "value") |>
+  filter(feature %in% top_biber_features,
+         source == "chunk_2") |>
+  group_by(feature) |>
+  summarize(val_sd = sd(value),
+            val_iqr = IQR(value))
+
+top_features_order <- importances |>
+  filter(feature %in% top_biber_features) |>
+  arrange(importance) |>
+  mutate(feature_name = feature_name_decode(feature))
+
+rate_difference <- d |>
+  select(-f_43_type_token) |>
+  pivot_longer(!c(doc_id, source, genre), names_to = "feature") |>
+  filter(feature %in% top_biber_features) |>
+  pivot_wider(id_cols = c(doc_id, genre, feature), names_from = source, values_from = value) |>
+  inner_join(human_biber_scale, by = "feature") |>
+  mutate(across(where(is.numeric) & !c(chunk_2, val_sd, val_iqr),
+                   ~ (. - chunk_2) / sd(. - chunk_2)),
+         feature = factor(feature, levels = top_features_order$feature,
+                          labels = top_features_order$feature_name),
+         .by = feature) |> # ensure sd() is computed within features
+  select(!c(doc_id, genre, val_iqr, val_sd, chunk_1, chunk_2)) |>
+  pivot_longer(!feature, names_to = "source", values_to = "value_diff") |>
+  mutate(source = source_name(source)) |>
+  ggplot(aes(x = value_diff, y = feature)) +
+  geom_vline(xintercept = 0, color = "blue") +
+  geom_boxplot(fill = NA, outlier.shape = NA,
+               # Play with the line width?
+               lwd = 0.25) +
+  scale_x_continuous(minor_breaks = -4:4) +
+  coord_cartesian(xlim = c(-4, 4)) +
+  facet_wrap(vars(source), nrow = 2, ncol = 3, dir = "v") +
+  labs(x = "Standardized rate difference (LLM - human)",
+       y = "Biber feature")
+
+ggsave("paper-output/rate-difference.pdf", rate_difference, dev = CairoPDF,
+       width = 7, height = 5)
+
+rate_difference
+```
+
+## Dot plot
+
+Only the top `r num_top_features` features, to highlight the differences between
+models. Coded by whether LLM use is significantly different from human chunk 2.
+
+```{r top-feature-dotplot}
+#| fig-width: 6.5
+#| fig-height: 5
+library(forcats)
+
+top_feature_plot <- compare_rates(d, importances) |>
+  head(n = num_top_features) |>
+  #mutate(feature = fct_reorder(feature, importance)) |>
+  select(-chunk_1, -chunk_2, -importance) |>
+  pivot_longer(-feature, names_to = "source", values_to = "rate") |>
+  inner_join(feature_significance, by = c("feature", "source")) |>
+  mutate(feature = factor(feature, levels = top_features_order$feature,
+                          labels = top_features_order$feature_name),
+         source = source_name(source)) |>
+  ggplot(aes(x = rate, y = feature, shape = significant)) +
+  facet_wrap(vars(source), nrow = 2, ncol = 3, dir = "v") +
+  geom_point() +
+  geom_vline(xintercept = 1) +
+  scale_x_log10(breaks = c(1/2, 1, 2, 3),
+                labels = c("½", "1", "2", "3"),
+                minor_breaks = c(4, 5)) +
+  labs(x = "Rate (1 = human)", y = "Biber feature") +
+  guides(shape = "none")
+
+ggsave("paper-output/top-features.pdf", top_feature_plot,
+       width = 6, height = 5, dev = CairoPDF)
+
+top_feature_plot
+```

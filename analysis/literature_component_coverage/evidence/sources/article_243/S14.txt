@@ -1,0 +1,118 @@
+CELL 1 (code)
+import os
+import json
+import math
+import openai
+import jsonlines
+import numpy as np
+import pandas as pd
+
+CELL 2 (code)
+system = {
+    'Hemonc': 'You are a doctor with a professional medical background.',
+    'PubMedQA': 'You are a doctor with a professional medical background.',
+    'NQ': 'You are a helpful AI assistant.',
+    'HotpotQA': 'You are a helpful AI assistant.'
+}
+instruction_doc = {
+    True: 'You are given some documents and a multiple-choice question.\nBased on the document, select the most appropriate answer from the options provided.',
+    False: 'Without relying on any external document, select the most appropriate answer from the options provided.'
+}
+instruction = 'First, explain your reasoning briefly step-by-step based on the provided information.\nThen, select the most appropriate option and present your response in the required format.'
+response = 'Provide your response in the following format:\n<answer>Option [number]</answer>'
+
+def get_message(row, qid, if_doc=False):
+    prompt = ['### Instruction:\n' + instruction_doc[if_doc] + instruction]
+    if if_doc: prompt += ['### Documents:\n' + row[f'evidence {augmentation}']]
+    prompt += ['### Question:\n' + row[f'question {qid}']]
+    prompt += ['### Choices:\n' + '\n'.join([f'Option {i}: {row[f"option {i}"]}' for i in range(1, 4)])]
+    prompt += [response]
+    message = [{'role':'system', 'content':system[args_dataset]}, {'role':'user', 'content':'\n\n'.join(prompt)}]
+    return message
+
+CELL 3 (code)
+cwd = os.getcwd()
+args_dataset = 'HotpotQA'
+augmentation = 'naive'
+dataset = pd.read_csv(f'{cwd}/Data/Augmentation/Input/{args_dataset}.csv')
+num_resp, num_qn = 100, 20
+messages_con = []
+for _ in range(num_resp):
+    qids = np.random.randint(1, num_qn+1, len(dataset))
+    messages_con.append([get_message(row, qids[i], if_doc=True) for i, row in dataset.iterrows()])
+
+CELL 4 (code)
+max_token = 1024
+batch_size = 300
+num_batch = math.ceil(len(dataset) / batch_size)
+for idx_batch in range(num_batch):
+    with open(f'{cwd}/Data/Augmentation/GPT-4o/input-{args_dataset}-{augmentation}-{idx_batch}.jsonl', 'w') as file:
+        for idx_query in range(idx_batch*batch_size, (idx_batch+1)*batch_size):
+            if idx_query >= len(dataset): break
+            for idx_resp in range(num_resp):
+                custom_id = f'{args_dataset}-{idx_query}-{augmentation}-{idx_resp}'
+                message = messages_con[idx_resp][idx_query]
+                item = {"custom_id": custom_id, "method": "POST", "url": '/v1/chat/completions', 
+                        "body": {"model": 'gpt-4o', "messages": message, "max_tokens": max_token}}
+                file.write(json.dumps(item) + '\n')
+
+CELL 5 (code)
+client = openai.OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+for idx_batch in range(num_batch):
+    batch_input_file = client.files.create(
+        file=open(f"{cwd}/Data/Augmentation/GPT-4o/input-{args_dataset}-{augmentation}-{idx_batch}.jsonl", "rb"), 
+        purpose="batch"
+    )
+    batch_job = client.batches.create(
+        input_file_id=batch_input_file.id,
+        endpoint=service2info[service]['url'],
+        completion_window="24h",
+        metadata={
+            "description": f"{args_dataset}-{augmentation}-{idx_batch}"
+        }
+    )
+    with open(f'{cwd}/Data/Augmentation/Batch2JobID.jsonl', 'a') as file:
+        file.write(json.dumps({f'{args_dataset}-{augmentation}-{idx_batch}':batch_job.id}) + '\n')
+
+CELL 6 (code)
+data = 'HotpotQA'
+augmentation = 'naive'
+client = openai.OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+
+cwd = os.getcwd()
+with jsonlines.open(f'{cwd}/Data/Augmentation/Batch2JobID.jsonl') as reader:
+    for line in reader:
+        batch, job_id = list(line.items())[0]
+        if batch.split('-')[0] != data or batch.split('-')[1] != augmentation: continue
+        batch_job = client.batches.retrieve(job_id)
+        if batch_job.status != 'completed': 
+            print(f'Batch Job: {batch} | Status: {batch_job.status}')
+            continue
+        file_path = f'{cwd}/Data/Augmentation/GPT-4o/output-{batch}.jsonl'
+        if os.path.exists(file_path): 
+            print(f'Batch Job: {batch} | Status: {batch_job.status} | Already Retrieved')
+            continue
+        print(f'Batch Job: {batch} | Status: {batch_job.status} | Retrieving Now')
+        batch_response = client.files.content(batch_job.output_file_id)
+        batch_response = batch_response.text.strip().split('\n')
+        batch_response = [json.loads(response) for response in batch_response]
+        with jsonlines.open(file_path, 'w') as writer:
+            writer.write_all(batch_response)
+
+CELL 7 (code)
+data = 'HotpotQA'
+augmentation = 'naive'
+num_batch = 21
+cwd = os.getcwd()
+dataset = pd.read_csv(f'{cwd}/Data/Augmentation/Input/{data}.csv')
+
+responses = [{'context':[]} for idx_query in range(len(dataset))]
+for idx_batch in range(num_batch):
+    with jsonlines.open(f'{cwd}/Data/Augmentation/GPT-4o/output-{data}-{augmentation}-{idx_batch}.jsonl') as reader:
+        for line in reader:
+            _, idx_query, _, _ = line['custom_id'].split('-')
+            response = line['response']['body']['choices'][0]['message']['content']
+            responses[int(idx_query)]['context'].append(response)
+            
+json.dump(responses, open(f'{cwd}/Data/Augmentation/GPT-4o/{data}-output_augmentation={augmentation}.json', 'w'), indent=4)
+

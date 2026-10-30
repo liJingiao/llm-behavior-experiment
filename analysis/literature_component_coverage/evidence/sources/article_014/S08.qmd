@@ -1,0 +1,350 @@
+---
+title: "Compare vocabulary use across LLMs"
+author: "Alex Reinhart, Ben Markey, Michael Laudenbach, Kachatad Pantusen, Ronald Yurko, Gordon Weinberg, and David West Brown"
+format: html
+---
+
+This notebook reproduces the vocabulary comparisons in the paper "Do LLMs write
+like humans? Variation in grammatical and rhetorical styles".
+
+## Import Libraries
+
+```{r message=FALSE}
+library(dplyr)
+library(polars)
+library(tidyr)
+library(stringr)
+
+library(ggplot2)
+# library(ggrepel)
+library(scales)
+library(patchwork)
+library(gt)
+```
+
+## Read in the Corpus
+
+See the README for citations of data used in this notebook.
+
+```{r load-data}
+spacy_data <- pl$read_parquet('hf://datasets/browndw/human-ai-parallel-corpus-spacy/**/*.parquet')$select(pl$col("doc_id", "lemma", "pos"))
+
+spacy_data <- spacy_data$to_data_frame()
+```
+
+```{r}
+head(spacy_data)
+```
+
+## Separate each source and count the frequency
+
+```{r}
+sep_spacy <- spacy_data |>
+  separate_wider_delim(doc_id, names = c("doc_id", "source"), delim = "@") |>
+  mutate(lemma = str_to_lower(lemma)) # make lemmas lower-case for grouping
+```
+
+```{r filter-pos}
+spacy_data_filtered <- sep_spacy |>
+  filter(pos != "PUNCT", # no punctuation
+         str_detect(lemma, "[:alpha:]")) |> # at least one letter
+  group_by(source, lemma) |>
+  summarise(lemma_count = n(),
+            .groups = "drop")
+```
+
+```{r relabel-sources}
+source_levels <- c(
+  "chunk_1", "chunk_2",
+  "gpt-4o-2024-08-06", "gpt-4o-mini-2024-07-18",
+  "Meta-Llama-3-70B-Instruct", "Meta-Llama-3-8B-Instruct",
+  "Meta-Llama-3-70B", "Meta-Llama-3-8B"
+)
+source_labels <-  c(
+  "Chunk 1", "Chunk 2",
+  "GPT-4o", "GPT-4o Mini",
+  "Llama 3 70B Instruct", "Llama 3 8B Instruct",
+  "Llama 3 70B", "Llama 3 8B"
+)
+
+spacy_data_filtered <- spacy_data_filtered |>
+    mutate(source = factor(source, levels = source_levels, labels = source_labels))
+```
+
+```{r normalize-rates}
+token_counts <- spacy_data_filtered |>
+  group_by(source) |>
+  summarize(total = sum(lemma_count))
+
+spacy_data_filtered <- spacy_data_filtered |>
+  left_join(token_counts, by = "source") |>
+  mutate(token_rate = lemma_count / total * 1000) |>
+  select(-total, -lemma_count)
+```
+
+```{r pivot}
+spacy_wide <- spacy_data_filtered |>
+  pivot_wider(
+    names_from = "source",
+    values_from = "token_rate",
+    values_fill = 0
+  )
+
+```
+
+```{r count-all}
+spacy_wide_combined <- spacy_wide |>
+  group_by(lemma) |>
+  summarise(across(everything(), sum))
+```
+
+## Take the Top 1000 tokens
+
+```{r find-top}
+top1000 <- spacy_wide_combined |>
+  filter(`Chunk 2` >= 0.001) |> # more than 1 per million words
+  arrange(desc(`Chunk 2`))
+```
+
+## Table of most different words
+
+Overused in LLMs compared to humans:
+
+```{r}
+num_top_words <- 10
+
+relative_rates <- top1000 |>
+  select(-`Chunk 1`) |>
+  mutate(across(where(is.numeric), ~ log10(. / `Chunk 2`)))
+
+top10 <- list()
+
+for (llm in c("GPT-4o", "GPT-4o Mini",
+               "Llama 3 70B Instruct", "Llama 3 8B Instruct",
+              "Llama 3 70B", "Llama 3 8B")) {
+  llm_rates <- relative_rates |>
+    select(lemma, llm = !!llm) |>
+    filter(!is.infinite(llm)) |>
+    arrange(desc(llm)) |>
+    head(n = num_top_words)
+
+  top10[[llm]] <- llm_rates$lemma
+  top10[[paste0(llm, "_rate")]] <- 10^llm_rates$llm
+}
+
+over_table <- as.data.frame(top10) |>
+  gt() |>
+  tab_spanner(
+    "Llama 3 8B",
+    c(Llama.3.8B, Llama.3.8B_rate)
+  ) |>
+  tab_spanner(
+    "Llama 3 70B",
+    c(Llama.3.70B, Llama.3.70B_rate)
+  ) |>
+  tab_spanner(
+    "Llama 3 8B Instruct",
+    c(Llama.3.8B.Instruct, Llama.3.8B.Instruct_rate)
+  ) |>
+  tab_spanner(
+    "Llama 3 70B Instruct",
+    c(Llama.3.70B.Instruct, Llama.3.70B.Instruct_rate)
+  ) |>
+  tab_spanner(
+    "GPT-4o Mini",
+    c(GPT.4o.Mini, GPT.4o.Mini_rate)
+  ) |>
+  tab_spanner(
+    "GPT-4o",
+    c(GPT.4o, GPT.4o_rate)
+  ) |>
+  cols_label(
+    Llama.3.8B = "Word",
+    Llama.3.8B_rate = "Rate",
+    Llama.3.70B = "Word",
+    Llama.3.70B_rate = "Rate",
+    Llama.3.8B.Instruct = "Word",
+    Llama.3.8B.Instruct_rate = "Rate",
+    Llama.3.70B.Instruct = "Word",
+    Llama.3.70B.Instruct_rate = "Rate",
+    GPT.4o.Mini = "Word",
+    GPT.4o.Mini_rate = "Rate",
+    GPT.4o = "Word",
+    GPT.4o_rate = "Rate"
+  ) |>
+  fmt_number(ends_with("_rate"), decimals = 0) |>
+  tab_header(
+    "Most overrepresented words in LLM texts",
+    "Rates relative to human chunk 2"
+  )
+
+gtsave(over_table, "paper-output/overrepresented.tex")
+
+over_table
+```
+
+Same words, but ordered by percentage of documents containing the token, to detect outlying tokens that are common but only because they are frequently used in a small minority of texts:
+
+```{r}
+n_docs <- length(unique(sep_spacy$doc_id))
+
+top10_freq <- list()
+
+for (ii in seq(3, length(source_levels))) {
+  llm_name <- source_labels[ii]
+  llm_source <- source_levels[ii]
+
+  words <- top10[[llm_name]]
+
+  pcts <- sep_spacy |>
+    filter(lemma %in% words,
+           source == llm_source) |>
+    group_by(source, lemma) |>
+    summarize(freq = n() / n_docs, .groups = "drop") |>
+    arrange(desc(freq))
+
+  top10_freq[[llm_name]] <- pcts$lemma
+  top10_freq[[paste0(llm_name, "_freq")]] <- pcts$freq
+}
+
+over_freq_table <- as.data.frame(top10_freq) |>
+  gt() |>
+  tab_spanner(
+    "Llama 3 8B",
+    c(Llama.3.8B, Llama.3.8B_freq)
+  ) |>
+  tab_spanner(
+    "Llama 3 70B",
+    c(Llama.3.70B, Llama.3.70B_freq)
+  ) |>
+  tab_spanner(
+    "Llama 3 8B Instruct",
+    c(Llama.3.8B.Instruct, Llama.3.8B.Instruct_freq)
+  ) |>
+  tab_spanner(
+    "Llama 3 70B Instruct",
+    c(Llama.3.70B.Instruct, Llama.3.70B.Instruct_freq)
+  ) |>
+  tab_spanner(
+    "GPT-4o Mini",
+    c(GPT.4o.Mini, GPT.4o.Mini_freq)
+  ) |>
+  tab_spanner(
+    "GPT-4o",
+    c(GPT.4o, GPT.4o_freq)
+  ) |>
+  cols_label(
+    Llama.3.8B = "Word",
+    Llama.3.8B_freq = "Rate",
+    Llama.3.70B = "Word",
+    Llama.3.70B_freq = "Rate",
+    Llama.3.8B.Instruct = "Word",
+    Llama.3.8B.Instruct_freq = "Rate",
+    Llama.3.70B.Instruct = "Word",
+    Llama.3.70B.Instruct_freq = "Rate",
+    GPT.4o.Mini = "Word",
+    GPT.4o.Mini_freq = "Rate",
+    GPT.4o = "Word",
+    GPT.4o_freq = "Rate"
+  ) |>
+  fmt_percent(ends_with("_freq"), decimals = 0) |>
+  tab_header(
+    "Most overrepresented words in LLM texts",
+    "Percentage of documents containing each word"
+  )
+
+gtsave(over_freq_table, "paper-output/overrepresented-freq.tex")
+
+over_freq_table
+```
+
+```{r}
+top10 <- list()
+
+for (llm in c("GPT-4o", "GPT-4o Mini",
+               "Llama 3 70B Instruct", "Llama 3 8B Instruct",
+              "Llama 3 70B", "Llama 3 8B")) {
+  llm_rates <- relative_rates |>
+    select(lemma, llm = !!llm) |>
+    filter(!is.infinite(llm)) |>
+    arrange(llm) |>
+    head(n = num_top_words)
+
+  top10[[llm]] <- llm_rates$lemma
+  top10[[paste0(llm, "_rate")]] <- 10^llm_rates$llm
+}
+
+under_table <- as.data.frame(top10) |>
+  gt() |>
+  tab_spanner(
+    "Llama 3 8B",
+    c(Llama.3.8B, Llama.3.8B_rate)
+  ) |>
+  tab_spanner(
+    "Llama 3 70B",
+    c(Llama.3.70B, Llama.3.70B_rate)
+  ) |>
+  tab_spanner(
+    "Llama 3 8B Instruct",
+    c(Llama.3.8B.Instruct, Llama.3.8B.Instruct_rate)
+  ) |>
+  tab_spanner(
+    "Llama 3 70B Instruct",
+    c(Llama.3.70B.Instruct, Llama.3.70B.Instruct_rate)
+  ) |>
+  tab_spanner(
+    "GPT-4o Mini",
+    c(GPT.4o.Mini, GPT.4o.Mini_rate)
+  ) |>
+  tab_spanner(
+    "GPT-4o",
+    c(GPT.4o, GPT.4o_rate)
+  ) |>
+  cols_label(
+    Llama.3.8B = "Word",
+    Llama.3.8B_rate = "Rate",
+    Llama.3.70B = "Word",
+    Llama.3.70B_rate = "Rate",
+    Llama.3.8B.Instruct = "Word",
+    Llama.3.8B.Instruct_rate = "Rate",
+    Llama.3.70B.Instruct = "Word",
+    Llama.3.70B.Instruct_rate = "Rate",
+    GPT.4o.Mini = "Word",
+    GPT.4o.Mini_rate = "Rate",
+    GPT.4o = "Word",
+    GPT.4o_rate = "Rate"
+  ) |>
+  fmt_number(ends_with("_rate"), n_sigfig = 2) |>
+  tab_header(
+    "Most underrepresented words in LLM texts",
+    "Rates relative to human chunk 2"
+  )
+
+gtsave(under_table, "paper-output/underrepresented.tex")
+
+under_table
+```
+
+## Overall comparison
+
+```{r}
+out <- top1000 |>
+  select(!`Chunk 1`) |>
+  pivot_longer(!c(lemma, `Chunk 2`), names_to = "source", values_to = "rate") |>
+  mutate(source = factor(source, levels = source_labels)) |>
+  ggplot(aes(x = `Chunk 2`, y = rate)) +
+  geom_point(alpha = 0.3, size = 0.1) +
+  geom_abline(color = "red", linetype = "dashed") +
+  geom_function(fun = function(x) 10 * x, color = "blue", linetype = "dashed") +
+  geom_function(fun = function(x) x / 10, color = "blue", linetype = "dashed") +
+  coord_fixed() +
+  facet_wrap(vars(source), nrow = 2, ncol = 3, dir = "v") +
+  labs(x = "Human", y = "LLM") +
+  scale_x_log10(limits = c(0.001, 13), labels = label_log()) +
+  scale_y_log10(limits = c(0.001, 13), labels = label_log()) +
+  theme_bw()
+
+ggsave("paper-output/vocab-compare.pdf", out, width = 6, height = 5)
+
+out
+```

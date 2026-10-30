@@ -1,0 +1,240 @@
+---
+title: "Lasso HAP-E to COCA predictions (and vice versa)"
+author: "Alex Reinhart, Ben Markey, Michael Laudenbach, Kachatad Pantusen, Ronald Yurko, Gordon Weinberg, and David West Brown"
+format: html
+---
+
+```{r setup}
+#| warning: false
+#| message: false
+library(tidyverse)
+library(scales)
+library(rsample)
+library(gt)
+library(glmnet)
+library(polars)
+
+source("biber-names.R")
+```
+
+## Read data and make train/test split
+
+See the README for citations of data used in this notebook.
+
+```{r load-data}
+#| message: false
+get_genre <- function(doc_id) {
+  sapply(strsplit(doc_id, "_", fixed = TRUE), function(x) x[1])
+}
+
+hape_data <- pl$read_parquet('hf://datasets/browndw/human-ai-parallel-corpus-biber/**/*.parquet')$to_data_frame()
+
+coca_data <- polars::pl$read_parquet('hf://datasets/browndw/coca-ai-parallel-corpus-biber/**/*.parquet')$to_data_frame()
+
+source_levels <- c(
+  "chunk_1", "chunk_2",
+  "gpt-4o-mini-2024-07-18", "gpt-4o-2024-08-06",
+  "Meta-Llama-3-8B-Instruct", "Meta-Llama-3-70B-Instruct",
+  "Meta-Llama-3-8B", "Meta-Llama-3-70B"
+)
+source_labels <-  c(
+  "Chunk 1", "Chunk 2",
+  "GPT-4o Mini", "GPT-4o",
+  "Llama 3 8B Instruct", "Llama 3 70B Instruct",
+  "Llama 3 8B", "Llama 3 70B"
+)
+
+# make response a factor
+hape_data <- hape_data |>
+  separate_wider_delim(doc_id, names = c("doc_id", "source"), delim = "@") |>
+  select(-f_43_type_token) |>
+  mutate(source = factor(source, levels = source_levels, labels = source_labels),
+         genre = get_genre(doc_id)) |>
+  filter(!is.na(f_01_past_tense), !is.na(f_44_mean_word_length))
+coca_data <- coca_data |>
+  separate_wider_delim(doc_id, names = c("doc_id", "source"), delim = "@") |>
+  select(-f_43_type_token) |>
+  mutate(source = factor(source, levels = source_levels, labels = source_labels),
+         genre = get_genre(doc_id)) |>
+  filter(!is.na(f_01_past_tense), !is.na(f_44_mean_word_length))
+```
+
+
+# Train HAP-E, predict COCA
+
+Set-up folds on HAP-E data for tuning:
+
+```{r}
+# Set-up folds on the whole dataset to use for tuning
+set.seed(38)
+all_fold_doc_index <- hape_data |>
+  dplyr::select(doc_id, genre) |>
+  distinct() |>
+  group_by(genre) |>
+  mutate(train_fold = sample(rep(1:10, length.out = n()))) |>
+  ungroup()
+```
+
+Init function for test accuracy:
+
+```{r}
+test_accuracy <- function(model, test_data) {
+  preds <- predict(model,
+                   newx = as.matrix(dplyr::select(test_data, -doc_id,
+                                                  -source, -genre)),
+                   s = "lambda.1se", type = "class")
+
+  mean(test_data$source == preds)
+}
+```
+
+Generate the results for each model:
+
+```{r one-v-one-comp, cache=TRUE}
+llms <- setdiff(unique(hape_data$source), c("Chunk 1", "Chunk 2"))
+
+hape_perf <-
+  map_dfr(llms,
+          function(comp_llm) {
+
+            llm_train_data <- hape_data |>
+              filter(source %in% c(comp_llm, "Chunk 2"))
+            llm_test_data <- coca_data |>
+              filter(source %in% c(comp_llm, "Chunk 2"))
+
+            # Get the training data folds with this split:
+            llm_training_folds <- llm_train_data |>
+              left_join(all_fold_doc_index, by = c("doc_id", "genre")) |>
+              pull(train_fold)
+
+            llm_train_cvfit <-
+              cv.glmnet(x = as.matrix(dplyr::select(llm_train_data, -doc_id,
+                                                    -source, -genre)),
+                        y = droplevels(llm_train_data$source),
+                        alpha = 1,
+                        family = "binomial",
+                        foldid = llm_training_folds)
+
+            tibble(llm = comp_llm,
+                   train_accuracy = test_accuracy(llm_train_cvfit, llm_train_data),
+                   test_accuracy = test_accuracy(llm_train_cvfit, llm_test_data))
+          })
+```
+
+Display the individual accuracy:
+
+```{r}
+hape_perf |>
+  arrange(desc(test_accuracy)) |>
+  gt() |>
+  cols_label(llm = "LLM", train_accuracy = "HAP-E Train accuracy",
+             test_accuracy = "CAP Test accuracy") |>
+  fmt_percent(c(test_accuracy, train_accuracy), decimals = 1)
+```
+
+
+# Train COCA, predict HAP-E
+
+Just repeat the above (could wrap in function but I'm being lazy here)
+
+Set-up folds on COCA data for tuning:
+
+```{r}
+# Set-up folds on the whole dataset to use for tuning
+set.seed(38)
+all_fold_doc_index <- coca_data |>
+  dplyr::select(doc_id, genre) |>
+  distinct() |>
+  group_by(genre) |>
+  mutate(train_fold = sample(rep(1:10, length.out = n()))) |>
+  ungroup()
+```
+
+
+Generate the results for each model:
+
+```{r one-v-one-comp-coca, cache=TRUE}
+llms <- setdiff(unique(coca_data$source), c("Chunk 1", "Chunk 2"))
+
+cap_perf <-
+  map_dfr(llms,
+          function(comp_llm) {
+
+            llm_train_data <- coca_data |>
+              filter(source %in% c(comp_llm, "Chunk 2"))
+            llm_test_data <- hape_data |>
+              filter(source %in% c(comp_llm, "Chunk 2"))
+
+            # Get the training data folds with this split:
+            llm_training_folds <- llm_train_data |>
+              left_join(all_fold_doc_index, by = c("doc_id", "genre")) |>
+              pull(train_fold)
+
+            llm_train_cvfit <-
+              cv.glmnet(x = as.matrix(dplyr::select(llm_train_data, -doc_id,
+                                                    -source, -genre)),
+                        y = droplevels(llm_train_data$source),
+                        alpha = 1,
+                        family = "binomial",
+                        foldid = llm_training_folds)
+
+            tibble(llm = comp_llm,
+                   train_accuracy = test_accuracy(llm_train_cvfit, llm_train_data),
+                   test_accuracy = test_accuracy(llm_train_cvfit, llm_test_data))
+          })
+```
+
+Display the individual accuracy:
+
+```{r}
+cap_perf |>
+  arrange(desc(test_accuracy)) |>
+  gt() |>
+  cols_label(llm = "LLM",
+             train_accuracy = "CAP Train accuracy",
+             test_accuracy = "HAP-E Test accuracy") |>
+  fmt_percent(c(test_accuracy, train_accuracy), decimals = 1)
+```
+
+## Summary
+
+```{r}
+out <- cap_perf |>
+  inner_join(hape_perf, by = "llm", suffix = c(".cap", ".hape")) |>
+  mutate(author = case_when(
+           endsWith(llm, "Instruct") ~ "Llama Instruct",
+           endsWith(llm, "B") ~ "Llama Base",
+           str_detect(llm, fixed("GPT")) ~ "GPT-4o")) |>
+  gt(rowname_col = "llm", groupname_col = "author") |>
+  cols_label(
+    llm = "LLM",
+    train_accuracy.hape = "Training",
+    test_accuracy.hape = "Test on CAP",
+    train_accuracy.cap = "Training",
+    test_accuracy.cap = "Test on HAP-E"
+  ) |>
+  tab_spanner(
+    "Trained on HAP-E",
+    c(train_accuracy.hape, test_accuracy.hape)
+  ) |>
+  tab_spanner(
+    "Trained on CAP",
+    c(train_accuracy.cap, test_accuracy.cap)
+  ) |>
+  fmt_percent(c(train_accuracy.hape, test_accuracy.hape,
+                train_accuracy.cap, test_accuracy.cap),
+              decimals = 1) |>
+  tab_stubhead(label = "LLM") |>
+  tab_stub_indent(
+    rows = everything(),
+    indent = 3
+  ) |>
+  cols_align(columns = llm, align = "left") |>
+  tab_header(
+    title = "Lasso pairwise classification accuracy, distinguishing each LLM from human text"
+  )
+
+gtsave(out, "paper-output/lasso.tex")
+
+out
+```

@@ -1,0 +1,167 @@
+---
+title: "Out of sample classification"
+author: "Alex Reinhart, Ben Markey, Michael Laudenbach, Kachatad Pantusen, Ronald Yurko, Gordon Weinberg, and David West Brown"
+format: html
+---
+
+Fit models to Biber features in the HAP-E corpus and test on CAP, and vice
+versa.
+
+See the README for citations of data used in this notebook.
+
+```{r setup, message=FALSE}
+library(caret)
+library(dplyr)
+library(tidyr)
+library(polars)
+library(ranger)
+
+hape <- pl$read_parquet('hf://datasets/browndw/human-ai-parallel-corpus-biber/**/*.parquet')
+hape <- hape$to_data_frame() |>
+  separate_wider_delim(doc_id, names = c("doc_id", "source"), delim = "@")
+
+cap <- pl$read_parquet('hf://datasets/browndw/coca-ai-parallel-corpus-biber/**/*.parquet')
+cap <- cap$to_data_frame() |>
+  separate_wider_delim(doc_id, names = c("doc_id", "source"), delim = "@")
+
+models <- setdiff(unique(hape$source),
+                  c("chunk_1", "chunk_2"))
+```
+
+```{r}
+# probability forests predict probabilities for each class; convert to vector of
+# highest-probability classes
+hard_predictions <- function(model, test_data) {
+  preds <- predictions(predict(model, data = test_data))
+  return(preds)
+  levels <- colnames(preds)
+
+  out <- levels[apply(preds, 1, which.max)]
+
+  # restore factor ordering. Note that the levels are now the *labels* of the
+  # source factor, because those are the column names of preds
+  out <- factor(out, levels = levels(test_data$source))
+
+  return(out)
+}
+```
+
+```{r}
+result <- data.frame(
+  model = models,
+  hape_train_accuracy = NA,
+  hape_test_accuracy = NA,
+  cap_train_accuracy = NA,
+  cap_test_accuracy = NA
+)
+
+for (i in seq_along(models)) {
+  message(models[i])
+  
+  hape_model <- hape |>
+    filter(source %in% c("chunk_2", models[i])) |>
+    # column_to_rownames("doc_id") |>
+    mutate(source = factor(source)) |>
+    dplyr::select(-f_43_type_token) |>
+    dplyr::select(source, everything())
+  
+  cap_model <- cap |>
+    filter(source %in% c("chunk_2", models[i])) |>
+    # column_to_rownames("doc_id") |>
+    mutate(source = factor(source)) |>
+    dplyr::select(-f_43_type_token) |>
+    dplyr::select(source, everything()) #|>
+    # slice(sample(1:n()))
+
+
+  # ctrl <- trainControl(method = "cv",
+  #                      # classProbs = TRUE,
+  #                      savePredictions = TRUE)
+
+  # hape_rf <- train(source ~ ., data = hape_model, method = "ranger",
+  #                  trControl = ctrl, metric = "Accuracy")
+  # cap_rf <- train(source ~ ., data = cap_model, method = "ranger",
+  #                 trControl = ctrl, metric = "Accuracy")
+  
+  hape_rf <- ranger(source ~ ., data = hape_model)
+  cap_rf <- ranger(source ~., data = cap_model)
+  
+  hape_train_pred <- hard_predictions(hape_rf, hape_model)
+  hape_test_pred <- hard_predictions(hape_rf, cap_model)
+  cap_train_pred <- hard_predictions(cap_rf, cap_model)
+  cap_test_pred <- hard_predictions(cap_rf, hape_model)
+  
+  hape_test_confusion <- confusionMatrix(hape_test_pred, cap_model$source)
+  cap_test_confusion <- confusionMatrix(cap_test_pred, hape_model$source)
+
+  result$hape_train_accuracy[i] <- 1 - hape_rf$prediction.error
+  result$hape_test_accuracy[i] <- hape_test_confusion$overall["Accuracy"]
+  
+  result$cap_train_accuracy[i] <- 1 - cap_rf$prediction.error
+  result$cap_test_accuracy[i] <- cap_test_confusion$overall["Accuracy"]
+}
+```
+
+```{r}
+library(gt)
+
+source_name <- function(source) {
+  source_names <- list(
+    chunk_1 = "Chunk 1",
+    chunk_2 = "Chunk 2",
+    `gpt-4o-2024-08-06` = "GPT-4o",
+    `gpt-4o-mini-2024-07-18` = "GPT-4o Mini",
+    `Meta-Llama-3-70B-Instruct` = "Llama 3 70B Instruct",
+    `Meta-Llama-3-70B` = "Llama 3 70B",
+    `Meta-Llama-3-8B-Instruct` = "Llama 3 8B Instruct",
+    `Meta-Llama-3-8B` = "Llama 3 8B"
+  )
+  
+  sources <- sapply(as.character(source), function(s) source_names[[s]])
+  
+  # Order sources in a desirable way
+  factor(sources,
+         levels = c("Chunk 1", "Chunk 2", "GPT-4o", "GPT-4o Mini",
+                    "Llama 3 70B Instruct", "Llama 3 8B Instruct",
+                    "Llama 3 70B", "Llama 3 8B"))
+}
+
+out <- result |>
+  mutate(model = as.character(source_name(model))) |>
+  mutate(author = case_when(
+           endsWith(model, "Instruct") ~ "Llama Instruct",
+           endsWith(model, "B") ~ "Llama Base",
+           str_detect(model, fixed("GPT")) ~ "GPT-4o")) |>
+  gt(rowname_col = "model", groupname_col = "author") |>
+  cols_label(
+    model = "LLM",
+    hape_train_accuracy = "Training",
+    hape_test_accuracy = "Test on CAP",
+    cap_train_accuracy = "Training",
+    cap_test_accuracy = "Test on HAP-E"
+  ) |>
+  tab_spanner(
+    "Trained on HAP-E",
+    c(hape_train_accuracy, hape_test_accuracy)
+  ) |>
+  tab_spanner(
+    "Trained on CAP",
+    c(cap_train_accuracy, cap_test_accuracy)
+  ) |>
+  fmt_percent(c(hape_train_accuracy, hape_test_accuracy,
+                cap_train_accuracy, cap_test_accuracy),
+              decimals = 1) |>
+  tab_stubhead(label = "LLM") |>
+  tab_stub_indent(
+    rows = everything(),
+    indent = 3
+  ) |>
+  cols_align(columns = model, align = "left") |>
+  tab_header(
+    title = "Random forest pairwise classification accuracy, distinguishing each LLM from human text"
+  )
+
+gtsave(out, "paper-output/rf.tex")
+
+out
+```
