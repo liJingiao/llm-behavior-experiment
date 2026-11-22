@@ -8,7 +8,9 @@
 
 | 内容 | 阅读入口 |
 |---|---|
-| 69项组件的定义与使用要求 | [组件手册v1.4](coding/manual/实验组件_v1.4.md) |
+| 训练后的65项机器行为实验组件 | [定稿组件库](coding/manual/machine_behavior_library_2026-11-22/README.md) · [组件手册](coding/manual/machine_behavior_library_2026-11-22/COMPONENTS.md) |
+| 如何用开发论文修订组件库 | [训练方法标准 v1.1](coding/manual/machine_behavior_library_2026-11-22/TRAINING_METHOD.md) · [381项缺口及依据](coding/manual/machine_behavior_library_2026-11-22/TRACEABILITY.md) |
+| 训练前69项组件的定义与使用要求 | [组件手册v1.4](coding/manual/实验组件_v1.4.md) |
 | 旧243篇的组件支持与知识缺口 | [243篇分析成果](analysis/literature_component_coverage/README.md) |
 | 新109篇评测候选文献的方法需求与组件关系 | [109篇对应成果](analysis/test_candidate_component_matching/README.md) |
 
