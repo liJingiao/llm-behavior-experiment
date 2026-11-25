@@ -9,7 +9,7 @@
 | 内容 | 阅读入口 |
 |---|---|
 | 训练后的65项机器行为实验组件 | [11月25日定稿组件库](coding/manual/machine_behavior_library_2026-11-25/README.md) · [完整组件手册](coding/manual/machine_behavior_library_2026-11-25/COMPONENTS.md) |
-| 如何用开发论文修订组件库 | [训练方法标准 v1.3](coding/manual/machine_behavior_library_2026-11-25/TRAINING_METHOD.md) · [集中改动记录与381项缺口去向](coding/manual/machine_behavior_library_2026-11-25/CHANGES.md) |
+| 如何用开发论文修订组件库 | [训练方法标准 v1.4](coding/manual/machine_behavior_library_2026-11-25/TRAINING_METHOD.md) · [集中改动记录与381项缺口去向](coding/manual/machine_behavior_library_2026-11-25/CHANGES.md) |
 | 历史训练材料 | [11月22日版本](coding/manual/machine_behavior_library_2026-11-22/README.md)：保留K方法与当时记录；当前完整正文和方法标准见上方11月25日版本。 |
 | 训练前69项组件的定义与使用要求 | [组件手册v1.4](coding/manual/实验组件_v1.4.md) |
 | 旧243篇的组件支持与知识缺口 | [243篇分析成果](analysis/literature_component_coverage/README.md) |
